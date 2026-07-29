@@ -1,4 +1,6 @@
 pub mod catalog;
+pub mod circuit;
+pub mod diagnostic;
 pub mod gates;
 pub mod trit;
 
