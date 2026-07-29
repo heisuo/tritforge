@@ -36,9 +36,22 @@ export interface WasmRuntime {
   simulator: WasmSimulatorBinding;
 }
 
+type WasmModule = typeof import("./wasm/pkg/sim_wasm");
+
+let wasmModulePromise: Promise<WasmModule> | null = null;
+
+function initializedWasmModule(): Promise<WasmModule> {
+  if (!wasmModulePromise) {
+    wasmModulePromise = import("./wasm/pkg/sim_wasm").then(async (wasm) => {
+      await wasm.default();
+      return wasm;
+    });
+  }
+  return wasmModulePromise;
+}
+
 export async function createWasmRuntime(): Promise<WasmRuntime> {
-  const wasm = await import("./wasm/pkg/sim_wasm");
-  await wasm.default();
+  const wasm = await initializedWasmModule();
 
   return {
     apiVersion: wasm.apiVersion(),
