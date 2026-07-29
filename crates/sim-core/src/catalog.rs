@@ -32,6 +32,8 @@ pub enum ComponentKind {
     IsPos,
     Mux2,
     Mux3,
+    HalfAdder,
+    FullAdder,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,6 +72,8 @@ impl ComponentKind {
             Self::IsPos => "gate.is_pos",
             Self::Mux2 => "gate.mux2",
             Self::Mux3 => "gate.mux3",
+            Self::HalfAdder => "module.half_adder",
+            Self::FullAdder => "module.full_adder",
         }
     }
 
@@ -87,6 +91,8 @@ impl ComponentKind {
             "gate.is_pos" => Some(Self::IsPos),
             "gate.mux2" => Some(Self::Mux2),
             "gate.mux3" => Some(Self::Mux3),
+            "module.half_adder" => Some(Self::HalfAdder),
+            "module.full_adder" => Some(Self::FullAdder),
             _ => None,
         }
     }
@@ -117,6 +123,19 @@ impl ComponentKind {
                 port("s", PortDirection::Input),
                 port("y", PortDirection::Output),
             ],
+            Self::HalfAdder => vec![
+                port("a", PortDirection::Input),
+                port("b", PortDirection::Input),
+                port("sum", PortDirection::Output),
+                port("carry", PortDirection::Output),
+            ],
+            Self::FullAdder => vec![
+                port("a", PortDirection::Input),
+                port("b", PortDirection::Input),
+                port("cin", PortDirection::Input),
+                port("sum", PortDirection::Output),
+                port("carry", PortDirection::Output),
+            ],
         }
     }
 }
@@ -135,6 +154,8 @@ pub fn component_catalog() -> Vec<ComponentDescriptor> {
         (ComponentKind::IsPos, "Is Positive", "gate"),
         (ComponentKind::Mux2, "2-Way Multiplexer", "gate"),
         (ComponentKind::Mux3, "3-Way Multiplexer", "gate"),
+        (ComponentKind::HalfAdder, "Half Adder", "module"),
+        (ComponentKind::FullAdder, "Full Adder", "module"),
     ]
     .into_iter()
     .map(|(kind, display_name, category)| descriptor(kind, display_name, category))
@@ -150,7 +171,7 @@ fn port(id: &str, direction: PortDirection) -> PortDescriptor {
 
 fn descriptor(kind: ComponentKind, display_name: &str, category: &str) -> ComponentDescriptor {
     let ports = kind.port_descriptors();
-    let truth_table = if category == "gate" {
+    let truth_table = if matches!(category, "gate" | "module") {
         build_truth_table(kind, &ports)
     } else {
         Vec::new()

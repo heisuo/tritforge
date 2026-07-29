@@ -15,15 +15,19 @@ const TYPE_IDS = [
   "gate.is_pos",
   "gate.mux2",
   "gate.mux3",
+  "module.half_adder",
+  "module.full_adder",
 ] as const;
 
 describe("example library", () => {
-  it("contains the five locked teaching examples", () => {
+  it("contains the teaching examples in stable order", () => {
     expect(EXAMPLES.map((example) => example.id)).toEqual([
       "neg",
       "min-max",
       "decoder",
       "mux3",
+      "full-adder",
+      "ripple-adder-3",
       "driver-conflict",
     ]);
   });
@@ -59,6 +63,15 @@ describe("example library", () => {
     expect(fresh.nodes[0].position.x).not.toBe(9999);
     expect(fresh.nodes[0].data.label).not.toBe("changed");
     expect(fresh.edges[0].source).not.toBe("changed");
+  });
+
+  it("builds the 3-trit ripple adder from exactly three full adders", () => {
+    const document = cloneExampleDocument("ripple-adder-3");
+    expect(
+      document.nodes.filter(
+        (node) => node.data.typeId === "module.full_adder",
+      ),
+    ).toHaveLength(3);
   });
 });
 

@@ -96,6 +96,44 @@ fn input_through_neg_reaches_probe_at_a_stable_value() {
 }
 
 #[test]
+fn three_trit_ripple_adder_propagates_carry_between_full_adders() {
+    let simulator = Simulator::load(definition(
+        vec![
+            valued_component("a0", "source.trit_input", Trit::Pos),
+            valued_component("a1", "source.trit_input", Trit::Zero),
+            valued_component("a2", "source.trit_input", Trit::Zero),
+            valued_component("b0", "source.trit_input", Trit::Pos),
+            valued_component("b1", "source.trit_input", Trit::Zero),
+            valued_component("b2", "source.trit_input", Trit::Zero),
+            valued_component("cin", "source.constant", Trit::Zero),
+            component("fa0", "module.full_adder"),
+            component("fa1", "module.full_adder"),
+            component("fa2", "module.full_adder"),
+        ],
+        vec![
+            connection("a0-fa0", "a0", "out", "fa0", "a"),
+            connection("b0-fa0", "b0", "out", "fa0", "b"),
+            connection("cin-fa0", "cin", "out", "fa0", "cin"),
+            connection("carry0-fa1", "fa0", "carry", "fa1", "cin"),
+            connection("a1-fa1", "a1", "out", "fa1", "a"),
+            connection("b1-fa1", "b1", "out", "fa1", "b"),
+            connection("carry1-fa2", "fa1", "carry", "fa2", "cin"),
+            connection("a2-fa2", "a2", "out", "fa2", "a"),
+            connection("b2-fa2", "b2", "out", "fa2", "b"),
+        ],
+    ))
+    .expect("valid ripple adder");
+
+    let snapshot = simulator.snapshot();
+    assert!(snapshot.stable);
+    assert!(snapshot.diagnostics.is_empty());
+    assert_eq!(snapshot.output_value("fa0", "sum"), Some(Trit::Neg));
+    assert_eq!(snapshot.output_value("fa1", "sum"), Some(Trit::Pos));
+    assert_eq!(snapshot.output_value("fa2", "sum"), Some(Trit::Zero));
+    assert_eq!(snapshot.output_value("fa2", "carry"), Some(Trit::Zero));
+}
+
+#[test]
 fn buffer_output_fans_out_to_two_probes() {
     let simulator = Simulator::load(definition(
         vec![

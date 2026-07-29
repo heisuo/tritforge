@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Box, CircleDot, Gauge, Radio, Triangle } from "lucide-react";
+import { Box, CircleDot, Gauge, Radio, Triangle, Workflow } from "lucide-react";
 import type {
   CatalogPort,
   EditorNode,
@@ -38,6 +38,9 @@ function ComponentIcon({ typeId }: { typeId: string }) {
   if (typeId.includes("mux")) {
     return <Triangle aria-hidden="true" />;
   }
+  if (typeId.startsWith("module.")) {
+    return <Workflow aria-hidden="true" />;
+  }
   return <CircleDot aria-hidden="true" />;
 }
 
@@ -53,7 +56,7 @@ export function CircuitNode({
   const primarySignal =
     data.typeId === "sink.probe"
       ? inputs.in ?? "Z"
-      : outputs.out ?? outputs.y ?? data.sourceValue ?? "Z";
+      : outputs.out ?? outputs.y ?? outputs.sum ?? data.sourceValue ?? "Z";
 
   return (
     <div

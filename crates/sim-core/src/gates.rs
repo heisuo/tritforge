@@ -24,6 +24,8 @@ pub fn evaluate(
         ComponentKind::IsPos => gate_output(decode(input(inputs, "a"), Trit::Pos)),
         ComponentKind::Mux2 => gate_output(mux2(inputs)),
         ComponentKind::Mux3 => gate_output(mux3(inputs)),
+        ComponentKind::HalfAdder => adder_outputs(inputs, &["a", "b"]),
+        ComponentKind::FullAdder => adder_outputs(inputs, &["a", "b", "cin"]),
     }
 }
 
@@ -33,6 +35,36 @@ fn input(inputs: &BTreeMap<String, Trit>, id: &str) -> Trit {
 
 fn gate_output(value: Trit) -> BTreeMap<String, Trit> {
     BTreeMap::from([("y".to_owned(), value)])
+}
+
+fn adder_outputs(inputs: &BTreeMap<String, Trit>, input_ids: &[&str]) -> BTreeMap<String, Trit> {
+    let values: Vec<_> = input_ids
+        .iter()
+        .map(|id| input(inputs, id).normalize_gate_input())
+        .collect();
+
+    let (sum, carry) = if values.contains(&Trit::Error) {
+        (Trit::Error, Trit::Error)
+    } else if values.contains(&Trit::Unknown) {
+        (Trit::Unknown, Trit::Unknown)
+    } else {
+        let total: i8 = values
+            .iter()
+            .map(|value| value.balanced_value().expect("known adder input"))
+            .sum();
+        match total {
+            -3 => (Trit::Zero, Trit::Neg),
+            -2 => (Trit::Pos, Trit::Neg),
+            -1 => (Trit::Neg, Trit::Zero),
+            0 => (Trit::Zero, Trit::Zero),
+            1 => (Trit::Pos, Trit::Zero),
+            2 => (Trit::Neg, Trit::Pos),
+            3 => (Trit::Zero, Trit::Pos),
+            _ => unreachable!("a one-trit adder total is always in -3..=3"),
+        }
+    };
+
+    BTreeMap::from([("sum".to_owned(), sum), ("carry".to_owned(), carry)])
 }
 
 fn neg(value: Trit) -> Trit {

@@ -10,6 +10,8 @@ export type ExampleId =
   | "min-max"
   | "decoder"
   | "mux3"
+  | "full-adder"
+  | "ripple-adder-3"
   | "driver-conflict";
 
 export interface TernaryExample {
@@ -147,6 +149,76 @@ export const EXAMPLES: TernaryExample[] = [
     },
   },
   {
+    id: "full-adder",
+    name: "单 trit 全加器",
+    category: "算术模块",
+    description: "把 a、b 和低位进位 cin 相加，同时观察本位和 sum 与高位进位 carry。",
+    composition: "Input a + Input b + cin → Full Adder → sum / carry",
+    expected: "默认 1 + 1 + 0：sum=T，carry=1，合起来是 1T₃（十进制 2）",
+    document: {
+      nodes: [
+        node("fa-a", "source.trit_input", "输入 a", 50, 80, "1"),
+        node("fa-b", "source.trit_input", "输入 b", 50, 260, "1"),
+        node("fa-cin", "source.trit_input", "低位进位 cin", 50, 440, "0"),
+        node("full-adder-1", "module.full_adder", "Full Adder", 380, 250),
+        node("fa-sum", "sink.probe", "本位和 sum", 730, 150),
+        node("fa-carry", "sink.probe", "高位进位 carry", 730, 370),
+      ],
+      edges: [
+        edge("fa-a-wire", "fa-a", "out", "full-adder-1", "a"),
+        edge("fa-b-wire", "fa-b", "out", "full-adder-1", "b"),
+        edge("fa-cin-wire", "fa-cin", "out", "full-adder-1", "cin"),
+        edge("fa-sum-wire", "full-adder-1", "sum", "fa-sum", "in"),
+        edge("fa-carry-wire", "full-adder-1", "carry", "fa-carry", "in"),
+      ],
+    },
+  },
+  {
+    id: "ripple-adder-3",
+    name: "3-trit 行波进位加法器",
+    category: "多 trit 算术",
+    description: "三个全加器从最低位到最高位串联，前一级 carry 接到后一级 cin。",
+    composition: "A[2:0] + B[2:0] → FA0 → FA1 → FA2 → S[2:0] + Cout",
+    expected: "默认 001₃ + 001₃ = 01T₃：S2=0、S1=1、S0=T、Cout=0",
+    document: {
+      nodes: [
+        node("a0", "source.trit_input", "A0 最低位", 20, 160, "1"),
+        node("b0", "source.trit_input", "B0 最低位", 20, 330, "1"),
+        node("cin-zero", "source.constant", "初始进位 0", 20, 500, "0"),
+        node("fa0", "module.full_adder", "FA0 最低位", 270, 300),
+        node("s0", "sink.probe", "S0", 540, 490),
+
+        node("a1", "source.trit_input", "A1", 450, 70, "0"),
+        node("b1", "source.trit_input", "B1", 450, 200, "0"),
+        node("fa1", "module.full_adder", "FA1", 700, 300),
+        node("s1", "sink.probe", "S1", 970, 490),
+
+        node("a2", "source.trit_input", "A2 最高位", 880, 70, "0"),
+        node("b2", "source.trit_input", "B2 最高位", 880, 200, "0"),
+        node("fa2", "module.full_adder", "FA2 最高位", 1130, 300),
+        node("s2", "sink.probe", "S2", 1420, 220),
+        node("cout", "sink.probe", "最终进位 Cout", 1420, 420),
+      ],
+      edges: [
+        edge("a0-fa0", "a0", "out", "fa0", "a"),
+        edge("b0-fa0", "b0", "out", "fa0", "b"),
+        edge("zero-fa0", "cin-zero", "out", "fa0", "cin"),
+        edge("fa0-s0", "fa0", "sum", "s0", "in"),
+        edge("carry0-fa1", "fa0", "carry", "fa1", "cin"),
+
+        edge("a1-fa1", "a1", "out", "fa1", "a"),
+        edge("b1-fa1", "b1", "out", "fa1", "b"),
+        edge("fa1-s1", "fa1", "sum", "s1", "in"),
+        edge("carry1-fa2", "fa1", "carry", "fa2", "cin"),
+
+        edge("a2-fa2", "a2", "out", "fa2", "a"),
+        edge("b2-fa2", "b2", "out", "fa2", "b"),
+        edge("fa2-s2", "fa2", "sum", "s2", "in"),
+        edge("fa2-cout", "fa2", "carry", "cout", "in"),
+      ],
+    },
+  },
+  {
     id: "driver-conflict",
     name: "多驱动冲突",
     category: "网络诊断",
@@ -181,4 +253,3 @@ export function cloneExampleDocument(id: ExampleId): EditorDocument {
     edges: example.document.edges.map((item) => ({ ...item })),
   };
 }
-

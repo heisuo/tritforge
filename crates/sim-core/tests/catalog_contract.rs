@@ -50,6 +50,8 @@ fn phase_one_catalog_has_exact_stable_ids_and_type_lookup() {
             "gate.is_pos",
             "gate.mux2",
             "gate.mux3",
+            "module.half_adder",
+            "module.full_adder",
         ]
     );
 
@@ -138,6 +140,27 @@ fn catalog_has_exact_categories_ports_and_truth_table_sizes() {
             ],
             81_usize,
         ),
+        (
+            "module",
+            vec![
+                ("a", PortDirection::Input),
+                ("b", PortDirection::Input),
+                ("sum", PortDirection::Output),
+                ("carry", PortDirection::Output),
+            ],
+            9_usize,
+        ),
+        (
+            "module",
+            vec![
+                ("a", PortDirection::Input),
+                ("b", PortDirection::Input),
+                ("cin", PortDirection::Input),
+                ("sum", PortDirection::Output),
+                ("carry", PortDirection::Output),
+            ],
+            27_usize,
+        ),
     ];
 
     let catalog = component_catalog();
@@ -194,7 +217,7 @@ fn port_directions_serialize_as_snake_case() {
 fn truth_tables_use_port_order_and_public_evaluator_results() {
     for descriptor in component_catalog()
         .into_iter()
-        .filter(|descriptor| descriptor.category == "gate")
+        .filter(|descriptor| !descriptor.truth_table.is_empty())
     {
         let input_ports: Vec<_> = descriptor
             .ports

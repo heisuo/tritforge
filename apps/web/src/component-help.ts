@@ -52,5 +52,12 @@ export const COMPONENT_HELP: Record<string, ComponentHelp> = {
     summary: "完整三选一选择器，用一个 trit 选择三路数据。",
     details: "选择端 s=T/0/1 时分别输出 a/b/c，是三进制数据通路中的基础路由模块。",
   },
+  "module.half_adder": {
+    summary: "单 trit 半加器，把两个平衡三进制输入相加并输出和与进位。",
+    details: "满足 a+b=sum+3×carry。例如 1+1=2，模块输出 sum=T、carry=1，即平衡三进制 1T。",
+  },
+  "module.full_adder": {
+    summary: "单 trit 全加器，在半加器基础上额外接收低位传来的 cin。",
+    details: "满足 a+b+cin=sum+3×carry。多个全加器首尾连接，就能构成多 trit 行波进位加法器。",
+  },
 };
-

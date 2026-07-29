@@ -80,6 +80,8 @@ const DISPLAY_NAMES: Record<string, string> = {
   "gate.is_pos": "IS_POS",
   "gate.mux2": "MUX2",
   "gate.mux3": "MUX3",
+  "module.half_adder": "Half Adder",
+  "module.full_adder": "Full Adder",
 };
 
 function descriptorIcon(descriptor: CatalogComponent) {
@@ -94,6 +96,9 @@ function descriptorIcon(descriptor: CatalogComponent) {
   }
   if (descriptor.type_id.includes("mux")) {
     return Triangle;
+  }
+  if (descriptor.category === "module") {
+    return Workflow;
   }
   return CircleDot;
 }
@@ -486,14 +491,16 @@ function Workbench() {
               <span>{catalog.length} COMPONENTS</span>
             </div>
           </div>
-          {["source", "gate", "sink"].map((category) => (
+          {["source", "gate", "module", "sink"].map((category) => (
             <section className="palette-group" key={category}>
               <h2>
                 {category === "source"
                   ? "输入与常量"
                   : category === "sink"
                     ? "观测"
-                    : "逻辑门"}
+                    : category === "module"
+                      ? "算术模块"
+                      : "逻辑门"}
               </h2>
               {catalog
                 .filter((descriptor) => descriptor.category === category)
@@ -756,7 +763,7 @@ function NodeInspector({
           <p>{help.details}</p>
         </section>
       )}
-      {descriptor.category === "gate" && (
+      {["gate", "module"].includes(descriptor.category) && (
         <section className="inspector-section truth-table-section">
           <h2>真值表</h2>
           <div className="truth-table-wrap">

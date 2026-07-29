@@ -272,7 +272,9 @@ fn property_is_valid(kind: ComponentKind, properties: &ComponentProperties) -> b
         | ComponentKind::IsZero
         | ComponentKind::IsPos
         | ComponentKind::Mux2
-        | ComponentKind::Mux3 => properties.value.is_none(),
+        | ComponentKind::Mux3
+        | ComponentKind::HalfAdder
+        | ComponentKind::FullAdder => properties.value.is_none(),
     }
 }
 
