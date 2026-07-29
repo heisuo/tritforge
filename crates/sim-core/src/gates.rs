@@ -22,6 +22,8 @@ pub fn evaluate(
         ComponentKind::IsNeg => gate_output(decode(input(inputs, "a"), Trit::Neg)),
         ComponentKind::IsZero => gate_output(decode(input(inputs, "a"), Trit::Zero)),
         ComponentKind::IsPos => gate_output(decode(input(inputs, "a"), Trit::Pos)),
+        ComponentKind::ModSum => gate_output(mod_sum(input(inputs, "a"), input(inputs, "b"))),
+        ComponentKind::Consensus => gate_output(consensus(input(inputs, "a"), input(inputs, "b"))),
         ComponentKind::Mux2 => gate_output(mux2(inputs)),
         ComponentKind::Mux3 => gate_output(mux3(inputs)),
         ComponentKind::HalfAdder => adder_outputs(inputs, &["a", "b"]),
@@ -74,6 +76,40 @@ fn neg(value: Trit) -> Trit {
         Trit::Pos => Trit::Neg,
         Trit::Unknown | Trit::HighZ => Trit::Unknown,
         Trit::Error => Trit::Error,
+    }
+}
+
+fn normalized_pair(a: Trit, b: Trit) -> Result<(Trit, Trit), Trit> {
+    let a = a.normalize_gate_input();
+    let b = b.normalize_gate_input();
+    if a == Trit::Error || b == Trit::Error {
+        Err(Trit::Error)
+    } else if a == Trit::Unknown || b == Trit::Unknown {
+        Err(Trit::Unknown)
+    } else {
+        Ok((a, b))
+    }
+}
+
+fn mod_sum(a: Trit, b: Trit) -> Trit {
+    let (a, b) = match normalized_pair(a, b) {
+        Ok(pair) => pair,
+        Err(meta) => return meta,
+    };
+    let total = a.balanced_value().expect("known trit") + b.balanced_value().expect("known trit");
+    match total {
+        -2 | 1 => Trit::Pos,
+        -1 | 2 => Trit::Neg,
+        0 => Trit::Zero,
+        _ => unreachable!("two known trits sum to -2..=2"),
+    }
+}
+
+fn consensus(a: Trit, b: Trit) -> Trit {
+    match normalized_pair(a, b) {
+        Ok((a, b)) if a == b => a,
+        Ok(_) => Trit::Zero,
+        Err(meta) => meta,
     }
 }
 

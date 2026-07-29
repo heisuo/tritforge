@@ -48,6 +48,8 @@ fn phase_one_catalog_has_exact_stable_ids_and_type_lookup() {
             "gate.is_neg",
             "gate.is_zero",
             "gate.is_pos",
+            "gate.mod_sum",
+            "gate.consensus",
             "gate.mux2",
             "gate.mux3",
             "module.half_adder",
@@ -118,6 +120,24 @@ fn catalog_has_exact_categories_ports_and_truth_table_sizes() {
             "gate",
             vec![("a", PortDirection::Input), ("y", PortDirection::Output)],
             3_usize,
+        ),
+        (
+            "gate",
+            vec![
+                ("a", PortDirection::Input),
+                ("b", PortDirection::Input),
+                ("y", PortDirection::Output),
+            ],
+            9_usize,
+        ),
+        (
+            "gate",
+            vec![
+                ("a", PortDirection::Input),
+                ("b", PortDirection::Input),
+                ("y", PortDirection::Output),
+            ],
+            9_usize,
         ),
         (
             "gate",

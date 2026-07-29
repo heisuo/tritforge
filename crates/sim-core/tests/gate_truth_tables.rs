@@ -77,6 +77,53 @@ fn neg_min_max_and_decoders_are_exhaustive_for_known_inputs() {
 }
 
 #[test]
+fn mod_sum_and_consensus_are_exhaustive_for_known_inputs() {
+    let mod_sum_expected = [
+        Trit::Pos,
+        Trit::Neg,
+        Trit::Zero,
+        Trit::Neg,
+        Trit::Zero,
+        Trit::Pos,
+        Trit::Zero,
+        Trit::Pos,
+        Trit::Neg,
+    ];
+    let consensus_expected = [
+        Trit::Neg,
+        Trit::Zero,
+        Trit::Zero,
+        Trit::Zero,
+        Trit::Zero,
+        Trit::Zero,
+        Trit::Zero,
+        Trit::Zero,
+        Trit::Pos,
+    ];
+
+    for (a_index, a) in KNOWN.into_iter().enumerate() {
+        for (b_index, b) in KNOWN.into_iter().enumerate() {
+            let flat = a_index * KNOWN.len() + b_index;
+            assert_eq!(binary(ComponentKind::ModSum, a, b), mod_sum_expected[flat]);
+            assert_eq!(
+                binary(ComponentKind::Consensus, a, b),
+                consensus_expected[flat]
+            );
+        }
+    }
+}
+
+#[test]
+fn arithmetic_gates_propagate_meta_states_conservatively() {
+    for kind in [ComponentKind::ModSum, ComponentKind::Consensus] {
+        assert_eq!(binary(kind, Trit::Pos, Trit::HighZ), Trit::Unknown);
+        assert_eq!(binary(kind, Trit::Unknown, Trit::Zero), Trit::Unknown);
+        assert_eq!(binary(kind, Trit::Error, Trit::Pos), Trit::Error);
+        assert_eq!(binary(kind, Trit::Unknown, Trit::Error), Trit::Error);
+    }
+}
+
+#[test]
 fn muxes_are_exhaustive_for_known_inputs() {
     for a in KNOWN {
         for b in KNOWN {

@@ -271,6 +271,8 @@ fn property_is_valid(kind: ComponentKind, properties: &ComponentProperties) -> b
         | ComponentKind::IsNeg
         | ComponentKind::IsZero
         | ComponentKind::IsPos
+        | ComponentKind::ModSum
+        | ComponentKind::Consensus
         | ComponentKind::Mux2
         | ComponentKind::Mux3
         | ComponentKind::HalfAdder

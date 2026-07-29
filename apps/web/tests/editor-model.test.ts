@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_DOCUMENT,
   cycleKnownTrit,
+  renameNodeLabel,
   toCircuitDefinition,
   validateConnection,
   type CatalogComponent,
@@ -79,6 +80,27 @@ describe("editor document model", () => {
   it("cycles known input values in balanced ternary order", () => {
     const values = ["T", "0", "1", "T"] as const;
     expect(values.slice(1)).toEqual(values.slice(0, -1).map(cycleKnownTrit));
+  });
+
+  it("renames only the node label without changing circuit topology", () => {
+    const renamedNodes = renameNodeLabel(
+      DEFAULT_DOCUMENT.nodes,
+      "neg-1",
+      "  一级取反门  ",
+    );
+
+    expect(
+      renamedNodes.find((node) => node.id === "neg-1")?.data.label,
+    ).toBe("一级取反门");
+    expect(
+      toCircuitDefinition({
+        nodes: renamedNodes,
+        edges: DEFAULT_DOCUMENT.edges,
+      }),
+    ).toEqual(toCircuitDefinition(DEFAULT_DOCUMENT));
+    expect(
+      renameNodeLabel(DEFAULT_DOCUMENT.nodes, "neg-1", "   "),
+    ).toBe(DEFAULT_DOCUMENT.nodes);
   });
 
   it("rejects connections that do not run output to input", () => {

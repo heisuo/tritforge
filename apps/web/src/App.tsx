@@ -44,6 +44,7 @@ import {
   createDefaultDocument,
   cycleKnownTrit,
   makeComponentId,
+  renameNodeLabel,
   toCircuitDefinition,
   validateConnection,
   type CatalogComponent,
@@ -78,6 +79,8 @@ const DISPLAY_NAMES: Record<string, string> = {
   "gate.is_neg": "IS_NEG",
   "gate.is_zero": "IS_ZERO",
   "gate.is_pos": "IS_POS",
+  "gate.mod_sum": "MOD_SUM",
+  "gate.consensus": "CONSENSUS",
   "gate.mux2": "MUX2",
   "gate.mux3": "MUX3",
   "module.half_adder": "Half Adder",
@@ -146,6 +149,7 @@ function Workbench() {
   const instanceRef = useRef<ReactFlowInstance<EditorNode, EditorEdge> | null>(
     null,
   );
+  const inputClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const edgeCounter = useRef(1);
 
   const document = useMemo(() => ({ nodes, edges }), [nodes, edges]);
@@ -314,13 +318,8 @@ function Workbench() {
     [catalogByType, nodes],
   );
 
-  const onNodeClick = useCallback(
-    (_event: React.MouseEvent, node: EditorNode) => {
-      setSelectedNodeId(node.id);
-      setSelectedEdgeIds([]);
-      if (node.data.typeId !== "source.trit_input") {
-        return;
-      }
+  const cycleInputNode = useCallback(
+    (node: EditorNode) => {
       const current = node.data.sourceValue ?? "0";
       const next = cycleKnownTrit(current);
       try {
@@ -344,6 +343,50 @@ function Workbench() {
       }
     },
     [edges, nodes],
+  );
+
+  const onNodeClick = useCallback(
+    (event: React.MouseEvent, node: EditorNode) => {
+      setSelectedNodeId(node.id);
+      setSelectedEdgeIds([]);
+      if (node.data.typeId !== "source.trit_input") {
+        return;
+      }
+      if (inputClickTimerRef.current) {
+        clearTimeout(inputClickTimerRef.current);
+        inputClickTimerRef.current = null;
+      }
+      if (event.detail > 1) {
+        return;
+      }
+      inputClickTimerRef.current = setTimeout(() => {
+        cycleInputNode(node);
+        inputClickTimerRef.current = null;
+      }, 220);
+    },
+    [cycleInputNode],
+  );
+
+  const onNodeDoubleClick = useCallback(
+    (_event: React.MouseEvent, node: EditorNode) => {
+      if (inputClickTimerRef.current) {
+        clearTimeout(inputClickTimerRef.current);
+        inputClickTimerRef.current = null;
+      }
+      const nextLabel = window.prompt("修改模块名称", node.data.label);
+      if (nextLabel === null) {
+        return;
+      }
+      const renamed = renameNodeLabel(nodes, node.id, nextLabel);
+      if (renamed === nodes) {
+        setStatusMessage("模块名称不能为空");
+        return;
+      }
+      setNodes(renamed);
+      setSelectedNodeId(node.id);
+      setStatusMessage(`已重命名：${nextLabel.trim()}`);
+    },
+    [nodes],
   );
 
   const deleteSelected = useCallback(() => {
@@ -560,6 +603,7 @@ function Workbench() {
               onConnect={onConnect}
               isValidConnection={isValidConnection}
               onNodeClick={onNodeClick}
+              onNodeDoubleClick={onNodeDoubleClick}
               onSelectionChange={onSelectionChange}
               onNodesDelete={(deleted) => {
                 const ids = new Set(deleted.map((node) => node.id));

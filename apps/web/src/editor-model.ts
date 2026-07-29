@@ -118,6 +118,22 @@ export function cycleKnownTrit(value: KnownTrit): KnownTrit {
   return "T";
 }
 
+export function renameNodeLabel(
+  nodes: EditorNode[],
+  nodeId: string,
+  label: string,
+): EditorNode[] {
+  const nextLabel = label.trim();
+  if (!nextLabel) {
+    return nodes;
+  }
+  return nodes.map((node) =>
+    node.id === nodeId
+      ? { ...node, data: { ...node.data, label: nextLabel } }
+      : node,
+  );
+}
+
 export function toCircuitDefinition(
   document: EditorDocument,
 ): CircuitDefinition {

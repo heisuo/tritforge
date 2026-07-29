@@ -267,6 +267,8 @@ fn gates_and_probe_reject_any_value_property() {
         "gate.is_neg",
         "gate.is_zero",
         "gate.is_pos",
+        "gate.mod_sum",
+        "gate.consensus",
         "gate.mux2",
         "gate.mux3",
     ] {

@@ -44,6 +44,14 @@ export const COMPONENT_HELP: Record<string, ComponentHelp> = {
     summary: "正值译码门，用于判断输入是否恰好为 1。",
     details: "输入为 1 时输出 1，其余已知输入输出 T，可用于正值条件分支。",
   },
+  "gate.mod_sum": {
+    summary: "平衡三进制模 3 加法门，只输出两输入相加后的本位结果。",
+    details: "它类似二进制 XOR。例如 1+1 的本位为 T，T+T 的本位为 1，是半加器的 sum 门。",
+  },
+  "gate.consensus": {
+    summary: "三进制一致门：两个输入相等时输出该值，不相等时输出 0。",
+    details: "只有 T+T 产生进位 T、1+1 产生进位 1，其余组合为 0，是半加器的 carry 门。",
+  },
   "gate.mux2": {
     summary: "二选一三进制选择器，用 T 和 1 选择两路数据。",
     details: "选择端 s=T 时输出 a，s=1 时输出 b；s=0 没有对应数据路，因此输出 X。",

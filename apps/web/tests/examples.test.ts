@@ -13,6 +13,8 @@ const TYPE_IDS = [
   "gate.is_neg",
   "gate.is_zero",
   "gate.is_pos",
+  "gate.mod_sum",
+  "gate.consensus",
   "gate.mux2",
   "gate.mux3",
   "module.half_adder",
@@ -26,6 +28,7 @@ describe("example library", () => {
       "min-max",
       "decoder",
       "mux3",
+      "half-adder",
       "full-adder",
       "ripple-adder-3",
       "driver-conflict",
@@ -74,14 +77,36 @@ describe("example library", () => {
     ).toHaveLength(3);
   });
 
-  it("builds the single-trit full adder only from basic MUX3 gates", () => {
-    const document = cloneExampleDocument("full-adder");
+  it("builds the half adder from one MOD_SUM and one CONSENSUS gate", () => {
+    const document = cloneExampleDocument("half-adder");
+    expect(
+      document.nodes.filter((node) => node.data.typeId === "gate.mod_sum"),
+    ).toHaveLength(1);
+    expect(
+      document.nodes.filter((node) => node.data.typeId === "gate.consensus"),
+    ).toHaveLength(1);
     expect(
       document.nodes.some((node) => node.data.typeId.startsWith("module.")),
     ).toBe(false);
+  });
+
+  it("builds the full adder from two half adders and one MOD_SUM gate", () => {
+    const document = cloneExampleDocument("full-adder");
     expect(
-      document.nodes.filter((node) => node.data.typeId === "gate.mux3"),
-    ).toHaveLength(14);
+      document.nodes.filter(
+        (node) => node.data.typeId === "module.half_adder",
+      ),
+    ).toHaveLength(2);
+    expect(
+      document.nodes.filter((node) => node.data.typeId === "gate.mod_sum"),
+    ).toHaveLength(1);
+    expect(
+      document.nodes.some(
+        (node) =>
+          node.data.typeId === "module.full_adder" ||
+          node.data.typeId === "gate.mux3",
+      ),
+    ).toBe(false);
   });
 });
 
