@@ -308,24 +308,26 @@ function Workbench() {
       const current = node.data.sourceValue ?? "0";
       const next = cycleKnownTrit(current);
       try {
-        const nextSnapshot = runtimeRef.current?.simulator.setInput(node.id, next);
-        if (!nextSnapshot) {
+        const runtime = runtimeRef.current;
+        if (!runtime) {
           return;
         }
-        setNodes((allNodes) =>
-          allNodes.map((item) =>
-            item.id === node.id
-              ? { ...item, data: { ...item.data, sourceValue: next } }
-              : item,
-          ),
+        const nextNodes = nodes.map((item) =>
+          item.id === node.id
+            ? { ...item, data: { ...item.data, sourceValue: next } }
+            : item,
         );
+        const nextSnapshot = runtime.simulator.loadCircuit(
+          toCircuitDefinition({ nodes: nextNodes, edges }),
+        );
+        setNodes(nextNodes);
         setSnapshot(nextSnapshot);
         setStatusMessage(`输入 ${node.id}：${current} → ${next}`);
       } catch (error) {
         setStatusMessage(`输入更新失败：${wasmErrorMessage(error)}`);
       }
     },
-    [],
+    [edges, nodes],
   );
 
   const deleteSelected = useCallback(() => {
