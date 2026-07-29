@@ -73,6 +73,16 @@ describe("example library", () => {
       ),
     ).toHaveLength(3);
   });
+
+  it("builds the single-trit full adder only from basic MUX3 gates", () => {
+    const document = cloneExampleDocument("full-adder");
+    expect(
+      document.nodes.some((node) => node.data.typeId.startsWith("module.")),
+    ).toBe(false);
+    expect(
+      document.nodes.filter((node) => node.data.typeId === "gate.mux3"),
+    ).toHaveLength(14);
+  });
 });
 
 describe("component help", () => {
