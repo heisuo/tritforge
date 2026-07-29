@@ -119,39 +119,129 @@ fn muxes_are_exhaustive_for_known_inputs() {
 }
 
 #[test]
-fn muxes_ignore_errors_on_unselected_data_inputs() {
+fn muxes_ignore_every_meta_state_on_each_unselected_data_input() {
+    for meta in [Trit::Unknown, Trit::HighZ, Trit::Error] {
+        assert_eq!(
+            output(
+                ComponentKind::Mux2,
+                &[("a", Trit::Neg), ("b", meta), ("s", Trit::Neg)]
+            ),
+            Trit::Neg
+        );
+        assert_eq!(
+            output(
+                ComponentKind::Mux2,
+                &[("a", meta), ("b", Trit::Pos), ("s", Trit::Pos)]
+            ),
+            Trit::Pos
+        );
+
+        for (selector, selected_index, expected) in [
+            (Trit::Neg, 0_usize, Trit::Neg),
+            (Trit::Zero, 1_usize, Trit::Zero),
+            (Trit::Pos, 2_usize, Trit::Pos),
+        ] {
+            for unselected_index in 0..3 {
+                if unselected_index == selected_index {
+                    continue;
+                }
+
+                let mut values = [
+                    ("a", Trit::Neg),
+                    ("b", Trit::Zero),
+                    ("c", Trit::Pos),
+                    ("s", selector),
+                ];
+                values[unselected_index].1 = meta;
+                assert_eq!(output(ComponentKind::Mux3, &values), expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn ordinary_gates_treat_missing_inputs_as_unknown() {
+    assert_eq!(output(ComponentKind::Buf, &[]), Trit::Unknown);
+    assert_eq!(
+        output(ComponentKind::Min, &[("a", Trit::Neg)]),
+        Trit::Unknown
+    );
+    assert_eq!(
+        output(ComponentKind::Max, &[("b", Trit::Pos)]),
+        Trit::Unknown
+    );
+}
+
+#[test]
+fn muxes_treat_missing_selectors_as_unknown() {
+    assert_eq!(
+        output(ComponentKind::Mux2, &[("a", Trit::Neg), ("b", Trit::Pos)]),
+        Trit::Unknown
+    );
     assert_eq!(
         output(
-            ComponentKind::Mux2,
-            &[("a", Trit::Neg), ("b", Trit::Error), ("s", Trit::Neg)]
+            ComponentKind::Mux3,
+            &[("a", Trit::Neg), ("b", Trit::Zero), ("c", Trit::Pos)]
         ),
+        Trit::Unknown
+    );
+}
+
+#[test]
+fn muxes_treat_missing_selected_data_as_unknown() {
+    assert_eq!(
+        output(ComponentKind::Mux2, &[("b", Trit::Pos), ("s", Trit::Neg)]),
+        Trit::Unknown
+    );
+    assert_eq!(
+        output(ComponentKind::Mux2, &[("a", Trit::Neg), ("s", Trit::Pos)]),
+        Trit::Unknown
+    );
+
+    for (selector, values) in [
+        (
+            Trit::Neg,
+            vec![("b", Trit::Zero), ("c", Trit::Pos), ("s", Trit::Neg)],
+        ),
+        (
+            Trit::Zero,
+            vec![("a", Trit::Neg), ("c", Trit::Pos), ("s", Trit::Zero)],
+        ),
+        (
+            Trit::Pos,
+            vec![("a", Trit::Neg), ("b", Trit::Zero), ("s", Trit::Pos)],
+        ),
+    ] {
+        assert_eq!(
+            output(ComponentKind::Mux3, &values),
+            Trit::Unknown,
+            "selector {selector:?} did not require its selected input"
+        );
+    }
+}
+
+#[test]
+fn muxes_do_not_read_missing_unselected_data() {
+    assert_eq!(
+        output(ComponentKind::Mux2, &[("a", Trit::Neg), ("s", Trit::Neg)]),
         Trit::Neg
     );
     assert_eq!(
-        output(
-            ComponentKind::Mux2,
-            &[("a", Trit::Error), ("b", Trit::Pos), ("s", Trit::Pos)]
-        ),
+        output(ComponentKind::Mux2, &[("b", Trit::Pos), ("s", Trit::Pos)]),
         Trit::Pos
     );
 
-    for (selector, expected) in [
-        (Trit::Neg, Trit::Neg),
-        (Trit::Zero, Trit::Zero),
-        (Trit::Pos, Trit::Pos),
+    for (selector, selected_id, selected_value) in [
+        (Trit::Neg, "a", Trit::Neg),
+        (Trit::Zero, "b", Trit::Zero),
+        (Trit::Pos, "c", Trit::Pos),
     ] {
-        let (a, b, c) = match selector {
-            Trit::Neg => (expected, Trit::Error, Trit::Error),
-            Trit::Zero => (Trit::Error, expected, Trit::Error),
-            Trit::Pos => (Trit::Error, Trit::Error, expected),
-            _ => unreachable!(),
-        };
         assert_eq!(
             output(
                 ComponentKind::Mux3,
-                &[("a", a), ("b", b), ("c", c), ("s", selector)]
+                &[(selected_id, selected_value), ("s", selector)]
             ),
-            expected
+            selected_value
         );
     }
 }
