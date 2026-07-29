@@ -1,3 +1,5 @@
+pub mod catalog;
+pub mod gates;
 pub mod trit;
 
 pub const fn api_version() -> u32 {
