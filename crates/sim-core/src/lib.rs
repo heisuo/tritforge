@@ -2,6 +2,7 @@ pub mod catalog;
 pub mod circuit;
 pub mod diagnostic;
 pub mod gates;
+pub mod simulator;
 pub mod trit;
 
 pub const fn api_version() -> u32 {
