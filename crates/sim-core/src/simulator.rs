@@ -18,7 +18,6 @@ pub struct Simulator {
     input_nets: BTreeMap<PortRef, Trit>,
     base_diagnostics: Vec<Diagnostic>,
     diagnostics: Vec<Diagnostic>,
-    cyclic_components: Vec<Vec<String>>,
     processed_events: usize,
     stable: bool,
 }
@@ -66,10 +65,15 @@ impl Simulator {
         let source_properties = original_source_properties.clone();
         let (component_outputs, input_nets) = signal_maps(&circuit);
         let base_diagnostics = baseline_diagnostics(&circuit, warnings);
-        let cyclic_components = find_cyclic_components(&circuit);
         let component_ids = circuit
             .components()
             .iter()
+            .filter(|component| {
+                matches!(
+                    circuit.component_kind(&component.id),
+                    Some(ComponentKind::TritInput | ComponentKind::Constant)
+                )
+            })
             .map(|component| component.id.clone())
             .collect::<Vec<_>>();
 
@@ -81,7 +85,6 @@ impl Simulator {
             input_nets,
             diagnostics: base_diagnostics.clone(),
             base_diagnostics,
-            cyclic_components,
             processed_events: 0,
             stable: false,
         };
@@ -130,6 +133,12 @@ impl Simulator {
             .circuit
             .components()
             .iter()
+            .filter(|component| {
+                matches!(
+                    self.circuit.component_kind(&component.id),
+                    Some(ComponentKind::TritInput | ComponentKind::Constant)
+                )
+            })
             .map(|component| component.id.clone())
             .collect::<Vec<_>>();
         self.settle(component_ids);
@@ -176,28 +185,6 @@ impl Simulator {
 
         let mut diagnostics: BTreeSet<_> = self.base_diagnostics.iter().cloned().collect();
         self.add_multiple_driver_diagnostics(&mut diagnostics);
-
-        let unresolved_cycles = self
-            .cyclic_components
-            .iter()
-            .filter(|component_ids| {
-                component_ids
-                    .iter()
-                    .any(|component_id| !self.component_outputs_are_known(component_id))
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-
-        if !unresolved_cycles.is_empty() {
-            let affected_components = unresolved_cycles
-                .into_iter()
-                .flatten()
-                .collect::<BTreeSet<_>>();
-            self.mark_components_as_error(&affected_components);
-            diagnostics.insert(self.non_convergent_diagnostic(&affected_components));
-            self.stable = false;
-        }
-
         self.diagnostics = diagnostics.into_iter().collect();
     }
 
@@ -338,33 +325,56 @@ impl Simulator {
         }
     }
 
-    fn component_outputs_are_known(&self, component_id: &str) -> bool {
-        self.component_outputs
-            .iter()
-            .filter(move |(port, _)| port.component_id == component_id)
-            .all(|(_, value)| value.is_known())
-    }
-
     fn fail_pending_components(&mut self, queued: &BTreeSet<String>) {
-        self.mark_components_as_error(queued);
+        let affected_components = self.propagate_error_from_pending(queued);
         let mut diagnostics: BTreeSet<_> = self.base_diagnostics.iter().cloned().collect();
         self.add_multiple_driver_diagnostics(&mut diagnostics);
-        diagnostics.insert(self.non_convergent_diagnostic(queued));
+        diagnostics.insert(self.non_convergent_diagnostic(&affected_components));
         self.diagnostics = diagnostics.into_iter().collect();
         self.stable = false;
     }
 
-    fn mark_components_as_error(&mut self, component_ids: &BTreeSet<String>) {
-        for (port, value) in &mut self.component_outputs {
-            if component_ids.contains(&port.component_id) {
-                *value = Trit::Error;
+    fn propagate_error_from_pending(
+        &mut self,
+        pending_components: &BTreeSet<String>,
+    ) -> BTreeSet<String> {
+        let mut queued = pending_components.clone();
+        let mut queue: VecDeque<_> = queued.iter().cloned().collect();
+        let mut affected_components = BTreeSet::new();
+
+        while let Some(component_id) = queue.pop_front() {
+            queued.remove(&component_id);
+            affected_components.insert(component_id.clone());
+            let kind = self
+                .circuit
+                .component_kind(&component_id)
+                .expect("pending component is validated");
+            let output_ids = kind
+                .port_descriptors()
+                .into_iter()
+                .filter(|port| port.direction == PortDirection::Output)
+                .map(|port| port.id)
+                .collect::<Vec<_>>();
+
+            for port_id in output_ids {
+                self.component_outputs
+                    .insert(PortRef::new(&component_id, &port_id), Trit::Error)
+                    .expect("declared output has a signal");
+                let downstream = self
+                    .circuit
+                    .downstream_for(&component_id, &port_id)
+                    .to_vec();
+                for downstream_id in downstream {
+                    if self.resolve_component_inputs(&downstream_id)
+                        && queued.insert(downstream_id.clone())
+                    {
+                        queue.push_back(downstream_id);
+                    }
+                }
             }
         }
-        for (port, value) in &mut self.input_nets {
-            if component_ids.contains(&port.component_id) {
-                *value = Trit::Error;
-            }
-        }
+
+        affected_components
     }
 
     fn non_convergent_diagnostic(&self, component_ids: &BTreeSet<String>) -> Diagnostic {
@@ -380,7 +390,7 @@ impl Simulator {
             .collect();
         Diagnostic::error(
             "NON_CONVERGENT_COMBINATIONAL_LOOP",
-            "combinational feedback did not establish a known stable value".to_owned(),
+            "circuit exceeded the event limit before reaching a stable state".to_owned(),
             component_ids.iter().cloned().collect(),
             connection_ids,
             vec![],
@@ -448,97 +458,4 @@ fn nested_signals(signals: &BTreeMap<PortRef, Trit>) -> BTreeMap<String, BTreeMa
             .insert(port.port_id.clone(), *value);
     }
     nested
-}
-
-fn find_cyclic_components(circuit: &ValidatedCircuit) -> Vec<Vec<String>> {
-    let component_ids = circuit
-        .components()
-        .iter()
-        .map(|component| component.id.clone())
-        .collect::<Vec<_>>();
-    let mut outgoing = component_ids
-        .iter()
-        .cloned()
-        .map(|component_id| (component_id, BTreeSet::new()))
-        .collect::<BTreeMap<_, _>>();
-    let mut incoming = outgoing.clone();
-
-    for connection in circuit.connections() {
-        outgoing
-            .get_mut(&connection.source_component_id)
-            .expect("validated source exists")
-            .insert(connection.target_component_id.clone());
-        incoming
-            .get_mut(&connection.target_component_id)
-            .expect("validated target exists")
-            .insert(connection.source_component_id.clone());
-    }
-
-    let mut visited = BTreeSet::new();
-    let mut finish_order = Vec::with_capacity(component_ids.len());
-    for component_id in &component_ids {
-        finish_dfs(component_id, &outgoing, &mut visited, &mut finish_order);
-    }
-
-    visited.clear();
-    let mut cyclic = Vec::new();
-    for component_id in finish_order.into_iter().rev() {
-        if visited.contains(&component_id) {
-            continue;
-        }
-
-        let mut stack = vec![component_id];
-        let mut component_group = Vec::new();
-        while let Some(current) = stack.pop() {
-            if !visited.insert(current.clone()) {
-                continue;
-            }
-            component_group.push(current.clone());
-            if let Some(neighbors) = incoming.get(&current) {
-                stack.extend(neighbors.iter().rev().cloned());
-            }
-        }
-        component_group.sort();
-
-        let is_self_loop = component_group.len() == 1
-            && outgoing
-                .get(&component_group[0])
-                .is_some_and(|neighbors| neighbors.contains(&component_group[0]));
-        if component_group.len() > 1 || is_self_loop {
-            cyclic.push(component_group);
-        }
-    }
-
-    cyclic.sort();
-    cyclic
-}
-
-fn finish_dfs(
-    start: &str,
-    outgoing: &BTreeMap<String, BTreeSet<String>>,
-    visited: &mut BTreeSet<String>,
-    finish_order: &mut Vec<String>,
-) {
-    let mut stack = vec![(start.to_owned(), false)];
-    while let Some((component_id, expanded)) = stack.pop() {
-        if expanded {
-            finish_order.push(component_id);
-            continue;
-        }
-        if !visited.insert(component_id.clone()) {
-            continue;
-        }
-
-        stack.push((component_id.clone(), true));
-        if let Some(neighbors) = outgoing.get(&component_id) {
-            stack.extend(
-                neighbors
-                    .iter()
-                    .rev()
-                    .filter(|neighbor| !visited.contains(*neighbor))
-                    .cloned()
-                    .map(|neighbor| (neighbor, false)),
-            );
-        }
-    }
 }

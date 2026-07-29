@@ -54,6 +54,25 @@ fn diagnostic_codes(snapshot: &SimulationSnapshot) -> Vec<&str> {
         .collect()
 }
 
+fn oscillator_definition() -> CircuitDefinition {
+    definition(
+        vec![
+            valued_component("data", "source.constant", Trit::Neg),
+            valued_component("selector", "source.trit_input", Trit::Neg),
+            component("mux", "gate.mux2"),
+            component("neg", "gate.neg"),
+            component("probe", "sink.probe"),
+        ],
+        vec![
+            connection("data-mux-a", "data", "out", "mux", "a"),
+            connection("selector-mux-s", "selector", "out", "mux", "s"),
+            connection("neg-mux-b", "neg", "y", "mux", "b"),
+            connection("mux-neg", "mux", "y", "neg", "a"),
+            connection("mux-probe", "mux", "y", "probe", "in"),
+        ],
+    )
+}
+
 #[test]
 fn input_through_neg_reaches_probe_at_a_stable_value() {
     let simulator = Simulator::load(definition(
@@ -198,7 +217,7 @@ fn unconnected_probe_starts_high_impedance_with_one_warning() {
 }
 
 #[test]
-fn self_inverting_feedback_is_reported_without_exhausting_the_process() {
+fn source_free_self_inverting_feedback_remains_quiescent_at_high_impedance() {
     let simulator = Simulator::load(definition(
         vec![component("neg", "gate.neg")],
         vec![connection("feedback", "neg", "y", "neg", "a")],
@@ -206,11 +225,11 @@ fn self_inverting_feedback_is_reported_without_exhausting_the_process() {
     .expect("feedback is structurally valid");
 
     let snapshot = simulator.snapshot();
-    assert!(!snapshot.stable);
-    assert!(diagnostic_codes(&snapshot).contains(&"NON_CONVERGENT_COMBINATIONAL_LOOP"));
-    assert_eq!(snapshot.output_value("neg", "y"), Some(Trit::Error));
-    assert_eq!(snapshot.input_value("neg", "a"), Some(Trit::Error));
-    assert!(snapshot.processed_events <= 1024);
+    assert!(snapshot.stable);
+    assert_eq!(snapshot.output_value("neg", "y"), Some(Trit::HighZ));
+    assert_eq!(snapshot.input_value("neg", "a"), Some(Trit::HighZ));
+    assert_eq!(snapshot.processed_events, 0);
+    assert!(!diagnostic_codes(&snapshot).contains(&"NON_CONVERGENT_COMBINATIONAL_LOOP"));
 }
 
 #[test]
@@ -235,6 +254,135 @@ fn cyclic_mux_with_unselected_feedback_can_reach_a_known_stable_point() {
     assert_eq!(snapshot.output_value("mux", "y"), Some(Trit::Pos));
     assert_eq!(snapshot.input_value("mux", "c"), Some(Trit::Pos));
     assert!(!diagnostic_codes(&snapshot).contains(&"NON_CONVERGENT_COMBINATIONAL_LOOP"));
+}
+
+#[test]
+fn cyclic_mux_with_unselected_feedback_can_stabilize_at_external_unknown() {
+    let simulator = Simulator::load(definition(
+        vec![
+            valued_component("data", "source.constant", Trit::Neg),
+            valued_component("selector", "source.constant", Trit::Neg),
+            component("mux", "gate.mux2"),
+            component("unknown-source", "gate.mux2"),
+            valued_component("zero", "source.constant", Trit::Zero),
+        ],
+        vec![
+            connection("data-unknown-a", "data", "out", "unknown-source", "a"),
+            connection("data-unknown-b", "data", "out", "unknown-source", "b"),
+            connection("zero-unknown-s", "zero", "out", "unknown-source", "s"),
+            connection("unknown-mux-a", "unknown-source", "y", "mux", "a"),
+            connection("selector-mux-s", "selector", "out", "mux", "s"),
+            connection("feedback", "mux", "y", "mux", "b"),
+        ],
+    ))
+    .expect("unknown feedback circuit is structurally valid");
+
+    let snapshot = simulator.snapshot();
+    assert!(snapshot.stable);
+    assert_eq!(
+        snapshot.output_value("unknown-source", "y"),
+        Some(Trit::Unknown)
+    );
+    assert_eq!(snapshot.output_value("mux", "y"), Some(Trit::Unknown));
+    assert_eq!(snapshot.input_value("mux", "a"), Some(Trit::Unknown));
+    assert_eq!(snapshot.input_value("mux", "b"), Some(Trit::Unknown));
+    assert_eq!(snapshot.input_value("mux", "s"), Some(Trit::Neg));
+    assert!(!diagnostic_codes(&snapshot).contains(&"NON_CONVERGENT_COMBINATIONAL_LOOP"));
+}
+
+#[test]
+fn cyclic_mux_with_unselected_feedback_can_stabilize_at_external_error() {
+    let simulator = Simulator::load(definition(
+        vec![
+            valued_component("negative", "source.constant", Trit::Neg),
+            valued_component("positive", "source.constant", Trit::Pos),
+            valued_component("selector", "source.constant", Trit::Neg),
+            component("mux", "gate.mux2"),
+        ],
+        vec![
+            connection("negative-mux-a", "negative", "out", "mux", "a"),
+            connection("positive-mux-a", "positive", "out", "mux", "a"),
+            connection("selector-mux-s", "selector", "out", "mux", "s"),
+            connection("feedback", "mux", "y", "mux", "b"),
+        ],
+    ))
+    .expect("error feedback circuit is structurally valid");
+
+    let snapshot = simulator.snapshot();
+    assert!(snapshot.stable);
+    assert_eq!(snapshot.output_value("mux", "y"), Some(Trit::Error));
+    assert_eq!(snapshot.input_value("mux", "a"), Some(Trit::Error));
+    assert_eq!(snapshot.input_value("mux", "b"), Some(Trit::Error));
+    assert_eq!(snapshot.input_value("mux", "s"), Some(Trit::Neg));
+    assert_eq!(
+        diagnostic_codes(&snapshot),
+        vec!["MULTIPLE_DRIVER_CONFLICT"]
+    );
+}
+
+#[test]
+fn active_mux_neg_oscillator_hits_the_event_bound_and_propagates_error() {
+    let mut simulator = Simulator::load(oscillator_definition()).expect("valid oscillator");
+    let initial = simulator.snapshot();
+    assert!(initial.stable);
+    assert_eq!(initial.output_value("mux", "y"), Some(Trit::Neg));
+    assert_eq!(initial.output_value("neg", "y"), Some(Trit::Pos));
+
+    let snapshot = simulator
+        .set_input("selector", Trit::Pos)
+        .expect("activate feedback");
+
+    assert!(!snapshot.stable);
+    assert_eq!(snapshot.processed_events, 1024);
+    assert_eq!(
+        diagnostic_codes(&snapshot),
+        vec!["NON_CONVERGENT_COMBINATIONAL_LOOP"]
+    );
+    assert_eq!(snapshot.output_value("mux", "y"), Some(Trit::Error));
+    assert_eq!(snapshot.output_value("neg", "y"), Some(Trit::Error));
+    assert_eq!(snapshot.input_value("neg", "a"), Some(Trit::Error));
+    assert_eq!(snapshot.input_value("probe", "in"), Some(Trit::Error));
+    assert_eq!(snapshot.input_value("mux", "b"), Some(Trit::Error));
+    assert_eq!(snapshot.input_value("mux", "a"), Some(Trit::Neg));
+    assert_eq!(snapshot.input_value("mux", "s"), Some(Trit::Pos));
+
+    let recovered = simulator
+        .set_input("selector", Trit::Neg)
+        .expect("deactivate feedback");
+    assert!(recovered.stable);
+    assert_eq!(recovered.output_value("mux", "y"), Some(Trit::Neg));
+    assert_eq!(recovered.output_value("neg", "y"), Some(Trit::Pos));
+    assert_eq!(recovered.input_value("probe", "in"), Some(Trit::Neg));
+    assert!(!diagnostic_codes(&recovered).contains(&"NON_CONVERGENT_COMBINATIONAL_LOOP"));
+}
+
+#[test]
+fn event_bound_failure_preserves_an_unrelated_stable_network() {
+    let mut circuit = oscillator_definition();
+    circuit.components.extend([
+        valued_component("unrelated", "source.constant", Trit::Pos),
+        component("unrelated-probe", "sink.probe"),
+    ]);
+    circuit.connections.push(connection(
+        "unrelated-probe",
+        "unrelated",
+        "out",
+        "unrelated-probe",
+        "in",
+    ));
+    let mut simulator = Simulator::load(circuit).expect("valid circuit");
+
+    let snapshot = simulator
+        .set_input("selector", Trit::Pos)
+        .expect("activate feedback");
+
+    assert!(!snapshot.stable);
+    assert_eq!(snapshot.processed_events, 1024);
+    assert_eq!(snapshot.output_value("unrelated", "out"), Some(Trit::Pos));
+    assert_eq!(
+        snapshot.input_value("unrelated-probe", "in"),
+        Some(Trit::Pos)
+    );
 }
 
 #[test]
