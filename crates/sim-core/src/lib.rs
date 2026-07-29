@@ -1,3 +1,5 @@
+pub mod trit;
+
 pub const fn api_version() -> u32 {
     1
 }
