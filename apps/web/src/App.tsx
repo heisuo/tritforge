@@ -17,6 +17,7 @@ import {
   Box,
   CircleDot,
   Gauge,
+  Library,
   Maximize2,
   MousePointer2,
   Plus,
@@ -37,6 +38,8 @@ import {
 import "@xyflow/react/dist/style.css";
 import "./styles.css";
 import { CircuitNode, SIGNAL_COLORS } from "./CircuitNode";
+import { COMPONENT_HELP } from "./component-help";
+import { ExampleLibrary } from "./ExampleLibrary";
 import {
   createDefaultDocument,
   cycleKnownTrit,
@@ -50,6 +53,12 @@ import {
   type KnownTrit,
   type TritSymbol,
 } from "./editor-model";
+import {
+  EXAMPLES,
+  cloneExampleDocument,
+  type ExampleId,
+  type TernaryExample,
+} from "./examples";
 import {
   createWasmRuntime,
   wasmErrorMessage,
@@ -124,6 +133,8 @@ function Workbench() {
   const [statusMessage, setStatusMessage] = useState("正在加载 Rust/WASM…");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
+  const [exampleLibraryOpen, setExampleLibraryOpen] = useState(false);
+  const [activeExampleId, setActiveExampleId] = useState<ExampleId>("neg");
   const [reloadRevision, setReloadRevision] = useState(0);
   const runtimeRef = useRef<WasmRuntime | null>(null);
   const flowRef = useRef<HTMLDivElement | null>(null);
@@ -355,18 +366,25 @@ function Workbench() {
     setStatusMessage("已删除所选元件或连线");
   }, [edges, nodes, selectedEdgeIds, selectedNodeId]);
 
-  const resetDefault = useCallback(() => {
-    const next = createDefaultDocument();
+  const loadExample = useCallback((exampleId: ExampleId) => {
+    const next = cloneExampleDocument(exampleId);
     setNodes(next.nodes);
     setEdges(next.edges);
     setSelectedNodeId(null);
     setSelectedEdgeIds([]);
+    setActiveExampleId(exampleId);
+    setExampleLibraryOpen(false);
     setReloadRevision((value) => value + 1);
-    setStatusMessage("已恢复默认示例");
+    const example = EXAMPLES.find((item) => item.id === exampleId);
+    setStatusMessage(`已载入示例：${example?.name ?? exampleId}`);
     requestAnimationFrame(() =>
       instanceRef.current?.fitView({ padding: 0.28, duration: 250 }),
     );
   }, []);
+
+  const resetDefault = useCallback(() => {
+    loadExample("neg");
+  }, [loadExample]);
 
   const clearDocument = useCallback(() => {
     setNodes([]);
@@ -420,6 +438,10 @@ function Workbench() {
           <span>QUICK DEMO</span>
         </div>
         <div className="toolbar" role="toolbar" aria-label="画布工具">
+          <button type="button" onClick={() => setExampleLibraryOpen(true)}>
+            <Library aria-hidden="true" />
+            示例库
+          </button>
           <button type="button" onClick={resetDefault}>
             <RotateCcw aria-hidden="true" />
             默认示例
@@ -587,11 +609,24 @@ function Workbench() {
               snapshot={snapshot}
             />
           ) : (
-            <ExampleHelp />
+            <ExampleHelp
+              example={
+                EXAMPLES.find((item) => item.id === activeExampleId) ??
+                EXAMPLES[0]
+              }
+            />
           )}
           <Diagnostics snapshot={snapshot} />
         </aside>
       </div>
+
+      {exampleLibraryOpen && (
+        <ExampleLibrary
+          examples={EXAMPLES}
+          onClose={() => setExampleLibraryOpen(false)}
+          onLoad={loadExample}
+        />
+      )}
 
       <footer className="statusbar">
         <span className={`status-dot state-${wasmState}`} />
@@ -614,21 +649,16 @@ function Workbench() {
   );
 }
 
-function ExampleHelp() {
+function ExampleHelp({ example }: { example: TernaryExample }) {
   return (
     <section className="inspector-section example-help">
-      <h2>默认示例</h2>
+      <span className="type-chip">当前示例</span>
+      <h2>{example.name}</h2>
       <div className="example-path">
-        <span>INPUT 0</span>
-        <b>→</b>
-        <span>NEG</span>
-        <b>→</b>
-        <span>PROBE</span>
+        <span>{example.composition}</span>
       </div>
-      <p>
-        点击画布中的 Trit Input，输入会按 <b>T → 0 → 1 → T</b>{" "}
-        循环，并立即调用 Rust/WASM 模拟器。
-      </p>
+      <p>{example.description}</p>
+      <p className="example-expected">{example.expected}</p>
       <dl className="ternary-key">
         <div>
           <dt className="signal-T">T</dt>
@@ -644,8 +674,8 @@ function ExampleHelp() {
         </div>
       </dl>
       <p>
-        NEG 执行平衡三进制取反，因此 T 变为 1，0 保持 0，1 变为 T。
-        X、Z、E 分别表示未知、高阻和错误；所有门值均来自模拟器快照。
+        点击画布中的 Trit Input 可按 <b>T → 0 → 1 → T</b> 循环。
+        X、Z、E 分别表示未知、高阻和错误，所有结果均来自 Rust/WASM。
       </p>
     </section>
   );
@@ -697,6 +727,7 @@ function NodeInspector({
   const outputPorts = descriptor.ports.filter(
     (port) => port.direction === "output",
   );
+  const help = COMPONENT_HELP[descriptor.type_id];
 
   return (
     <>
@@ -718,6 +749,13 @@ function NodeInspector({
           <SignalRows title="输出" values={outputValues} />
         </div>
       </section>
+      {help && (
+        <section className="inspector-section component-help">
+          <h2>中文说明</h2>
+          <p>{help.summary}</p>
+          <p>{help.details}</p>
+        </section>
+      )}
       {descriptor.category === "gate" && (
         <section className="inspector-section truth-table-section">
           <h2>真值表</h2>

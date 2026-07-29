@@ -508,6 +508,25 @@ button {
   line-height: 1.65;
 }
 
+.example-expected {
+  padding: 7px 8px;
+  border-left: 3px solid #237066;
+  background: #eff7f5;
+  font-weight: 700;
+}
+
+.component-help p {
+  margin: 7px 0 0;
+  color: #526068;
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.component-help p:first-of-type {
+  color: #26363d;
+  font-weight: 700;
+}
+
 .ternary-key {
   margin: 11px 0;
   border-top: 1px solid #e2e7e9;
@@ -730,6 +749,184 @@ button {
 
 .status-spacer {
   flex: 1;
+}
+
+.example-library-backdrop {
+  position: fixed;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  inset: 0;
+  padding: 30px;
+  background: rgb(16 27 32 / 46%);
+}
+
+.example-library-dialog {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(880px, calc(100vw - 60px));
+  max-height: min(760px, calc(100vh - 60px));
+  overflow: hidden;
+  border: 1px solid #aebdc2;
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 20px 60px rgb(10 25 31 / 24%);
+}
+
+.example-library-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 76px;
+  padding: 14px 18px;
+  border-bottom: 1px solid #d8e0e2;
+}
+
+.example-library-header > div {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.example-library-header svg {
+  width: 22px;
+  height: 22px;
+  color: #237066;
+}
+
+.example-library-header h2,
+.example-library-header p {
+  margin: 0;
+}
+
+.example-library-header h2 {
+  font-size: 18px;
+}
+
+.example-library-header p {
+  margin-top: 4px;
+  color: #68767d;
+  font-size: 11px;
+}
+
+.example-library-close {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.example-library-close:hover {
+  border-color: #cad4d7;
+  background: #f2f6f6;
+}
+
+.example-library-close svg {
+  width: 17px;
+  height: 17px;
+  color: #526068;
+}
+
+.example-library-list {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.example-library-item {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) 92px;
+  gap: 14px;
+  align-items: center;
+  min-height: 116px;
+  padding: 14px 18px;
+  border-bottom: 1px solid #e1e7e9;
+}
+
+.example-library-item:last-child {
+  border-bottom: 0;
+}
+
+.example-library-item:hover {
+  background: #f7faf9;
+}
+
+.example-number {
+  color: #93a0a6;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 19px;
+  font-weight: 800;
+}
+
+.example-library-copy {
+  min-width: 0;
+}
+
+.example-library-copy > span {
+  color: #237066;
+  font-size: 9px;
+  font-weight: 850;
+}
+
+.example-library-copy h3,
+.example-library-copy p {
+  margin: 0;
+}
+
+.example-library-copy h3 {
+  margin-top: 2px;
+  font-size: 14px;
+}
+
+.example-library-copy p {
+  margin-top: 5px;
+  color: #5b696f;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.example-library-copy code,
+.example-library-copy strong {
+  display: block;
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+  font-size: 10px;
+}
+
+.example-library-copy code {
+  color: #47565d;
+}
+
+.example-library-copy strong {
+  color: #7a5b17;
+}
+
+.example-library-item > button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  border: 1px solid #2c776c;
+  border-radius: 4px;
+  color: #ffffff;
+  background: #2c776c;
+  font-size: 11px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.example-library-item > button:hover {
+  background: #205f56;
+}
+
+.example-library-item > button svg {
+  width: 14px;
+  height: 14px;
 }
 
 @media (max-width: 1180px) {
