@@ -1,6 +1,36 @@
 use proptest::prelude::*;
 use sim_core::trit::{Trit, resolve_drivers};
 
+fn oracle_resolve_drivers(drivers: &[Trit]) -> Trit {
+    if drivers.contains(&Trit::Error) {
+        return Trit::Error;
+    }
+
+    let present_known: Vec<_> = [Trit::Neg, Trit::Zero, Trit::Pos]
+        .into_iter()
+        .filter(|value| drivers.contains(value))
+        .collect();
+
+    if present_known.len() > 1 {
+        Trit::Error
+    } else if drivers.contains(&Trit::Unknown) {
+        Trit::Unknown
+    } else {
+        present_known.first().copied().unwrap_or(Trit::HighZ)
+    }
+}
+
+fn trit_from_index(value: u8) -> Trit {
+    match value {
+        0 => Trit::Neg,
+        1 => Trit::Zero,
+        2 => Trit::Pos,
+        3 => Trit::Unknown,
+        4 => Trit::HighZ,
+        _ => Trit::Error,
+    }
+}
+
 #[test]
 fn trit_serializes_as_stable_symbols_and_round_trips() {
     let values = [
@@ -59,6 +89,16 @@ fn resolves_known_unknown_high_z_and_conflict() {
     assert_eq!(resolve_drivers(&[Trit::Neg, Trit::Pos]), Trit::Error);
     assert_eq!(resolve_drivers(&[Trit::Zero, Trit::Unknown]), Trit::Unknown);
     assert_eq!(resolve_drivers(&[Trit::Error, Trit::HighZ]), Trit::Error);
+}
+
+#[test]
+fn known_conflict_takes_precedence_over_an_unknown_middle_driver() {
+    let mut drivers = [Trit::Neg, Trit::Unknown, Trit::Zero];
+
+    assert_eq!(resolve_drivers(&drivers), Trit::Error);
+
+    drivers.rotate_left(1);
+    assert_eq!(resolve_drivers(&drivers), Trit::Error);
 }
 
 #[test]
@@ -135,21 +175,22 @@ fn resolves_the_complete_two_driver_matrix() {
 
 proptest! {
     #[test]
-    fn resolution_is_permutation_invariant(
-        mut values in prop::collection::vec(0u8..6, 0..=12)
+    fn resolution_matches_the_oracle_and_is_permutation_invariant(
+        values in prop::collection::vec(0u8..6, 0..=12)
     ) {
-        let map = |value| match value {
-            0 => Trit::Neg,
-            1 => Trit::Zero,
-            2 => Trit::Pos,
-            3 => Trit::Unknown,
-            4 => Trit::HighZ,
-            _ => Trit::Error,
-        };
-        let original: Vec<_> = values.iter().copied().map(map).collect();
-        values.reverse();
-        let reversed: Vec<_> = values.iter().copied().map(map).collect();
+        let original: Vec<_> = values.into_iter().map(trit_from_index).collect();
+        let expected = oracle_resolve_drivers(&original);
 
+        prop_assert_eq!(resolve_drivers(&original), expected);
+
+        let mut reversed = original.clone();
+        reversed.reverse();
         prop_assert_eq!(resolve_drivers(&original), resolve_drivers(&reversed));
+
+        if !original.is_empty() {
+            let mut rotated = original.clone();
+            rotated.rotate_left(1);
+            prop_assert_eq!(resolve_drivers(&rotated), expected);
+        }
     }
 }
