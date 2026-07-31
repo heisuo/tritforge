@@ -40,6 +40,7 @@ import "./styles.css";
 import { CircuitNode, SIGNAL_COLORS } from "./CircuitNode";
 import { COMPONENT_HELP } from "./component-help";
 import { ExampleLibrary } from "./ExampleLibrary";
+import { LogicWireEdge } from "./LogicWireEdge";
 import {
   createDefaultDocument,
   cycleKnownTrit,
@@ -66,8 +67,10 @@ import {
   type SimulationSnapshot,
   type WasmRuntime,
 } from "./wasm-client";
+import { assignWireLanes } from "./wire-routing";
 
 const nodeTypes = { component: CircuitNode };
+const edgeTypes = { logic: LogicWireEdge };
 const DISPLAY_NAMES: Record<string, string> = {
   "source.trit_input": "Trit Input",
   "source.constant": "Constant",
@@ -216,12 +219,32 @@ function Workbench() {
     [catalogByType, nodes, snapshot],
   );
 
+  const wireLanes = useMemo(() => {
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    return assignWireLanes(
+      edges.map((edge) => ({
+        id: edge.id,
+        source: edge.source,
+        sourceHandle: edge.sourceHandle,
+        target: edge.target,
+        targetHandle: edge.targetHandle,
+        sourcePosition: nodeById.get(edge.source)?.position ?? { x: 0, y: 0 },
+        targetPosition: nodeById.get(edge.target)?.position ?? { x: 0, y: 0 },
+      })),
+    );
+  }, [edges, nodes]);
+
   const renderedEdges = useMemo(
     () =>
       edges.map((edge) => {
         const signal = edgeSignal(edge, snapshot);
         return {
           ...edge,
+          type: "logic" as const,
+          data: {
+            ...edge.data,
+            ...wireLanes[edge.id],
+          },
           label: signal,
           labelStyle: {
             fill: SIGNAL_COLORS[signal],
@@ -237,7 +260,7 @@ function Workbench() {
           },
         };
       }),
-    [edges, snapshot],
+    [edges, snapshot, wireLanes],
   );
 
   const onNodesChange = useCallback(
@@ -595,6 +618,7 @@ function Workbench() {
               nodes={renderedNodes}
               edges={renderedEdges}
               nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
               onInit={(instance) => {
                 instanceRef.current = instance;
               }}
@@ -621,7 +645,7 @@ function Workbench() {
               maxZoom={2}
               snapToGrid
               snapGrid={[16, 16]}
-              defaultEdgeOptions={{ type: "smoothstep" }}
+              defaultEdgeOptions={{ type: "logic" }}
               proOptions={{ hideAttribution: true }}
             >
               <Background

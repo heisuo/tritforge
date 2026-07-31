@@ -1,4 +1,5 @@
 import type { Edge, Node } from "@xyflow/react";
+import type { WireLaneAssignment } from "./wire-routing";
 
 export type KnownTrit = "T" | "0" | "1";
 export type TritSymbol = KnownTrit | "X" | "Z" | "E";
@@ -32,7 +33,10 @@ export interface ComponentNodeData extends Record<string, unknown> {
 }
 
 export type EditorNode = Node<ComponentNodeData, "component">;
-export type EditorEdge = Edge;
+export interface LogicWireData
+  extends Record<string, unknown>,
+    WireLaneAssignment {}
+export type EditorEdge = Edge<LogicWireData, "logic">;
 
 export interface EditorDocument {
   nodes: EditorNode[];
