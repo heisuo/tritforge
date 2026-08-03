@@ -4,6 +4,48 @@ import type { WireLaneAssignment } from "./wire-routing";
 export type KnownTrit = "T" | "0" | "1";
 export type TritSymbol = KnownTrit | "X" | "Z" | "E";
 
+export interface QualifiedComponentRef {
+  circuitId: string;
+  instancePath: string[];
+  componentId: string;
+}
+
+export interface QualifiedConnectionRef {
+  circuitId: string;
+  instancePath: string[];
+  connectionId: string;
+}
+
+export interface QualifiedPortRef {
+  circuitId: string;
+  instancePath: string[];
+  componentId: string;
+  portId: string;
+}
+
+export type ProjectDiagnosticLocation =
+  | { kind: "component"; ref: QualifiedComponentRef }
+  | { kind: "connection"; ref: QualifiedConnectionRef }
+  | { kind: "port"; ref: QualifiedPortRef };
+
+export interface ProjectSimulationDiagnostic {
+  code: string;
+  severity: "info" | "warning" | "error";
+  message: string;
+  primaryLocation: ProjectDiagnosticLocation | null;
+  componentRefs: QualifiedComponentRef[];
+  connectionRefs: QualifiedConnectionRef[];
+  portRefs: QualifiedPortRef[];
+}
+
+export interface ProjectSimulationSnapshot {
+  componentOutputs: Record<string, Record<string, TritSymbol>>;
+  inputNets: Record<string, Record<string, TritSymbol>>;
+  diagnostics: ProjectSimulationDiagnostic[];
+  stable: boolean;
+  compileCount: number;
+}
+
 export interface CatalogPort {
   id: string;
   direction: "input" | "output";

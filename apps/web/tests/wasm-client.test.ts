@@ -2,10 +2,12 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 
 const wasmMock = vi.hoisted(() => {
   class WasmSimulator {}
+  class WasmProjectSimulator {}
 
   return {
     initialize: vi.fn(async () => undefined),
     WasmSimulator,
+    WasmProjectSimulator,
   };
 });
 
@@ -14,6 +16,7 @@ vi.mock("../src/wasm/pkg/sim_wasm", () => ({
   apiVersion: () => 1,
   componentCatalog: () => [],
   WasmSimulator: wasmMock.WasmSimulator,
+  WasmProjectSimulator: wasmMock.WasmProjectSimulator,
 }));
 
 describe("WASM runtime initialization", () => {
@@ -34,5 +37,8 @@ describe("WASM runtime initialization", () => {
     expect(second.apiVersion).toBe(1);
     expect(first.simulator).toBeInstanceOf(wasmMock.WasmSimulator);
     expect(second.simulator).toBeInstanceOf(wasmMock.WasmSimulator);
+    expect(first.projectSimulator).toBeInstanceOf(
+      wasmMock.WasmProjectSimulator,
+    );
   });
 });

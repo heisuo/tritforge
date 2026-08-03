@@ -2,6 +2,8 @@ import type {
   CatalogComponent,
   CircuitDefinition,
   KnownTrit,
+  ProjectSimulationDiagnostic,
+  ProjectSimulationSnapshot,
   TritSymbol,
 } from "./editor-model";
 
@@ -30,10 +32,26 @@ interface WasmSimulatorBinding {
   snapshot(): SimulationSnapshot;
 }
 
+export interface WasmProjectSimulatorBinding {
+  loadProject(
+    project: unknown,
+    activeCircuitId: string,
+  ): ProjectSimulationSnapshot;
+  updateProject(project: unknown): ProjectSimulationSnapshot;
+  switchActive(activeCircuitId: string): ProjectSimulationSnapshot;
+  setSource(
+    circuitId: string,
+    componentId: string,
+    value: KnownTrit,
+  ): ProjectSimulationSnapshot;
+  snapshot(): ProjectSimulationSnapshot;
+}
+
 export interface WasmRuntime {
   apiVersion: number;
   catalog: CatalogComponent[];
   simulator: WasmSimulatorBinding;
+  projectSimulator: WasmProjectSimulatorBinding;
 }
 
 type WasmModule = typeof import("./wasm/pkg/sim_wasm");
@@ -57,6 +75,43 @@ export async function createWasmRuntime(): Promise<WasmRuntime> {
     apiVersion: wasm.apiVersion(),
     catalog: wasm.componentCatalog() as CatalogComponent[],
     simulator: new wasm.WasmSimulator() as WasmSimulatorBinding,
+    projectSimulator:
+      new wasm.WasmProjectSimulator() as WasmProjectSimulatorBinding,
+  };
+}
+
+export interface WasmProjectError {
+  name: "SimulationError";
+  code: string;
+  message: string;
+  diagnostics: ProjectSimulationDiagnostic[];
+}
+
+export function wasmProjectError(error: unknown): WasmProjectError {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string"
+  ) {
+    return {
+      name: "SimulationError",
+      code: error.code,
+      message:
+        "message" in error && typeof error.message === "string"
+          ? error.message
+          : "Project simulation failed",
+      diagnostics:
+        "diagnostics" in error && Array.isArray(error.diagnostics)
+          ? (error.diagnostics as ProjectSimulationDiagnostic[])
+          : [],
+    };
+  }
+  return {
+    name: "SimulationError",
+    code: "WASM_PROJECT_ERROR",
+    message: wasmErrorMessage(error),
+    diagnostics: [],
   };
 }
 
