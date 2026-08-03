@@ -56,7 +56,7 @@ engine. Do not add module semantics to `gates.rs` or TypeScript.
 - Create: `crates/sim-core/tests/project_contract.rs`
 - Modify: `crates/sim-core/src/lib.rs`
 
-- [ ] **Step 1: Write failing serde and identity tests**
+- [x] **Step 1: Write failing serde and identity tests**
 
 ```rust
 use sim_core::project::{
@@ -97,7 +97,7 @@ fn qualified_refs_include_their_own_scope() {
 }
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 cargo test -p sim-core --test project_contract
@@ -105,7 +105,7 @@ cargo test -p sim-core --test project_contract
 
 Expected: compile failure because `sim_core::project` does not exist.
 
-- [ ] **Step 3: Add public contracts**
+- [x] **Step 3: Add public contracts**
 
 Define serde/ordering contracts for:
 
@@ -144,7 +144,7 @@ without consuming unrelated keys. Add `QualifiedComponentRef`,
 `QualifiedConnectionRef`, `QualifiedPortRef`, and `ProjectDiagnostic` with
 stable ordering. Each qualified ref owns its circuit ID and instance path.
 
-- [ ] **Step 4: Run GREEN**
+- [x] **Step 4: Run GREEN**
 
 ```bash
 cargo test -p sim-core --test project_contract
@@ -152,7 +152,7 @@ cargo fmt --all -- --check
 cargo clippy -p sim-core --all-targets -- -D warnings
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/sim-core
