@@ -15,6 +15,11 @@ pub fn component_catalog() -> Result<JsValue, JsValue> {
     to_js_value(&sim_core::catalog::component_catalog())
 }
 
+pub fn component_catalog_json() -> String {
+    serde_json::to_string(&sim_core::catalog::component_catalog())
+        .expect("component catalog must be serializable")
+}
+
 #[wasm_bindgen]
 pub struct WasmSimulator {
     simulator: Option<Simulator>,
@@ -40,12 +45,11 @@ impl WasmSimulator {
                 .into_js()
             })?;
         let simulator = Simulator::load(definition).map_err(|diagnostics| {
-            BoundaryError::new(
-                "CIRCUIT_VALIDATION_FAILED",
-                "circuit validation failed".to_owned(),
-                diagnostics,
-            )
-            .into_js()
+            let code = diagnostics
+                .first()
+                .map(|diagnostic| diagnostic.code.clone())
+                .unwrap_or_else(|| "CIRCUIT_VALIDATION_FAILED".to_owned());
+            BoundaryError::new(&code, "circuit validation failed".to_owned(), diagnostics).into_js()
         })?;
         let snapshot = simulator.snapshot();
         self.simulator = Some(simulator);

@@ -467,6 +467,7 @@ dependencies = [
  "js-sys",
  "serde",
  "serde-wasm-bindgen",
+ "serde_json",
  "sim-core",
  "wasm-bindgen",
  "wasm-bindgen-test",
