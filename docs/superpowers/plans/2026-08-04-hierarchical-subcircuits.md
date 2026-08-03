@@ -426,7 +426,7 @@ git commit -m "feat: simulate and project hierarchical circuits"
 - Modify: `crates/sim-wasm/src/lib.rs`
 - Create: `crates/sim-wasm/tests/project_web_api.rs`
 
-- [ ] **Step 1: Write failing Node/WASM tests**
+- [x] **Step 1: Write failing Node/WASM tests**
 
 ```rust
 let mut simulator = WasmProjectSimulator::new();
@@ -441,13 +441,13 @@ assert_eq!(third.compile_count(), 2);
 Also verify structured `MODULE_DEPENDENCY_CYCLE` and
 `HIERARCHY_EXPANSION_LIMIT` failures.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 wasm-pack test --node crates/sim-wasm --test project_web_api
 ```
 
-- [ ] **Step 3: Add `WasmProjectSimulator`**
+- [x] **Step 3: Add `WasmProjectSimulator`**
 
 Expose exact JS names:
 
@@ -463,7 +463,7 @@ Reuse `BoundaryError`; use the first deterministic ProjectDiagnostic code as
 the boundary code and serialize all diagnostics. Keep existing
 `WasmSimulator` unchanged.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 ```bash
 wasm-pack test --node crates/sim-wasm
