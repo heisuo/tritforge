@@ -482,7 +482,7 @@ git commit -m "feat: expose hierarchical simulation to wasm"
 - Create: `apps/web/tests/project-document.test.ts`
 - Modify: `apps/web/src/editor/circuit-document.ts`
 
-- [ ] **Step 1: Write failing migration tests**
+- [x] **Step 1: Write failing migration tests**
 
 ```typescript
 const migrated = parseProjectDocument(serializeCircuitDocument(v1));
@@ -499,13 +499,13 @@ Include v1 ordinary properties `{ moduleId: 123, portId: false }` and assert
 they survive. Reject malformed special properties, two main circuits, invalid
 zoom, duplicate circuit IDs, and unknown top-level keys.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 npm --prefix apps/web test -- project-document.test.ts
 ```
 
-- [ ] **Step 3: Implement v2 parsing and Schema**
+- [x] **Step 3: Implement v2 parsing and Schema**
 
 ```typescript
 export interface ProjectDocumentV2 {
@@ -528,7 +528,7 @@ Dispatch by version. Export pure `migrateV1ToV2`. Schema uses `if/then` so
 only `project.*` types constrain module keys. Ordinary extension keys remain
 opaque. Deep-clone nested properties.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 ```bash
 npm --prefix apps/web test -- project-document.test.ts
