@@ -234,7 +234,7 @@ git commit -m "feat: validate module interfaces and dependencies"
 - Modify: `crates/sim-core/src/simulator.rs`
 - Modify: `crates/sim-core/tests/simulator_propagation.rs`
 
-- [ ] **Step 1: Add failing atomicity tests**
+- [x] **Step 1: Add failing atomicity tests**
 
 ```rust
 let before = simulator.snapshot();
@@ -249,13 +249,13 @@ assert_eq!(simulator.snapshot(), before);
 
 Add a successful batch that changes Trit Input and Constant together.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 cargo test -p sim-core --test simulator_propagation set_sources
 ```
 
-- [ ] **Step 3: Implement atomic `set_sources`**
+- [x] **Step 3: Implement atomic `set_sources`**
 
 ```rust
 pub fn set_sources<I, S>(
@@ -272,7 +272,7 @@ known trits, and unique IDs. Apply all values, then settle once with sorted
 IDs. Keep `set_input` as a compatibility wrapper retaining its current error
 code.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 ```bash
 cargo test -p sim-core --test simulator_propagation
