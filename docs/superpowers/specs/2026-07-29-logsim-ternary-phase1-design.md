@@ -404,6 +404,10 @@ interface EditorConnection {
 }
 ```
 
+`properties` 允许扩展键并在导入导出时保留。第一阶段保留两个可选键：输入源
+的 `value` 必须是 `T/0/1`，编辑器显示名称 `label` 必须是非空字符串；其他键
+由编辑器透明保存，不参与 TypeScript 端逻辑求值。
+
 第一阶段连接是有方向的输出到输入边，不支持在线中间创建分叉点。一个输出
 通过多条连接实现扇出。
 
@@ -710,3 +714,27 @@ MAX(a,b) = NEG(MIN(NEG(a),NEG(b)))
 
 每一步先写失败测试，再实现最小行为。不能先在 TypeScript 中临时实现门逻辑
 再迁移 Rust，因为这会形成两套语义并污染验收结果。
+
+## 19. 验收记录（2026-08-04）
+
+第一阶段按本文冻结的接口与验收标准完成验证：
+
+- `cargo fmt --all -- --check`：通过。
+- `cargo clippy --workspace --all-targets -- -D warnings`：通过。
+- `cargo test --workspace`：61 项原生 Rust 测试通过。
+- `wasm-pack test --node crates/sim-wasm`：3 项真实 Node/WASM 边界测试通过。
+- `npm --prefix apps/web test`：7 个测试文件、49 项 Web 测试通过。
+- `npm --prefix apps/web run build`：TypeScript 严格检查、WASM release 构建和
+  Vite 生产构建通过。
+- `npm --prefix apps/web run test:e2e`：5 项 Chromium 验收通过，覆盖
+  `1440x900`、`900x700` 和 `390x844` 三种视口。
+- 性能样例严格包含 200 个元件和 400 条无反馈连接；最终测得输入更新到稳定
+  快照为 `1.6 ms`，低于本地目标 `50 ms` 和 CI 阈值 `150 ms`。
+- 桌面与窄屏均通过横向溢出检查；窄屏元件库和检查器抽屉均完成交互验证。
+- 桌面截图已人工检查并保存为 `docs/images/phase1-editor.png`。
+- v1 工程文件复核确认使用本文 10.1 节冻结的扁平连接字段，支持可扩展
+  `properties`，并拒绝重复 ID、缺失元件引用及非正数 viewport zoom。
+
+残余提示：`wasm-pack build` 会建议在 crate 清单中补充 `description`、
+`repository`，并在 crate 目录放置额外 LICENSE 文件。仓库根目录已包含完整
+GPLv3 `LICENSE`；这些是包发布元数据提示，不影响本阶段构建、测试或本地运行。

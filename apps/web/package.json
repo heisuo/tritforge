@@ -7,7 +7,7 @@
     "build:wasm": "wasm-pack build ../../crates/sim-wasm --target web --out-dir ../../apps/web/src/wasm/pkg",
     "dev": "npm run build:wasm && vite",
     "build": "npm run build:wasm && tsc -b && vite build",
-    "test": "vitest run",
+    "test": "npm run build:wasm && vitest run",
     "test:e2e": "playwright test"
   },
   "dependencies": {
@@ -21,6 +21,7 @@
     "@playwright/test": "1.62.0",
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "16.3.0",
+    "@types/node": "26.1.2",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.4",

@@ -138,7 +138,7 @@ Expected: every command exits `0`; Node remains major version 22.
 - Create: `apps/web/tests/app.test.tsx`
 - Modify: `.gitignore`
 
-- [ ] **Step 1: Add a failing Rust workspace smoke test**
+- [x] **Step 1: Add a failing Rust workspace smoke test**
 
 Create `crates/sim-core/src/lib.rs`:
 
@@ -152,7 +152,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run the Rust test and verify RED**
+- [x] **Step 2: Run the Rust test and verify RED**
 
 Run:
 
@@ -163,7 +163,7 @@ cargo test --workspace
 Expected: compilation fails because the workspace manifests and `api_version`
 do not exist.
 
-- [ ] **Step 3: Add minimal Rust manifests and API**
+- [x] **Step 3: Add minimal Rust manifests and API**
 
 Root `Cargo.toml`:
 
@@ -243,7 +243,7 @@ pub fn api_version() -> u32 {
 }
 ```
 
-- [ ] **Step 4: Add the Web smoke test and scaffold**
+- [x] **Step 4: Add the Web smoke test and scaffold**
 
 `apps/web/package.json`:
 
@@ -383,7 +383,7 @@ describe("App", () => {
 });
 ```
 
-- [ ] **Step 5: Ignore generated files and install dependencies**
+- [x] **Step 5: Ignore generated files and install dependencies**
 
 Append to `.gitignore`:
 
@@ -406,7 +406,7 @@ cd ../..
 
 Expected: `apps/web/package-lock.json` is created.
 
-- [ ] **Step 6: Verify GREEN**
+- [x] **Step 6: Verify GREEN**
 
 Run:
 
@@ -420,7 +420,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 Expected: Rust smoke test and Web smoke test pass; production build succeeds.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add .gitignore Cargo.toml rust-toolchain.toml crates apps/web
@@ -436,7 +436,7 @@ git commit -m "chore: bootstrap ternary simulator workspace"
 - Create: `crates/sim-core/tests/trit_contract.rs`
 - Modify: `crates/sim-core/src/lib.rs`
 
-- [ ] **Step 1: Write failing Trit contract tests**
+- [x] **Step 1: Write failing Trit contract tests**
 
 `crates/sim-core/tests/trit_contract.rs`:
 
@@ -511,7 +511,7 @@ proptest! {
 }
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 cargo test -p sim-core --test trit_contract
@@ -519,7 +519,7 @@ cargo test -p sim-core --test trit_contract
 
 Expected: fails because `sim_core::trit` does not exist.
 
-- [ ] **Step 3: Implement `Trit` and aggregate resolution**
+- [x] **Step 3: Implement `Trit` and aggregate resolution**
 
 `crates/sim-core/src/trit.rs`:
 
@@ -604,7 +604,7 @@ Export it from `crates/sim-core/src/lib.rs`:
 pub mod trit;
 ```
 
-- [ ] **Step 4: Run GREEN and quality checks**
+- [x] **Step 4: Run GREEN and quality checks**
 
 ```bash
 cargo test -p sim-core --test trit_contract
@@ -614,7 +614,7 @@ cargo clippy -p sim-core --all-targets -- -D warnings
 
 Expected: all Trit tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/sim-core/src crates/sim-core/tests/trit_contract.rs
@@ -632,7 +632,7 @@ git commit -m "feat: define native ternary signal states"
 - Create: `crates/sim-core/tests/gate_truth_tables.rs`
 - Modify: `crates/sim-core/src/lib.rs`
 
-- [ ] **Step 1: Write failing catalog and gate tests**
+- [x] **Step 1: Write failing catalog and gate tests**
 
 `crates/sim-core/tests/catalog_contract.rs`:
 
@@ -755,7 +755,7 @@ fn ordinary_gates_propagate_meta_states_conservatively() {
 }
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 cargo test -p sim-core --test catalog_contract --test gate_truth_tables
@@ -763,7 +763,7 @@ cargo test -p sim-core --test catalog_contract --test gate_truth_tables
 
 Expected: modules and types are missing.
 
-- [ ] **Step 3: Implement stable descriptors**
+- [x] **Step 3: Implement stable descriptors**
 
 `catalog.rs` must define:
 
@@ -829,7 +829,7 @@ gate.mux3:         a,b,c,s -> y
 The three non-gate types have an empty `truth_table`. Gate descriptors contain
 all known-input rows in lexical input order matching the listed ports.
 
-- [ ] **Step 4: Implement gate evaluation**
+- [x] **Step 4: Implement gate evaluation**
 
 `gates.rs` must expose:
 
@@ -870,7 +870,7 @@ Constant:  properties.value.unwrap_or(0) -> out
 Probe:     no outputs
 ```
 
-- [ ] **Step 5: Add algebraic property tests**
+- [x] **Step 5: Add algebraic property tests**
 
 Add to `gate_truth_tables.rs` using `proptest!` over integers `0..3`, mapped to
 known trits. Exercise only the public evaluator:
@@ -928,7 +928,7 @@ proptest! {
 }
 ```
 
-- [ ] **Step 6: Verify GREEN**
+- [x] **Step 6: Verify GREEN**
 
 ```bash
 cargo test -p sim-core --test catalog_contract --test gate_truth_tables
@@ -937,7 +937,7 @@ cargo clippy -p sim-core --all-targets -- -D warnings
 
 Expected: catalog, truth-table, meta-state, and property tests pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add crates/sim-core/src crates/sim-core/tests
@@ -954,7 +954,7 @@ git commit -m "feat: add ternary component catalog and gates"
 - Create: `crates/sim-core/tests/circuit_validation.rs`
 - Modify: `crates/sim-core/src/lib.rs`
 
-- [ ] **Step 1: Write failing validation tests**
+- [x] **Step 1: Write failing validation tests**
 
 ```rust
 use sim_core::catalog::ComponentProperties;
@@ -1068,7 +1068,7 @@ fn ignores_duplicate_connections_with_a_warning() {
 }
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 cargo test -p sim-core --test circuit_validation
@@ -1076,7 +1076,7 @@ cargo test -p sim-core --test circuit_validation
 
 Expected: circuit types are missing.
 
-- [ ] **Step 3: Implement serializable circuit types**
+- [x] **Step 3: Implement serializable circuit types**
 
 `circuit.rs`:
 
@@ -1110,7 +1110,7 @@ and downstream components grouped by source output. Expose read-only
 `connection_count()` and `drivers_for(component_id, port_id)` methods used by
 the tests.
 
-- [ ] **Step 4: Implement validation and diagnostic codes**
+- [x] **Step 4: Implement validation and diagnostic codes**
 
 `diagnostic.rs`:
 
@@ -1145,7 +1145,7 @@ DUPLICATE_CONNECTION
 
 Only `DUPLICATE_CONNECTION` is a warning; all other listed codes reject load.
 
-- [ ] **Step 5: Verify GREEN**
+- [x] **Step 5: Verify GREEN**
 
 ```bash
 cargo test -p sim-core --test circuit_validation
@@ -1154,7 +1154,7 @@ cargo test -p sim-core
 
 Expected: validation tests and all prior tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/sim-core/src crates/sim-core/tests/circuit_validation.rs
@@ -1170,7 +1170,7 @@ git commit -m "feat: validate ternary circuit graphs"
 - Create: `crates/sim-core/tests/simulator_propagation.rs`
 - Modify: `crates/sim-core/src/lib.rs`
 
-- [ ] **Step 1: Write failing propagation tests**
+- [x] **Step 1: Write failing propagation tests**
 
 Build circuits for:
 
@@ -1196,7 +1196,7 @@ For multiple different known drivers, assert `E` plus
 `stable == false`, `NON_CONVERGENT_COMBINATIONAL_LOOP`, and processed events
 do not exceed `max(1024, 64 * (components + connections))`.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 cargo test -p sim-core --test simulator_propagation
@@ -1204,7 +1204,7 @@ cargo test -p sim-core --test simulator_propagation
 
 Expected: `Simulator` and `SimulationSnapshot` are missing.
 
-- [ ] **Step 3: Implement simulator state and snapshots**
+- [x] **Step 3: Implement simulator state and snapshots**
 
 Define:
 
@@ -1241,7 +1241,7 @@ impl Simulator {
 }
 ```
 
-- [ ] **Step 4: Implement ordered propagation**
+- [x] **Step 4: Implement ordered propagation**
 
 Use a `VecDeque<String>` and a `BTreeSet<String>` to prevent duplicate pending
 component IDs within one delta. Always enqueue in component ID order.
@@ -1261,7 +1261,7 @@ unconnected input port whose resolved value is `Z`.
 When the event limit is exceeded, mark still-pending outputs and target inputs
 `E`, emit `NON_CONVERGENT_COMBINATIONAL_LOOP`, clear the queue, and return.
 
-- [ ] **Step 5: Verify GREEN and determinism**
+- [x] **Step 5: Verify GREEN and determinism**
 
 ```bash
 cargo test -p sim-core --test simulator_propagation
@@ -1272,7 +1272,7 @@ cargo clippy -p sim-core --all-targets -- -D warnings
 Add a test that loads the same circuit with reversed component and connection
 array order and asserts identical snapshots.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/sim-core
@@ -1288,7 +1288,7 @@ git commit -m "feat: simulate ternary circuits to a stable state"
 - Create: `crates/sim-wasm/tests/web_api.rs`
 - Modify: `crates/sim-wasm/Cargo.toml`
 
-- [ ] **Step 1: Write failing WASM boundary tests**
+- [x] **Step 1: Write failing WASM boundary tests**
 
 Configure `wasm-bindgen-test` for the Node runner and test:
 
@@ -1305,15 +1305,15 @@ input to `"T"`, and checking the serialized snapshot contains probe value
 `"1"`. Pass an invalid source `properties.value` and assert a structured
 `INVALID_PROPERTY` error rather than a panic string.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
-wasm-pack test crates/sim-wasm --node
+wasm-pack test --node crates/sim-wasm
 ```
 
 Expected: batch API functions are missing.
 
-- [ ] **Step 3: Implement `WasmSimulator`**
+- [x] **Step 3: Implement `WasmSimulator`**
 
 Expose:
 
@@ -1354,10 +1354,10 @@ drift from the simulator catalog.
 Convert every Rust error to a serialized object with `code`, `message`, and
 affected IDs. Do not expose panic strings as user-facing results.
 
-- [ ] **Step 4: Build and test**
+- [x] **Step 4: Build and test**
 
 ```bash
-wasm-pack test crates/sim-wasm --node
+wasm-pack test --node crates/sim-wasm
 npm --prefix apps/web run build:wasm
 test -f apps/web/src/wasm/pkg/sim_wasm.js
 test -f apps/web/src/wasm/pkg/sim_wasm_bg.wasm
@@ -1365,7 +1365,7 @@ test -f apps/web/src/wasm/pkg/sim_wasm_bg.wasm
 
 Expected: WASM tests pass and generated package exists.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/sim-wasm
@@ -1386,7 +1386,7 @@ git commit -m "feat: expose ternary simulator through wasm"
 - Modify: `apps/web/src/main.tsx`
 - Modify: `apps/web/tests/app.test.tsx`
 
-- [ ] **Step 1: Replace the smoke test with failing shell tests**
+- [x] **Step 1: Replace the smoke test with failing shell tests**
 
 Assert the page has:
 
@@ -1398,7 +1398,7 @@ expect(screen.getByRole("complementary", { name: "属性与状态" })).toBeVisib
 expect(screen.getByRole("status")).toHaveTextContent("WASM");
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 npm --prefix apps/web test -- app.test.tsx
@@ -1406,7 +1406,7 @@ npm --prefix apps/web test -- app.test.tsx
 
 Expected: regions are missing.
 
-- [ ] **Step 3: Implement the shell**
+- [x] **Step 3: Implement the shell**
 
 Build a full-height workbench:
 
@@ -1426,13 +1426,13 @@ Use a neutral light workspace with red, gray, green, yellow, blue, and magenta
 reserved for signal states. Cards may only represent repeated palette items;
 page regions stay unframed.
 
-- [ ] **Step 4: Add responsive behavior**
+- [x] **Step 4: Add responsive behavior**
 
 At widths below `760px`, make the canvas fill the body and expose palette and
 inspector as side drawers toggled by toolbar icons. Ensure toolbar actions do
 not wrap over the canvas.
 
-- [ ] **Step 5: Verify GREEN**
+- [x] **Step 5: Verify GREEN**
 
 ```bash
 npm --prefix apps/web test -- app.test.tsx
@@ -1441,7 +1441,7 @@ npm --prefix apps/web run build
 
 Expected: shell tests and TypeScript build pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web
@@ -1459,7 +1459,7 @@ git commit -m "feat: add ternary editor workbench"
 - Create: `apps/web/tests/editor-store.test.ts`
 - Create: `schemas/circuit-v1.schema.json`
 
-- [ ] **Step 1: Write failing store tests**
+- [x] **Step 1: Write failing store tests**
 
 Test exact behavior:
 
@@ -1478,7 +1478,7 @@ expect(store.getState().document.components).toEqual([]);
 Also assert delete removes connections attached to a deleted component and that
 loading an example deep-clones the template.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 npm --prefix apps/web test -- editor-store.test.ts
@@ -1486,7 +1486,7 @@ npm --prefix apps/web test -- editor-store.test.ts
 
 Expected: store and types are missing.
 
-- [ ] **Step 3: Implement the shared boundary types and versioned document**
+- [x] **Step 3: Implement the shared boundary types and versioned document**
 
 Define shared WASM boundary types in `apps/web/src/simulation/types.ts`:
 
@@ -1524,7 +1524,7 @@ Implement a JSON Schema that requires `format`, `version`, component IDs,
 type IDs, positions, and directed connection endpoints. It must disallow
 unknown top-level properties.
 
-- [ ] **Step 4: Implement history without storing simulation snapshots**
+- [x] **Step 4: Implement history without storing simulation snapshots**
 
 The Zustand store state must contain:
 
@@ -1541,14 +1541,14 @@ Every edit pushes the previous document to `past` and clears `future`.
 Selection, viewport movement, and simulation values do not create history
 entries.
 
-- [ ] **Step 5: Verify GREEN**
+- [x] **Step 5: Verify GREEN**
 
 ```bash
 npm --prefix apps/web test -- editor-store.test.ts
 npm --prefix apps/web run build
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/editor apps/web/src/simulation/types.ts apps/web/src/app apps/web/tests schemas
@@ -1568,7 +1568,7 @@ git commit -m "feat: add versioned ternary circuit documents"
 - Modify: `apps/web/src/App.tsx`
 - Create: `apps/web/tests/connections.test.ts`
 
-- [ ] **Step 1: Write failing connection tests**
+- [x] **Step 1: Write failing connection tests**
 
 Assert:
 
@@ -1579,13 +1579,13 @@ expect(isValidConnection(outputToOutput, catalog)).toBe(false);
 expect(isExactDuplicate(existingEdge, candidate)).toBe(true);
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 npm --prefix apps/web test -- connections.test.ts
 ```
 
-- [ ] **Step 3: Build catalog-driven nodes**
+- [x] **Step 3: Build catalog-driven nodes**
 
 `simulation/catalog.ts` dynamically initializes the generated WASM module,
 calls `componentCatalog()`, deserializes the result into
@@ -1601,7 +1601,7 @@ calls `componentCatalog()`, deserializes the result into
 
 Do not hard-code port lists in React components.
 
-- [ ] **Step 4: Add drag/drop and connection creation**
+- [x] **Step 4: Add drag/drop and connection creation**
 
 Palette items use HTML drag data containing only `typeId`. On drop, create a
 stable UUID, translate screen coordinates with React Flow, and add the
@@ -1611,7 +1611,7 @@ Reject invalid directions and exact duplicates before editing the document.
 Allow multiple distinct outputs to connect to one input and one output to
 fan out.
 
-- [ ] **Step 5: Verify with component tests and build**
+- [x] **Step 5: Verify with component tests and build**
 
 ```bash
 npm --prefix apps/web test
@@ -1621,7 +1621,7 @@ npm --prefix apps/web run build
 Expected: all 12 catalog types render, valid connections are accepted, invalid
 connections are rejected.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web
@@ -1640,7 +1640,7 @@ git commit -m "feat: place and wire ternary components"
 - Modify: `apps/web/src/App.tsx`
 - Modify: `apps/web/src/components/ComponentNode.tsx`
 
-- [ ] **Step 1: Write failing engine adapter tests**
+- [x] **Step 1: Write failing engine adapter tests**
 
 Mock only the generated WASM object and assert:
 
@@ -1655,13 +1655,13 @@ expect(engine.snapshot()!.inputNets["probe-1"].in).toBe("1");
 Add a source scan assertion that `apps/web/src` contains no functions named
 `evaluateGate`, `ternaryMin`, `ternaryMax`, or truth-table maps.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 npm --prefix apps/web test -- engine.test.ts
 ```
 
-- [ ] **Step 3: Implement typed WASM loading**
+- [x] **Step 3: Implement typed WASM loading**
 
 `engine.ts` dynamically imports `../wasm/pkg/sim_wasm.js`, calls its default
 initializer once, and wraps `WasmSimulator`.
@@ -1682,7 +1682,7 @@ export interface SimulationEngine {
 Convert editor components and connections to Rust `CircuitDefinition`, dropping
 positions and viewport.
 
-- [ ] **Step 4: Drive visual values from snapshots**
+- [x] **Step 4: Drive visual values from snapshots**
 
 Compute a topology signature from component IDs, type IDs, and connections.
 On component add/remove/type change or connection change, debounce one
@@ -1701,14 +1701,14 @@ T -> 0 -> 1 -> T
 Call `setInput` without rebuilding topology. Update nodes, edges, Probe values,
 status bar, and diagnostics from the returned snapshot.
 
-- [ ] **Step 5: Verify GREEN**
+- [x] **Step 5: Verify GREEN**
 
 ```bash
 npm --prefix apps/web test -- engine.test.ts
 npm --prefix apps/web run build
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web
@@ -1726,7 +1726,7 @@ git commit -m "feat: run ternary circuits through wasm"
 - Create: `apps/web/src/components/signal-style.ts`
 - Create: `apps/web/tests/inspector.test.tsx`
 
-- [ ] **Step 1: Write failing display tests**
+- [x] **Step 1: Write failing display tests**
 
 For every symbol assert both text and a non-color distinction:
 
@@ -1739,13 +1739,13 @@ Render a selected `NEG` and assert the truth table has rows `T -> 1`, `0 -> 0`,
 `1 -> T`. Render a conflict diagnostic and assert the affected connection is
 identified by ID.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 npm --prefix apps/web test -- inspector.test.tsx
 ```
 
-- [ ] **Step 3: Implement signal tokens**
+- [x] **Step 3: Implement signal tokens**
 
 Define one map:
 
@@ -1762,7 +1762,7 @@ const SIGNAL_STYLE = {
 
 Nodes, edges, Probe, and inspector badges must all consume this map.
 
-- [ ] **Step 4: Implement catalog-driven truth tables and diagnostics**
+- [x] **Step 4: Implement catalog-driven truth tables and diagnostics**
 
 Truth tables come from `ComponentDescriptor.truth_table`. Inspector displays:
 
@@ -1773,14 +1773,14 @@ Truth tables come from `ComponentDescriptor.truth_table`. Inspector displays:
 
 Clicking a diagnostic selects and fits the affected elements.
 
-- [ ] **Step 5: Verify GREEN**
+- [x] **Step 5: Verify GREEN**
 
 ```bash
 npm --prefix apps/web test -- inspector.test.tsx
 npm --prefix apps/web run build
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web
@@ -1798,7 +1798,7 @@ git commit -m "feat: explain ternary values and simulation errors"
 - Modify: `apps/web/src/app/editor-store.ts`
 - Modify: `apps/web/src/App.tsx`
 
-- [ ] **Step 1: Write failing example tests**
+- [x] **Step 1: Write failing example tests**
 
 For each example, load it through the real WASM engine and assert:
 
@@ -1811,13 +1811,13 @@ MUX3: selector T/0/1 selects constants T/0/1
 
 Also assert each template remains byte-identical after editing its loaded copy.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 npm --prefix apps/web test -- examples.test.ts
 ```
 
-- [ ] **Step 3: Implement four immutable templates**
+- [x] **Step 3: Implement four immutable templates**
 
 Create:
 
@@ -1833,21 +1833,21 @@ export const EXAMPLES = {
 Every component and connection has a stable human-readable ID. Place nodes so
 the signal path reads left-to-right without overlap at a 1280 × 800 viewport.
 
-- [ ] **Step 4: Add example menu, clear, and reset**
+- [x] **Step 4: Add example menu, clear, and reset**
 
 - `Examples` opens a menu of four choices.
 - Selecting an example loads a deep-cloned document and fits the view.
 - `Clear` asks for confirmation only when the current circuit is non-empty.
 - `Reset` restores component source values and reruns the current topology.
 
-- [ ] **Step 5: Verify GREEN**
+- [x] **Step 5: Verify GREEN**
 
 ```bash
 npm --prefix apps/web test -- examples.test.ts
 npm --prefix apps/web run build
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web
@@ -1867,7 +1867,7 @@ git commit -m "feat: add ternary demonstration circuits"
 - Create: `docs/images/phase1-editor.png`
 - Modify: `docs/superpowers/specs/2026-07-29-logsim-ternary-phase1-design.md`
 
-- [ ] **Step 1: Write failing Playwright acceptance**
+- [x] **Step 1: Write failing Playwright acceptance**
 
 The test must:
 
@@ -1890,12 +1890,12 @@ npm --prefix apps/web run test:e2e
 
 Expected RED: Playwright configuration or selectors are not complete.
 
-- [ ] **Step 2: Add deterministic test IDs only where semantic roles are insufficient**
+- [x] **Step 2: Add deterministic test IDs only where semantic roles are insufficient**
 
 Use `data-testid` for React Flow handles, canvas elements, and generated edges.
 Keep toolbar, palette, inspector, menu, and status queries role-based.
 
-- [ ] **Step 3: Add the performance benchmark**
+- [x] **Step 3: Add the performance benchmark**
 
 In a browser test, generate 200 alternating BUF/NEG components and 400
 connections without a feedback loop. Record only the `setInput` to stable
@@ -1913,7 +1913,7 @@ Record `50 ms` as the local target. Use `150 ms` as the CI failure threshold
 to account for shared-runner variance. Always print the measured value and both
 thresholds; do not remove the benchmark when it fails.
 
-- [ ] **Step 4: Add CI**
+- [x] **Step 4: Add CI**
 
 CI runs:
 
@@ -1921,7 +1921,7 @@ CI runs:
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-wasm-pack test crates/sim-wasm --node
+wasm-pack test --node crates/sim-wasm
 npm ci --prefix apps/web
 npm --prefix apps/web test
 npm --prefix apps/web run build
@@ -1932,7 +1932,7 @@ npm --prefix apps/web run test:e2e
 Cache Cargo registry/target and npm cache, but never cache generated WASM as a
 source artifact.
 
-- [ ] **Step 5: Add README and license**
+- [x] **Step 5: Add README and license**
 
 `README.md` must contain:
 
@@ -1951,19 +1951,19 @@ After both viewports pass visual inspection, capture the desktop editor with
 Playwright to `docs/images/phase1-editor.png`; verify the image with
 `functions.view_image` before linking it from the README.
 
-- [ ] **Step 6: Mark verified acceptance items in the design**
+- [x] **Step 6: Mark verified acceptance items in the design**
 
 Append a dated verification record to the phase-one design containing actual
 test counts, browser sizes, benchmark result, and any residual warning. Do not
 change the original requirements to match implementation.
 
-- [ ] **Step 7: Run the complete final verification**
+- [x] **Step 7: Run the complete final verification**
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-wasm-pack test crates/sim-wasm --node
+wasm-pack test --node crates/sim-wasm
 npm ci --prefix apps/web
 npm --prefix apps/web test
 npm --prefix apps/web run build
@@ -1978,14 +1978,14 @@ Expected:
 - `git status --short` lists only the intended Task 13 files;
 - only documented third-party warnings remain.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add .github LICENSE README.md apps/web docs
 git commit -m "test: verify phase one ternary editor"
 ```
 
-- [ ] **Step 9: Confirm the committed worktree**
+- [x] **Step 9: Confirm the committed worktree**
 
 ```bash
 git status --short
@@ -2012,14 +2012,14 @@ Expected: no output.
 
 ## 4. Completion Checklist
 
-- [ ] Rust is the only source of trit and gate semantics.
-- [ ] All 12 phase-one component types are available.
-- [ ] `T/0/1/X/Z/E` serialization and rendering are stable.
-- [ ] Multi-driver resolution is permutation-invariant.
-- [ ] Invalid circuits return structured diagnostics.
-- [ ] Combinational loops terminate with `E`, never freeze the browser.
-- [ ] WASM uses batch definitions and snapshots.
-- [ ] The editor supports placement, movement, connection, deletion, undo, and redo.
-- [ ] The four examples pass through the real Rust/WASM engine.
-- [ ] Desktop and mobile browser acceptance passes.
-- [ ] Full verification commands are recorded in the design document.
+- [x] Rust is the only source of trit and gate semantics.
+- [x] All 12 phase-one component types are available.
+- [x] `T/0/1/X/Z/E` serialization and rendering are stable.
+- [x] Multi-driver resolution is permutation-invariant.
+- [x] Invalid circuits return structured diagnostics.
+- [x] Combinational loops terminate with `E`, never freeze the browser.
+- [x] WASM uses batch definitions and snapshots.
+- [x] The editor supports placement, movement, connection, deletion, undo, and redo.
+- [x] The four examples pass through the real Rust/WASM engine.
+- [x] Desktop and mobile browser acceptance passes.
+- [x] Full verification commands are recorded in the design document.
