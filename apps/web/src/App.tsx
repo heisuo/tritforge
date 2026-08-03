@@ -9,6 +9,7 @@ import {
   type Connection,
   type EdgeChange,
   type NodeChange,
+  type OnNodeDrag,
   type OnSelectionChangeParams,
   type ReactFlowInstance,
 } from "@xyflow/react";
@@ -16,15 +17,22 @@ import {
   Activity,
   Box,
   CircleDot,
+  Download,
   Gauge,
   Library,
   Maximize2,
+  Menu,
   MousePointer2,
+  PanelLeft,
+  PanelRight,
   Plus,
   Radio,
+  Redo2,
   RotateCcw,
   Trash2,
   Triangle,
+  Undo2,
+  Upload,
   Workflow,
 } from "lucide-react";
 import {
@@ -35,16 +43,25 @@ import {
   useState,
   type DragEvent,
 } from "react";
+import { useStore } from "zustand";
 import "@xyflow/react/dist/style.css";
 import "./styles.css";
+import { createEditorStore } from "./app/editor-store";
 import { CircuitNode, SIGNAL_COLORS } from "./CircuitNode";
 import { COMPONENT_HELP } from "./component-help";
 import { ExampleLibrary } from "./ExampleLibrary";
 import { LogicWireEdge } from "./LogicWireEdge";
 import {
+  fromEditorDocument,
+  parseCircuitDocument,
+  serializeCircuitDocument,
+  toEditorDocument,
+} from "./editor/circuit-document";
+import {
   createDefaultDocument,
   cycleKnownTrit,
   makeComponentId,
+  makeConnectionId,
   renameNodeLabel,
   toCircuitDefinition,
   validateConnection,
@@ -133,6 +150,10 @@ function edgeSignal(
 
 function Workbench() {
   const initial = useMemo(createDefaultDocument, []);
+  const editorStore = useMemo(
+    () => createEditorStore(fromEditorDocument(initial)),
+    [initial],
+  );
   const [nodes, setNodes] = useState<EditorNode[]>(initial.nodes);
   const [edges, setEdges] = useState<EditorEdge[]>(initial.edges);
   const [catalog, setCatalog] = useState<CatalogComponent[]>([]);
@@ -145,18 +166,48 @@ function Workbench() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
   const [exampleLibraryOpen, setExampleLibraryOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [activeExampleId, setActiveExampleId] = useState<ExampleId>("neg");
   const [reloadRevision, setReloadRevision] = useState(0);
   const runtimeRef = useRef<WasmRuntime | null>(null);
   const flowRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const instanceRef = useRef<ReactFlowInstance<EditorNode, EditorEdge> | null>(
     null,
   );
   const inputClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const edgeCounter = useRef(1);
+  const canUndo = useStore(editorStore, (state) => state.past.length > 0);
+  const canRedo = useStore(editorStore, (state) => state.future.length > 0);
 
   const document = useMemo(() => ({ nodes, edges }), [nodes, edges]);
   const circuitKey = useMemo(() => topologyKey(document), [document]);
+
+  const applyEditorDocument = useCallback(
+    (next: EditorDocument, recordHistory = true) => {
+      const viewport = instanceRef.current?.getViewport();
+      editorStore
+        .getState()
+        .setDocument(fromEditorDocument(next, viewport), recordHistory);
+      setNodes(next.nodes);
+      setEdges(next.edges);
+    },
+    [editorStore],
+  );
+
+  const restoreStoreDocument = useCallback(() => {
+    const next = toEditorDocument(editorStore.getState().document);
+    setNodes(next.nodes);
+    setEdges(next.edges);
+    setSelectedNodeId(null);
+    setSelectedEdgeIds([]);
+    setReloadRevision((value) => value + 1);
+    const viewport = editorStore.getState().document.viewport;
+    if (viewport) {
+      requestAnimationFrame(() => instanceRef.current?.setViewport(viewport));
+    }
+  }, [editorStore]);
 
   useEffect(() => {
     let active = true;
@@ -270,9 +321,17 @@ function Workbench() {
     [],
   );
 
-  const onEdgesChange = useCallback((changes: EdgeChange<EditorEdge>[]) => {
-    setEdges((current) => applyEdgeChanges(changes, current));
-  }, []);
+  const onEdgesChange = useCallback(
+    (changes: EdgeChange<EditorEdge>[]) => {
+      const nextEdges = applyEdgeChanges(changes, edges);
+      if (changes.some((change) => change.type === "remove")) {
+        applyEditorDocument({ nodes, edges: nextEdges });
+      } else {
+        setEdges(nextEdges);
+      }
+    },
+    [applyEditorDocument, edges, nodes],
+  );
 
   const isValidConnection = useCallback(
     (connection: Connection | EditorEdge) =>
@@ -294,12 +353,12 @@ function Workbench() {
       }
       const edge: EditorEdge = {
         ...connection,
-        id: `wire-${edgeCounter.current++}`,
+        id: makeConnectionId(edges),
       };
-      setEdges((current) => addEdge(edge, current));
+      applyEditorDocument({ nodes, edges: addEdge(edge, edges) });
       setStatusMessage("已添加连线，正在重新求值");
     },
-    [catalog, document],
+    [applyEditorDocument, catalog, document, edges, nodes],
   );
 
   const addComponent = useCallback(
@@ -322,8 +381,9 @@ function Workbench() {
       const id = makeComponentId(typeId, nodes);
       const sourceValue =
         descriptor.category === "source" ? ("0" as KnownTrit) : undefined;
-      setNodes((current) => [
-        ...current,
+      applyEditorDocument({
+        nodes: [
+          ...nodes,
         {
           id,
           type: "component",
@@ -333,12 +393,14 @@ function Workbench() {
             label: DISPLAY_NAMES[typeId] ?? descriptor.display_name,
             ...(sourceValue ? { sourceValue } : {}),
           },
-        },
-      ]);
+          },
+        ],
+        edges,
+      });
       setSelectedNodeId(id);
       setStatusMessage(`已添加 ${DISPLAY_NAMES[typeId] ?? descriptor.display_name}`);
     },
-    [catalogByType, nodes],
+    [applyEditorDocument, catalogByType, edges, nodes],
   );
 
   const cycleInputNode = useCallback(
@@ -355,17 +417,15 @@ function Workbench() {
             ? { ...item, data: { ...item.data, sourceValue: next } }
             : item,
         );
-        const nextSnapshot = runtime.simulator.loadCircuit(
-          toCircuitDefinition({ nodes: nextNodes, edges }),
-        );
-        setNodes(nextNodes);
+        const nextSnapshot = runtime.simulator.setInput(node.id, next);
+        applyEditorDocument({ nodes: nextNodes, edges });
         setSnapshot(nextSnapshot);
         setStatusMessage(`输入 ${node.id}：${current} → ${next}`);
       } catch (error) {
         setStatusMessage(`输入更新失败：${wasmErrorMessage(error)}`);
       }
     },
-    [edges, nodes],
+    [applyEditorDocument, edges, nodes],
   );
 
   const onNodeClick = useCallback(
@@ -405,11 +465,11 @@ function Workbench() {
         setStatusMessage("模块名称不能为空");
         return;
       }
-      setNodes(renamed);
+      applyEditorDocument({ nodes: renamed, edges });
       setSelectedNodeId(node.id);
       setStatusMessage(`已重命名：${nextLabel.trim()}`);
     },
-    [nodes],
+    [applyEditorDocument, edges, nodes],
   );
 
   const deleteSelected = useCallback(() => {
@@ -423,22 +483,23 @@ function Workbench() {
     if (selectedNodeId) {
       nodeIds.add(selectedNodeId);
     }
-    setNodes((current) => current.filter((node) => !nodeIds.has(node.id)));
-    setEdges((current) =>
-      current.filter(
+    applyEditorDocument({
+      nodes: nodes.filter((node) => !nodeIds.has(node.id)),
+      edges: edges.filter(
         (edge) =>
           !edgeIds.has(edge.id) &&
           !nodeIds.has(edge.source) &&
           !nodeIds.has(edge.target),
       ),
-    );
+    });
     setSelectedNodeId(null);
     setSelectedEdgeIds([]);
     setStatusMessage("已删除所选元件或连线");
-  }, [edges, nodes, selectedEdgeIds, selectedNodeId]);
+  }, [applyEditorDocument, edges, nodes, selectedEdgeIds, selectedNodeId]);
 
   const loadExample = useCallback((exampleId: ExampleId) => {
     const next = cloneExampleDocument(exampleId);
+    editorStore.getState().load(fromEditorDocument(next));
     setNodes(next.nodes);
     setEdges(next.edges);
     setSelectedNodeId(null);
@@ -451,27 +512,127 @@ function Workbench() {
     requestAnimationFrame(() =>
       instanceRef.current?.fitView({ padding: 0.28, duration: 250 }),
     );
-  }, []);
+  }, [editorStore]);
 
   const resetDefault = useCallback(() => {
     loadExample("neg");
   }, [loadExample]);
 
   const clearDocument = useCallback(() => {
+    editorStore.getState().clear();
     setNodes([]);
     setEdges([]);
     setSelectedNodeId(null);
     setSelectedEdgeIds([]);
     setReloadRevision((value) => value + 1);
     setStatusMessage("画布已清空");
-  }, []);
+  }, [editorStore]);
+
+  const undo = useCallback(() => {
+    editorStore.getState().undo();
+    restoreStoreDocument();
+    setStatusMessage("已撤销上一步编辑");
+  }, [editorStore, restoreStoreDocument]);
+
+  const redo = useCallback(() => {
+    editorStore.getState().redo();
+    restoreStoreDocument();
+    setStatusMessage("已重做编辑");
+  }, [editorStore, restoreStoreDocument]);
+
+  const exportDocument = useCallback(() => {
+    const saved = fromEditorDocument(
+      document,
+      instanceRef.current?.getViewport(),
+    );
+    editorStore.getState().setDocument(saved, false);
+    const blob = new Blob([serializeCircuitDocument(saved)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = window.document.createElement("a");
+    anchor.href = url;
+    anchor.download = "logsim-ternary-circuit.json";
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setStatusMessage("工程已导出为 JSON");
+  }, [document, editorStore]);
+
+  const importDocument = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (!file) {
+        return;
+      }
+      try {
+        const imported = parseCircuitDocument(await file.text());
+        editorStore.getState().load(imported);
+        restoreStoreDocument();
+        setExampleLibraryOpen(false);
+        setStatusMessage(`已导入工程：${file.name}`);
+      } catch (error) {
+        setStatusMessage(`工程导入失败：${wasmErrorMessage(error)}`);
+      }
+    },
+    [editorStore, restoreStoreDocument],
+  );
+
+  const onNodeDragStop = useCallback<OnNodeDrag<EditorNode>>(
+    (_event, node) => {
+      applyEditorDocument({
+        nodes: nodes.map((item) =>
+          item.id === node.id
+            ? { ...item, position: { ...node.position } }
+            : item,
+        ),
+        edges,
+      });
+    },
+    [applyEditorDocument, edges, nodes],
+  );
+
+  useEffect(() => {
+    const handleHistoryKeys = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.matches("input, textarea, [contenteditable='true']")) {
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        if (event.shiftKey) {
+          if (canRedo) redo();
+        } else if (canUndo) {
+          undo();
+        }
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") {
+        event.preventDefault();
+        if (canRedo) redo();
+      }
+      if (event.key === "Delete" || event.key === "Backspace") {
+        if (selectedNodeId || selectedEdgeIds.length > 0) {
+          event.preventDefault();
+          deleteSelected();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleHistoryKeys);
+    return () => window.removeEventListener("keydown", handleHistoryKeys);
+  }, [canRedo, canUndo, deleteSelected, redo, selectedEdgeIds.length, selectedNodeId, undo]);
 
   const onSelectionChange = useCallback(
     ({ nodes: selectedNodes, edges: selectedEdges }: OnSelectionChangeParams) => {
       setSelectedNodeId(selectedNodes.at(-1)?.id ?? null);
       setSelectedEdgeIds(selectedEdges.map((edge) => edge.id));
+      editorStore
+        .getState()
+        .setSelection(
+          selectedNodes.map((node) => node.id),
+          selectedEdges.map((edge) => edge.id),
+        );
     },
-    [],
+    [editorStore],
   );
 
   const onDrop = useCallback(
@@ -506,9 +667,67 @@ function Workbench() {
         <div className="brand">
           <Workflow aria-hidden="true" />
           <strong>LOGSIM TERNARY</strong>
-          <span>QUICK DEMO</span>
+          <span>PHASE 1</span>
         </div>
-        <div className="toolbar" role="toolbar" aria-label="画布工具">
+        <div
+          className={`toolbar ${mobileMenuOpen ? "is-open" : ""}`}
+          role="toolbar"
+          aria-label="画布工具"
+        >
+          <button
+            className="mobile-only icon-button"
+            type="button"
+            title="打开工具菜单"
+            aria-label="打开工具菜单"
+            onClick={() => setMobileMenuOpen((open) => !open)}
+          >
+            <Menu aria-hidden="true" />
+          </button>
+          <button
+            className="mobile-only icon-button"
+            type="button"
+            title="元件库"
+            aria-label="切换元件库"
+            onClick={() => {
+              setPaletteOpen((open) => !open);
+              setInspectorOpen(false);
+            }}
+          >
+            <PanelLeft aria-hidden="true" />
+          </button>
+          <button
+            className="mobile-only icon-button"
+            type="button"
+            title="检查器"
+            aria-label="切换检查器"
+            onClick={() => {
+              setInspectorOpen((open) => !open);
+              setPaletteOpen(false);
+            }}
+          >
+            <PanelRight aria-hidden="true" />
+          </button>
+          <div className="toolbar-menu">
+          <button
+            className="icon-button"
+            type="button"
+            title="撤销"
+            aria-label="撤销"
+            disabled={!canUndo}
+            onClick={undo}
+          >
+            <Undo2 aria-hidden="true" />
+          </button>
+          <button
+            className="icon-button"
+            type="button"
+            title="重做"
+            aria-label="重做"
+            disabled={!canRedo}
+            onClick={redo}
+          >
+            <Redo2 aria-hidden="true" />
+          </button>
           <button type="button" onClick={() => setExampleLibraryOpen(true)}>
             <Library aria-hidden="true" />
             示例库
@@ -530,6 +749,24 @@ function Workbench() {
             <Maximize2 aria-hidden="true" />
             适应画布
           </button>
+          <button
+            className="icon-button"
+            type="button"
+            title="导入工程"
+            aria-label="导入工程"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Upload aria-hidden="true" />
+          </button>
+          <button
+            className="icon-button"
+            type="button"
+            title="导出工程"
+            aria-label="导出工程"
+            onClick={exportDocument}
+          >
+            <Download aria-hidden="true" />
+          </button>
           <span className="toolbar-divider" />
           <button
             className="icon-button"
@@ -541,6 +778,7 @@ function Workbench() {
           >
             <Trash2 aria-hidden="true" />
           </button>
+          </div>
         </div>
         <div className={`wasm-badge state-${wasmState}`}>
           <span />
@@ -548,8 +786,31 @@ function Workbench() {
         </div>
       </header>
 
+      <input
+        ref={fileInputRef}
+        className="visually-hidden"
+        type="file"
+        accept="application/json,.json"
+        aria-label="选择三进制工程文件"
+        onChange={importDocument}
+      />
+
       <div className="workbench">
-        <aside className="palette" aria-label="元件库">
+        {(paletteOpen || inspectorOpen) && (
+          <button
+            className="drawer-backdrop mobile-only"
+            type="button"
+            aria-label="关闭侧栏"
+            onClick={() => {
+              setPaletteOpen(false);
+              setInspectorOpen(false);
+            }}
+          />
+        )}
+        <aside
+          className={`palette ${paletteOpen ? "is-open" : ""}`}
+          aria-label="元件库"
+        >
           <div className="panel-title">
             <Plus aria-hidden="true" />
             <div>
@@ -628,17 +889,9 @@ function Workbench() {
               isValidConnection={isValidConnection}
               onNodeClick={onNodeClick}
               onNodeDoubleClick={onNodeDoubleClick}
+              onNodeDragStop={onNodeDragStop}
               onSelectionChange={onSelectionChange}
-              onNodesDelete={(deleted) => {
-                const ids = new Set(deleted.map((node) => node.id));
-                setEdges((current) =>
-                  current.filter(
-                    (edge) => !ids.has(edge.source) && !ids.has(edge.target),
-                  ),
-                );
-                setSelectedNodeId(null);
-              }}
-              deleteKeyCode={["Backspace", "Delete"]}
+              deleteKeyCode={null}
               fitView
               fitViewOptions={{ padding: 0.28 }}
               minZoom={0.25}
@@ -669,7 +922,10 @@ function Workbench() {
           )}
         </section>
 
-        <aside className="inspector" aria-label="检查器">
+        <aside
+          className={`inspector ${inspectorOpen ? "is-open" : ""}`}
+          aria-label="检查器"
+        >
           <div className="panel-title">
             <Activity aria-hidden="true" />
             <div>

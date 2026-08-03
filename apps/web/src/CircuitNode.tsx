@@ -45,6 +45,7 @@ function ComponentIcon({ typeId }: { typeId: string }) {
 }
 
 export function CircuitNode({
+  id,
   data,
   selected,
 }: NodeProps<EditorNode>) {
@@ -86,6 +87,7 @@ export function CircuitNode({
           >
             <Handle
               id={port.id}
+              data-testid={`handle-${id}-input-${port.id}`}
               type="target"
               position={Position.Left}
               style={{ backgroundColor: SIGNAL_COLORS[signal] }}
@@ -110,6 +112,7 @@ export function CircuitNode({
             <span>{port.id}</span>
             <Handle
               id={port.id}
+              data-testid={`handle-${id}-output-${port.id}`}
               type="source"
               position={Position.Right}
               style={{ backgroundColor: SIGNAL_COLORS[signal] }}

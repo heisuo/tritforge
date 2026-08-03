@@ -26,6 +26,7 @@ export interface CatalogComponent {
 export interface ComponentNodeData extends Record<string, unknown> {
   typeId: string;
   label: string;
+  properties?: Record<string, unknown>;
   sourceValue?: KnownTrit;
   ports?: CatalogPort[];
   inputSignals?: Record<string, TritSymbol>;
@@ -238,4 +239,13 @@ export function makeComponentId(
     suffix += 1;
   }
   return `${stem}-${suffix}`;
+}
+
+export function makeConnectionId(edges: EditorEdge[]): string {
+  const used = new Set(edges.map((edge) => edge.id));
+  let suffix = 1;
+  while (used.has(`wire-${suffix}`)) {
+    suffix += 1;
+  }
+  return `wire-${suffix}`;
 }

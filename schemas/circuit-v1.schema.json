@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://logsim-ternary.local/schemas/circuit-v1.schema.json",
+  "title": "Logsim Ternary Circuit Document v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "components", "connections"],
+  "properties": {
+    "format": { "const": "logsim-ternary" },
+    "version": { "const": 1 },
+    "components": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/component" }
+    },
+    "connections": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/connection" }
+    },
+    "viewport": { "$ref": "#/$defs/viewport" }
+  },
+  "$defs": {
+    "point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      }
+    },
+    "viewport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "zoom"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "zoom": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "properties": {
+      "type": "object",
+      "properties": {
+        "value": { "enum": ["T", "0", "1"] },
+        "label": { "type": "string", "minLength": 1 }
+      }
+    },
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "typeId", "position", "properties"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "typeId": { "type": "string", "minLength": 1 },
+        "position": { "$ref": "#/$defs/point" },
+        "properties": { "$ref": "#/$defs/properties" }
+      }
+    },
+    "connection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "sourceComponentId",
+        "sourcePortId",
+        "targetComponentId",
+        "targetPortId"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "sourceComponentId": { "type": "string", "minLength": 1 },
+        "sourcePortId": { "type": "string", "minLength": 1 },
+        "targetComponentId": { "type": "string", "minLength": 1 },
+        "targetPortId": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
