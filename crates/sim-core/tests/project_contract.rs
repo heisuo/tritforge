@@ -149,6 +149,35 @@ fn project_diagnostics_have_stable_ordering_and_qualified_locations() {
 }
 
 #[test]
+fn diagnostic_set_orders_ports_before_unrelated_connection_ids() {
+    let diagnostic = |port_id: &str, connection_id: &str| ProjectDiagnostic {
+        code: "INVALID_PORT".into(),
+        severity: Severity::Error,
+        message: port_id.into(),
+        primary_location: None,
+        component_refs: vec![QualifiedComponentRef::new("main", [] as [&str; 0], "gate")],
+        connection_refs: vec![QualifiedConnectionRef::new(
+            "main",
+            [] as [&str; 0],
+            connection_id,
+        )],
+        port_refs: vec![QualifiedPortRef::new(
+            "main",
+            [] as [&str; 0],
+            "gate",
+            port_id,
+        )],
+    };
+    let mut diagnostics = ProjectDiagnosticSet::new();
+    diagnostics.insert(diagnostic("z", "a-connection"));
+    diagnostics.insert(diagnostic("a", "z-connection"));
+
+    let ordered = diagnostics.into_vec();
+    assert_eq!(ordered[0].port_refs[0].port_id, "a");
+    assert_eq!(ordered[1].port_refs[0].port_id, "z");
+}
+
+#[test]
 fn project_wire_format_uses_camel_case_and_tagged_locations() {
     let component = ProjectComponent::new(
         "instance-1",

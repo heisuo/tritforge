@@ -81,6 +81,10 @@ impl ProjectProperties {
         self.0.get(key)
     }
 
+    pub fn keys(&self) -> impl Iterator<Item = &str> {
+        self.0.keys().map(String::as_str)
+    }
+
     pub fn known_value(&self) -> Option<Trit> {
         self.known_trit("value")
     }
@@ -234,13 +238,15 @@ impl ProjectDiagnostic {
         connection_refs.dedup();
         port_refs.sort();
         port_refs.dedup();
+        let location = diagnostic_location(&component_refs, &connection_refs, &port_refs);
 
         ProjectDiagnosticKey {
+            location,
+            code: self.code.clone(),
+            severity: self.severity,
             component_refs,
             connection_refs,
             port_refs,
-            code: self.code.clone(),
-            severity: self.severity,
         }
     }
 
@@ -256,11 +262,70 @@ impl ProjectDiagnostic {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ProjectDiagnosticKey {
+    location: Option<ProjectDiagnosticLocationKey>,
+    code: String,
+    severity: Severity,
     component_refs: Vec<QualifiedComponentRef>,
     connection_refs: Vec<QualifiedConnectionRef>,
     port_refs: Vec<QualifiedPortRef>,
-    code: String,
-    severity: Severity,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct ProjectDiagnosticLocationKey {
+    circuit_id: String,
+    instance_path: Vec<String>,
+    target: ProjectDiagnosticLocationTarget,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum ProjectDiagnosticLocationTarget {
+    Port {
+        component_id: String,
+        port_id: String,
+    },
+    Component {
+        component_id: String,
+    },
+    Connection {
+        connection_id: String,
+    },
+}
+
+fn diagnostic_location(
+    component_refs: &[QualifiedComponentRef],
+    connection_refs: &[QualifiedConnectionRef],
+    port_refs: &[QualifiedPortRef],
+) -> Option<ProjectDiagnosticLocationKey> {
+    let ports = port_refs
+        .iter()
+        .map(|reference| ProjectDiagnosticLocationKey {
+            circuit_id: reference.circuit_id.clone(),
+            instance_path: reference.instance_path.clone(),
+            target: ProjectDiagnosticLocationTarget::Port {
+                component_id: reference.component_id.clone(),
+                port_id: reference.port_id.clone(),
+            },
+        });
+    let components = component_refs
+        .iter()
+        .map(|reference| ProjectDiagnosticLocationKey {
+            circuit_id: reference.circuit_id.clone(),
+            instance_path: reference.instance_path.clone(),
+            target: ProjectDiagnosticLocationTarget::Component {
+                component_id: reference.component_id.clone(),
+            },
+        });
+    let connections = connection_refs
+        .iter()
+        .map(|reference| ProjectDiagnosticLocationKey {
+            circuit_id: reference.circuit_id.clone(),
+            instance_path: reference.instance_path.clone(),
+            target: ProjectDiagnosticLocationTarget::Connection {
+                connection_id: reference.connection_id.clone(),
+            },
+        });
+
+    ports.chain(components).chain(connections).min()
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

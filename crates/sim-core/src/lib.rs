@@ -3,6 +3,7 @@ pub mod circuit;
 pub mod diagnostic;
 pub mod gates;
 pub mod project;
+pub mod project_validation;
 pub mod simulator;
 pub mod trit;
 
