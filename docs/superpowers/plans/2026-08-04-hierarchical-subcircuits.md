@@ -290,7 +290,7 @@ git commit -m "feat: update simulator sources atomically"
 - Create: `crates/sim-core/tests/hierarchy_compilation.rs`
 - Modify: `crates/sim-core/src/lib.rs`
 
-- [ ] **Step 1: Write failing compiler tests**
+- [x] **Step 1: Write failing compiler tests**
 
 Assert two- and three-level expansion, deterministic IDs, no remaining
 `project.*` types, IDs containing `/`, `~`, and `::`, unconnected `Z` staying
@@ -299,13 +299,13 @@ Assert two- and three-level expansion, deterministic IDs, no remaining
 checked multiplication overflow. Every failure uses
 `HIERARCHY_EXPANSION_LIMIT` before a partial flat graph is returned.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 cargo test -p sim-core --test hierarchy_compilation
 ```
 
-- [ ] **Step 3: Implement two-pass compilation**
+- [x] **Step 3: Implement two-pass compilation**
 
 ```rust
 pub const MAX_HIERARCHY_DEPTH: usize = 32;
@@ -329,7 +329,7 @@ external drivers to internal targets and internal drivers to external targets.
 Never insert BUF. Root module inputs become Trit Input and root outputs become
 Probe. Encode path segments with JSON-Pointer escaping.
 
-- [ ] **Step 4: Run GREEN, mutation check, and commit**
+- [x] **Step 4: Run GREEN, mutation check, and commit**
 
 ```bash
 cargo test -p sim-core --test hierarchy_compilation
