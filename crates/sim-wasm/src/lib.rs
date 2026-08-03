@@ -1,6 +1,8 @@
 use serde::Serialize;
 use sim_core::circuit::CircuitDefinition;
 use sim_core::diagnostic::Diagnostic;
+use sim_core::project::{ProjectDiagnostic, ProjectDocument};
+use sim_core::project_simulator::ProjectSimulator;
 use sim_core::simulator::Simulator;
 use sim_core::trit::Trit;
 use wasm_bindgen::prelude::*;
@@ -37,7 +39,7 @@ impl WasmSimulator {
     pub fn load_circuit(&mut self, definition: JsValue) -> Result<JsValue, JsValue> {
         let definition: CircuitDefinition =
             serde_wasm_bindgen::from_value(definition).map_err(|error| {
-                BoundaryError::new(
+                BoundaryError::<Diagnostic>::new(
                     "INVALID_CIRCUIT",
                     format!("could not deserialize circuit definition: {error}"),
                     Vec::new(),
@@ -59,7 +61,7 @@ impl WasmSimulator {
     #[wasm_bindgen(js_name = setInput)]
     pub fn set_input(&mut self, component_id: &str, value: &str) -> Result<JsValue, JsValue> {
         let value = parse_trit_symbol(value).map_err(|code| {
-            BoundaryError::new(
+            BoundaryError::<Diagnostic>::new(
                 code,
                 format!("'{value}' is not a known ternary input symbol"),
                 Vec::new(),
@@ -95,6 +97,134 @@ impl WasmSimulator {
     }
 }
 
+#[wasm_bindgen]
+pub struct WasmProjectSimulator {
+    simulator: Option<ProjectSimulator>,
+}
+
+#[wasm_bindgen]
+impl WasmProjectSimulator {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        console_error_panic_hook::set_once();
+        Self { simulator: None }
+    }
+
+    #[wasm_bindgen(js_name = loadProject)]
+    pub fn load_project(
+        &mut self,
+        project: JsValue,
+        active_circuit_id: &str,
+    ) -> Result<JsValue, JsValue> {
+        let project = parse_project(project)?;
+        let simulator = ProjectSimulator::load(project, active_circuit_id)
+            .map_err(project_diagnostics_error)?;
+        let snapshot = simulator
+            .snapshot()
+            .expect("loaded project simulator has a snapshot");
+        self.simulator = Some(simulator);
+        to_js_value(&snapshot)
+    }
+
+    #[wasm_bindgen(js_name = updateProject)]
+    pub fn update_project(&mut self, project: JsValue) -> Result<JsValue, JsValue> {
+        let project = parse_project(project)?;
+        let snapshot = self
+            .simulator_mut()?
+            .update_project(project)
+            .map_err(project_diagnostics_error)?;
+        to_js_value(&snapshot)
+    }
+
+    #[wasm_bindgen(js_name = switchActive)]
+    pub fn switch_active(&mut self, active_circuit_id: &str) -> Result<JsValue, JsValue> {
+        let snapshot = self
+            .simulator_mut()?
+            .switch_active(active_circuit_id)
+            .map_err(project_diagnostics_error)?;
+        to_js_value(&snapshot)
+    }
+
+    #[wasm_bindgen(js_name = setSource)]
+    pub fn set_source(
+        &mut self,
+        circuit_id: &str,
+        component_id: &str,
+        value: &str,
+    ) -> Result<JsValue, JsValue> {
+        let value = parse_trit_symbol(value).map_err(|code| {
+            BoundaryError::<ProjectDiagnostic>::new(
+                code,
+                format!("'{value}' is not a known ternary source symbol"),
+                Vec::new(),
+            )
+            .into_js()
+        })?;
+        let snapshot = self
+            .simulator_mut()?
+            .set_source(circuit_id, component_id, value)
+            .map_err(|diagnostic| {
+                BoundaryError::new(
+                    &diagnostic.code.clone(),
+                    diagnostic.message.clone(),
+                    vec![diagnostic],
+                )
+                .into_js()
+            })?;
+        to_js_value(&snapshot)
+    }
+
+    pub fn snapshot(&self) -> Result<JsValue, JsValue> {
+        let snapshot = self
+            .simulator
+            .as_ref()
+            .ok_or_else(|| BoundaryError::<ProjectDiagnostic>::project_not_loaded().into_js())?
+            .snapshot()
+            .ok_or_else(|| {
+                BoundaryError::<ProjectDiagnostic>::new(
+                    "PROJECT_NOT_READY",
+                    "project simulation is unavailable until validation succeeds".into(),
+                    Vec::new(),
+                )
+                .into_js()
+            })?;
+        to_js_value(&snapshot)
+    }
+}
+
+impl Default for WasmProjectSimulator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl WasmProjectSimulator {
+    fn simulator_mut(&mut self) -> Result<&mut ProjectSimulator, JsValue> {
+        self.simulator
+            .as_mut()
+            .ok_or_else(|| BoundaryError::<ProjectDiagnostic>::project_not_loaded().into_js())
+    }
+}
+
+fn parse_project(project: JsValue) -> Result<ProjectDocument, JsValue> {
+    serde_wasm_bindgen::from_value(project).map_err(|error| {
+        BoundaryError::<ProjectDiagnostic>::new(
+            "INVALID_PROJECT",
+            format!("could not deserialize project document: {error}"),
+            Vec::new(),
+        )
+        .into_js()
+    })
+}
+
+fn project_diagnostics_error(diagnostics: Vec<ProjectDiagnostic>) -> JsValue {
+    let code = diagnostics
+        .first()
+        .map(|diagnostic| diagnostic.code.clone())
+        .unwrap_or_else(|| "PROJECT_VALIDATION_FAILED".into());
+    BoundaryError::new(&code, "project operation failed".into(), diagnostics).into_js()
+}
+
 impl Default for WasmSimulator {
     fn default() -> Self {
         Self::new()
@@ -119,31 +249,35 @@ fn parse_trit_symbol(symbol: &str) -> Result<Trit, &'static str> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct BoundaryError {
+struct BoundaryError<D> {
     name: &'static str,
     code: String,
     message: String,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<D>,
 }
 
-impl BoundaryError {
-    fn new(code: &str, message: String, diagnostics: Vec<Diagnostic>) -> Self {
+impl<D> BoundaryError<D> {
+    fn new(code: &str, message: String, diagnostics: Vec<D>) -> Self {
         Self {
             name: "SimulationError",
-            code: code.to_owned(),
+            code: code.into(),
             message,
             diagnostics,
         }
     }
+}
 
-    fn not_loaded() -> Self {
+impl BoundaryError<ProjectDiagnostic> {
+    fn project_not_loaded() -> Self {
         Self::new(
             "SIMULATOR_NOT_LOADED",
-            "loadCircuit must be called before simulation".to_owned(),
+            "loadProject must be called before project simulation".into(),
             Vec::new(),
         )
     }
+}
 
+impl<D: Serialize> BoundaryError<D> {
     fn into_js(self) -> JsValue {
         match self.serialize(&serde_wasm_bindgen::Serializer::json_compatible()) {
             Ok(value) => value,
@@ -152,11 +286,21 @@ impl BoundaryError {
     }
 }
 
+impl BoundaryError<Diagnostic> {
+    fn not_loaded() -> Self {
+        Self::new(
+            "SIMULATOR_NOT_LOADED",
+            "loadCircuit must be called before simulation".to_owned(),
+            Vec::new(),
+        )
+    }
+}
+
 fn to_js_value<T: Serialize>(value: &T) -> Result<JsValue, JsValue> {
     value
         .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
         .map_err(|error| {
-            BoundaryError::new(
+            BoundaryError::<Diagnostic>::new(
                 "SERIALIZATION_FAILED",
                 format!("could not serialize simulator value: {error}"),
                 Vec::new(),
