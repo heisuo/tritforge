@@ -548,7 +548,7 @@ git commit -m "feat: add versioned hierarchical project documents"
 - Create: `apps/web/tests/project-store.test.ts`
 - Create: `apps/web/tests/project-catalog.test.ts`
 
-- [ ] **Step 1: Write failing store tests**
+- [x] **Step 1: Write failing store tests**
 
 ```typescript
 store.getState().createModule("Half Adder");
@@ -562,13 +562,13 @@ connected-port deletion protection, label rename preserving port ID, separate
 structure/value revisions, zero-copy source undo, active-path fallback after
 undo, and cycle-causing catalog candidates being excluded.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 npm --prefix apps/web test -- project-store.test.ts project-catalog.test.ts
 ```
 
-- [ ] **Step 3: Implement store and dynamic descriptors**
+- [x] **Step 3: Implement store and dynamic descriptors**
 
 ```typescript
 interface ProjectEditorState {
@@ -585,7 +585,7 @@ Persist viewport per circuit before navigation. Selection and active path are
 session-only. Dynamic descriptors use type `project.module_instance`, category
 `project-module`, `moduleId`, and ordered boundary ports.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 ```bash
 npm --prefix apps/web test -- project-store.test.ts project-catalog.test.ts
