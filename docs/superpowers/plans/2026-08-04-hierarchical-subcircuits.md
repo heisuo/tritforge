@@ -354,7 +354,7 @@ git commit -m "feat: compile bounded module hierarchies"
 - Create: `crates/sim-core/tests/project_simulation.rs`
 - Modify: `crates/sim-core/src/lib.rs`
 
-- [ ] **Step 1: Write failing projected-snapshot tests**
+- [x] **Step 1: Write failing projected-snapshot tests**
 
 Assert logical module ports are returned instead of flat IDs:
 
@@ -372,13 +372,13 @@ separate target-net conflicts with local drivers, a three-boundary causal chain,
 cross-level qualified refs, invalid unreachable module invalidation/repair,
 zero-copy source updates, and shared Constant updates across every instance.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 cargo test -p sim-core --test project_simulation
 ```
 
-- [ ] **Step 3: Implement the active-root simulator**
+- [x] **Step 3: Implement the active-root simulator**
 
 ```rust
 pub struct ProjectSnapshot {
@@ -409,7 +409,7 @@ diagnostic ref through qualified provenance. Any project validation failure
 drops the flat simulator and snapshot. A valid zero-copy source update changes
 only the stored project.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 ```bash
 cargo test -p sim-core --test project_simulation
