@@ -460,6 +460,66 @@ fn set_input_cycles_known_values_and_rejects_invalid_updates_atomically() {
 }
 
 #[test]
+fn set_sources_updates_inputs_and_constants_in_one_batch() {
+    let mut simulator = Simulator::load(definition(
+        vec![
+            valued_component("input", "source.trit_input", Trit::Zero),
+            valued_component("constant", "source.constant", Trit::Zero),
+            component("input-probe", "sink.probe"),
+            component("constant-probe", "sink.probe"),
+        ],
+        vec![
+            connection("input-wire", "input", "out", "input-probe", "in"),
+            connection("constant-wire", "constant", "out", "constant-probe", "in"),
+        ],
+    ))
+    .expect("valid circuit");
+
+    let snapshot = simulator
+        .set_sources([("input", Trit::Pos), ("constant", Trit::Neg)])
+        .expect("both source kinds are mutable");
+
+    assert_eq!(snapshot.input_value("input-probe", "in"), Some(Trit::Pos));
+    assert_eq!(
+        snapshot.input_value("constant-probe", "in"),
+        Some(Trit::Neg)
+    );
+}
+
+#[test]
+fn set_sources_rejects_the_whole_batch_before_mutating_any_source() {
+    let mut simulator = Simulator::load(definition(
+        vec![
+            valued_component("input", "source.trit_input", Trit::Zero),
+            valued_component("constant", "source.constant", Trit::Zero),
+            component("neg", "gate.neg"),
+        ],
+        vec![],
+    ))
+    .expect("valid circuit");
+
+    let invalid_batches = [
+        vec![
+            ("input", Trit::Pos),
+            ("constant", Trit::Neg),
+            ("neg", Trit::Zero),
+        ],
+        vec![("input", Trit::Pos), ("missing", Trit::Neg)],
+        vec![("input", Trit::Pos), ("constant", Trit::Unknown)],
+        vec![("input", Trit::Pos), ("input", Trit::Neg)],
+    ];
+
+    for updates in invalid_batches {
+        let before = simulator.snapshot();
+        let diagnostic = simulator
+            .set_sources(updates)
+            .expect_err("invalid batch must fail atomically");
+        assert_eq!(diagnostic.code, "INVALID_SOURCE_UPDATE");
+        assert_eq!(simulator.snapshot(), before);
+    }
+}
+
+#[test]
 fn reset_restores_the_definition_input_value() {
     let mut simulator = Simulator::load(definition(
         vec![

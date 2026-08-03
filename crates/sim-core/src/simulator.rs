@@ -125,6 +125,61 @@ impl Simulator {
         Ok(self.snapshot())
     }
 
+    #[allow(clippy::result_large_err)]
+    pub fn set_sources<I, S>(&mut self, updates: I) -> Result<SimulationSnapshot, Diagnostic>
+    where
+        I: IntoIterator<Item = (S, Trit)>,
+        S: Into<String>,
+    {
+        let mut staged = BTreeMap::new();
+        for (component_id, value) in updates {
+            let component_id = component_id.into();
+            if !matches!(
+                self.circuit.component_kind(&component_id),
+                Some(ComponentKind::TritInput | ComponentKind::Constant)
+            ) {
+                return Err(Diagnostic::error(
+                    "INVALID_SOURCE_UPDATE",
+                    format!("component '{component_id}' is not a mutable source"),
+                    vec![component_id],
+                    vec![],
+                    vec![],
+                ));
+            }
+            if !value.is_known() {
+                return Err(Diagnostic::error(
+                    "INVALID_SOURCE_UPDATE",
+                    format!("component '{component_id}' requires a known T, 0, or 1 value"),
+                    vec![component_id],
+                    vec![],
+                    vec![],
+                ));
+            }
+            if staged.insert(component_id.clone(), value).is_some() {
+                return Err(Diagnostic::error(
+                    "INVALID_SOURCE_UPDATE",
+                    format!("component '{component_id}' is updated more than once"),
+                    vec![component_id],
+                    vec![],
+                    vec![],
+                ));
+            }
+        }
+
+        if staged.is_empty() {
+            return Ok(self.snapshot());
+        }
+
+        for (component_id, value) in &staged {
+            self.source_properties
+                .get_mut(component_id)
+                .expect("validated source has mutable properties")
+                .value = Some(*value);
+        }
+        self.settle(staged.into_keys());
+        Ok(self.snapshot())
+    }
+
     pub fn reset(&mut self) -> SimulationSnapshot {
         self.source_properties
             .clone_from(&self.original_source_properties);
