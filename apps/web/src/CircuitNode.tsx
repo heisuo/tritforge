@@ -1,5 +1,13 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Box, CircleDot, Gauge, Radio, Triangle, Workflow } from "lucide-react";
+import {
+  Box,
+  Boxes,
+  CircleDot,
+  Gauge,
+  Radio,
+  Triangle,
+  Workflow,
+} from "lucide-react";
 import type {
   CatalogPort,
   EditorNode,
@@ -26,6 +34,15 @@ function signalForPort(
 }
 
 function ComponentIcon({ typeId }: { typeId: string }) {
+  if (typeId === "project.module_instance") {
+    return <Boxes aria-hidden="true" />;
+  }
+  if (typeId === "project.module_input") {
+    return <Radio aria-hidden="true" />;
+  }
+  if (typeId === "project.module_output") {
+    return <Gauge aria-hidden="true" />;
+  }
   if (typeId === "source.trit_input") {
     return <Radio aria-hidden="true" />;
   }
@@ -55,13 +72,15 @@ export function CircuitNode({
   const inputPorts = ports.filter((port) => port.direction === "input");
   const outputPorts = ports.filter((port) => port.direction === "output");
   const primarySignal =
-    data.typeId === "sink.probe"
+    data.typeId === "sink.probe" || data.typeId === "project.module_output"
       ? inputs.in ?? "Z"
       : outputs.out ?? outputs.y ?? outputs.sum ?? data.sourceValue ?? "Z";
 
   return (
     <div
       className={`circuit-node signal-${primarySignal} ${
+        data.typeId.startsWith("project.module_") ? "is-project-node" : ""
+      } ${
         selected ? "is-selected" : ""
       }`}
       style={{ "--signal-color": SIGNAL_COLORS[primarySignal] } as React.CSSProperties}
@@ -92,7 +111,7 @@ export function CircuitNode({
               position={Position.Left}
               style={{ backgroundColor: SIGNAL_COLORS[signal] }}
             />
-            <span>{port.id}</span>
+            <span>{"label" in port ? String(port.label) : port.id}</span>
             <b style={{ color: SIGNAL_COLORS[signal] }}>{signal}</b>
           </div>
         );
@@ -109,7 +128,7 @@ export function CircuitNode({
             }}
           >
             <b style={{ color: SIGNAL_COLORS[signal] }}>{signal}</b>
-            <span>{port.id}</span>
+            <span>{"label" in port ? String(port.label) : port.id}</span>
             <Handle
               id={port.id}
               data-testid={`handle-${id}-output-${port.id}`}

@@ -27,6 +27,14 @@ export interface ProjectEditorState {
   selectionByCircuit: Record<string, ProjectSelection>;
   structureRevision: number;
   valueRevision: number;
+  setCircuit: (
+    circuitId: string,
+    update: Pick<ProjectCircuit, "components" | "connections"> & {
+      viewport?: ProjectCircuit["viewport"];
+    },
+  ) => void;
+  replaceProject: (project: ProjectDocumentV2) => void;
+  openCircuit: (circuitId: string) => void;
   createModule: (name: string) => string;
   renameModule: (circuitId: string, name: string) => void;
   deleteModule: (circuitId: string) => void;
@@ -98,6 +106,38 @@ export function createProjectStore(
       selectionByCircuit: {},
       structureRevision: 0,
       valueRevision: 0,
+      setCircuit: (circuitId, update) => {
+        updateCircuit(circuitId, (circuit) => ({
+          ...circuit,
+          components: update.components.map(cloneComponent),
+          connections: update.connections.map((connection) => ({ ...connection })),
+          ...(update.viewport
+            ? { viewport: { ...update.viewport } }
+            : circuit.viewport
+              ? { viewport: { ...circuit.viewport } }
+              : {}),
+        }));
+      },
+      replaceProject: (project) => {
+        commit(project);
+        set({
+          activePath: initialPath(project),
+          selectionByCircuit: {},
+        });
+      },
+      openCircuit: (circuitId) => {
+        const project = get().project;
+        const circuit = requireCircuit(project, circuitId);
+        set({
+          activePath:
+            circuit.kind === "main"
+              ? [{ circuitId }]
+              : [
+                  { circuitId: project.rootCircuitId },
+                  { circuitId },
+                ],
+        });
+      },
       createModule: (name) => {
         const trimmedName = name.trim();
         if (!trimmedName) {
@@ -133,15 +173,19 @@ export function createProjectStore(
         if (circuit.kind !== "module") {
           throw new Error("The main circuit cannot be deleted");
         }
-        const referenced = project.circuits.some((owner) =>
-          owner.components.some(
-            (component) =>
-              component.typeId === "project.module_instance" &&
-              component.properties.moduleId === circuitId,
-          ),
+        const references = project.circuits.flatMap((owner) =>
+          owner.components
+            .filter(
+              (component) =>
+                component.typeId === "project.module_instance" &&
+                component.properties.moduleId === circuitId,
+            )
+            .map((component) => `${owner.id}/${component.id}`),
         );
-        if (referenced) {
-          throw new Error(`Module '${circuitId}' is referenced by an instance`);
+        if (references.length > 0) {
+          throw new Error(
+            `Module '${circuitId}' is referenced (${references.length} 个引用): ${references.join(", ")}`,
+          );
         }
         const next = {
           ...project,
@@ -194,12 +238,14 @@ export function createProjectStore(
           throw new Error(`Unknown module port component: ${componentId}`);
         }
         const portId = String(boundary.properties.portId ?? "");
-        const connectedInside = circuit.connections.some(
-          (connection) =>
-            connection.sourceComponentId === componentId ||
-            connection.targetComponentId === componentId,
-        );
-        const connectedOutside = project.circuits.some((owner) => {
+        const usageLocations = circuit.connections
+          .filter(
+            (connection) =>
+              connection.sourceComponentId === componentId ||
+              connection.targetComponentId === componentId,
+          )
+          .map((connection) => `${circuit.id}/${connection.id}`);
+        for (const owner of project.circuits) {
           const instanceIds = new Set(
             owner.components
               .filter(
@@ -209,16 +255,22 @@ export function createProjectStore(
               )
               .map((component) => component.id),
           );
-          return owner.connections.some(
-            (connection) =>
-              (instanceIds.has(connection.sourceComponentId) &&
-                connection.sourcePortId === portId) ||
-              (instanceIds.has(connection.targetComponentId) &&
-                connection.targetPortId === portId),
+          usageLocations.push(
+            ...owner.connections
+              .filter(
+                (connection) =>
+                  (instanceIds.has(connection.sourceComponentId) &&
+                    connection.sourcePortId === portId) ||
+                  (instanceIds.has(connection.targetComponentId) &&
+                    connection.targetPortId === portId),
+              )
+              .map((connection) => `${owner.id}/${connection.id}`),
           );
-        });
-        if (connectedInside || connectedOutside) {
-          throw new Error(`Module port '${portId}' is connected`);
+        }
+        if (usageLocations.length > 0) {
+          throw new Error(
+            `Module port '${portId}' is connected at ${usageLocations.join(", ")}`,
+          );
         }
         updateCircuit(circuitId, (current) => ({
           ...current,

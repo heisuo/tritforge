@@ -90,7 +90,9 @@ export function fromEditorDocument(
         label: node.data.label,
         ...(node.data.sourceValue === undefined
           ? {}
-          : { value: node.data.sourceValue }),
+          : node.data.typeId === "project.module_input"
+            ? { previewValue: node.data.sourceValue }
+            : { value: node.data.sourceValue }),
       },
     })),
     connections: document.edges.map((edge) => ({
@@ -106,7 +108,8 @@ export function fromEditorDocument(
 
 export function toEditorDocument(document: CircuitDocument): EditorDocument {
   const nodes: EditorNode[] = document.components.map((component) => {
-    const { label, value, ...extraProperties } = component.properties;
+    const { label, value, previewValue, ...extraProperties } =
+      component.properties;
     return {
       id: component.id,
       type: "component",
@@ -120,7 +123,9 @@ export function toEditorDocument(document: CircuitDocument): EditorDocument {
         ...(Object.keys(extraProperties).length > 0
           ? { properties: extraProperties }
           : {}),
-        ...(value === undefined ? {} : { sourceValue: value as KnownTrit }),
+        ...(value === undefined && previewValue === undefined
+          ? {}
+          : { sourceValue: (value ?? previewValue) as KnownTrit }),
       },
     };
   });
