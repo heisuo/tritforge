@@ -168,7 +168,7 @@ git commit -m "feat: define hierarchical project contracts"
 - Create: `crates/sim-core/tests/project_validation.rs`
 - Modify: `crates/sim-core/src/lib.rs`
 
-- [ ] **Step 1: Write failing validation tests**
+- [x] **Step 1: Write failing validation tests**
 
 Create fixture helpers and assert these exact codes:
 
@@ -188,13 +188,13 @@ Also assert `project.module_input` owns only `out`,
 `project.module_output` owns only `in`, and module instances use dynamic
 `portId` handles.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 cargo test -p sim-core --test project_validation
 ```
 
-- [ ] **Step 3: Implement local validation and DAG analysis**
+- [x] **Step 3: Implement local validation and DAG analysis**
 
 ```rust
 pub struct ModulePort {
@@ -217,7 +217,7 @@ Validate every circuit before reachability analysis. DFS colors are
 `White/Gray/Black`; a Gray edge emits the full deterministic cycle path.
 `moduleId` must equal a `kind: module` circuit ID and may never reference main.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 ```bash
 cargo test -p sim-core --test project_validation
