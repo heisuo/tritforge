@@ -604,7 +604,7 @@ git commit -m "feat: manage project modules and navigation"
 - Modify: `apps/web/src/wasm-client.ts`
 - Modify: `apps/web/src/editor-model.ts`
 
-- [ ] **Step 1: Write failing adapter tests**
+- [x] **Step 1: Write failing adapter tests**
 
 Mock `WasmProjectSimulator` and assert one load, value-only `setSource`,
 reachable structural `updateProject`, and navigation `switchActive` calls.
@@ -618,13 +618,13 @@ expect(mock.setSource).toHaveBeenCalledWith("half-adder", "constant-1", "T");
 expect(mock.loadProject).toHaveBeenCalledTimes(1);
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 npm --prefix apps/web test -- hierarchy-runtime.test.ts
 ```
 
-- [ ] **Step 3: Implement adapter and projected types**
+- [x] **Step 3: Implement adapter and projected types**
 
 Add TS types matching `ProjectSnapshot` and every qualified diagnostic ref.
 Convert only naming conventions and WASM errors. Before serialization, build a
@@ -636,7 +636,7 @@ single-circuit runtime until App migration is green. Structure revision changes
 call `updateProject`; value revision changes call `setSource`; active ID changes
 call `switchActive`.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 ```bash
 npm --prefix apps/web test -- hierarchy-runtime.test.ts wasm-client.test.ts
