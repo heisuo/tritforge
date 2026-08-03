@@ -105,6 +105,19 @@ impl ProjectProperties {
         self.known_trit("previewValue")
     }
 
+    pub fn set_known_value(&mut self, key: &str, value: Trit) {
+        let symbol = match value {
+            Trit::Neg => "T",
+            Trit::Zero => "0",
+            Trit::Pos => "1",
+            Trit::Unknown | Trit::HighZ | Trit::Error => {
+                debug_assert!(false, "project source values must be known");
+                return;
+            }
+        };
+        self.0.insert(key.to_owned(), Value::String(symbol.into()));
+    }
+
     fn string(&self, key: &str) -> Option<&str> {
         self.get(key).and_then(Value::as_str)
     }

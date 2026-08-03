@@ -4,6 +4,7 @@ pub mod diagnostic;
 pub mod gates;
 pub mod hierarchy;
 pub mod project;
+pub mod project_simulator;
 pub mod project_validation;
 pub mod simulator;
 pub mod trit;

@@ -36,12 +36,16 @@ pub struct FlatPortRef {
 pub struct ProjectionEntry {
     pub direction: PortDirection,
     pub endpoints: Vec<FlatPortRef>,
+    pub drivers: Vec<FlatPortRef>,
+    pub upstream_boundaries: Vec<QualifiedPortRef>,
+    pub direct_drivers: Vec<FlatPortRef>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectionMap {
     pub ports: BTreeMap<QualifiedPortRef, ProjectionEntry>,
+    pub boundaries: BTreeMap<QualifiedPortRef, ProjectionEntry>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -169,6 +173,7 @@ pub fn compile_project(
         nodes: BTreeMap::new(),
         edges: BTreeMap::new(),
         active_ports: Vec::new(),
+        boundary_ports: Vec::new(),
         growth_location: budget_growth_location(
             project,
             &active.id,
@@ -384,6 +389,7 @@ enum NodeRole {
     PrimitiveOutput(FlatPortRef),
 }
 
+#[derive(Clone)]
 struct ActivePort {
     reference: QualifiedPortRef,
     node: NodeKey,
@@ -396,6 +402,7 @@ struct HierarchyAnalyzer<'a> {
     nodes: BTreeMap<NodeKey, NodeRole>,
     edges: BTreeMap<NodeKey, BTreeMap<NodeKey, BTreeSet<QualifiedConnectionRef>>>,
     active_ports: Vec<ActivePort>,
+    boundary_ports: Vec<ActivePort>,
     growth_location: Option<QualifiedComponentRef>,
 }
 
@@ -639,7 +646,7 @@ impl HierarchyAnalyzer<'_> {
             self.nodes.insert(node.clone(), NodeRole::Virtual);
         }
         if is_root {
-            self.active_ports.push(ActivePort {
+            let port = ActivePort {
                 reference: QualifiedPortRef::new(
                     &circuit.id,
                     path.iter().cloned(),
@@ -648,7 +655,9 @@ impl HierarchyAnalyzer<'_> {
                 ),
                 node,
                 direction,
-            });
+            };
+            self.active_ports.push(port.clone());
+            self.boundary_ports.push(port);
         }
     }
 
@@ -709,17 +718,19 @@ impl HierarchyAnalyzer<'_> {
         for port in &ports {
             let node = NodeKey::new(&circuit.id, path, &component.id, &port.id);
             self.nodes.insert(node.clone(), NodeRole::Virtual);
+            let boundary = ActivePort {
+                reference: QualifiedPortRef::new(
+                    &circuit.id,
+                    path.iter().cloned(),
+                    &component.id,
+                    &port.id,
+                ),
+                node,
+                direction: port.direction,
+            };
+            self.boundary_ports.push(boundary.clone());
             if is_root {
-                self.active_ports.push(ActivePort {
-                    reference: QualifiedPortRef::new(
-                        &circuit.id,
-                        path.iter().cloned(),
-                        &component.id,
-                        &port.id,
-                    ),
-                    node,
-                    direction: port.direction,
-                });
+                self.active_ports.push(boundary);
             }
         }
 
@@ -814,11 +825,24 @@ impl HierarchyAnalyzer<'_> {
         }
 
         let mut projection_endpoints = 0_usize;
-        for active_port in &self.active_ports {
+        for active_port in self.active_ports.iter().chain(&self.boundary_ports) {
             let additional = match active_port.direction {
                 PortDirection::Input => forward_projection
                     .ports(&active_port.node, &mut forward_ports)
-                    .len(),
+                    .len()
+                    .checked_add(
+                        reverse_projection
+                            .ports(&active_port.node, &mut reverse_ports)
+                            .len(),
+                    )
+                    .ok_or_else(|| {
+                        vec![limit_error(
+                            self.growth_location
+                                .clone()
+                                .or_else(|| Some(port_location(&active_port.reference))),
+                            "projection endpoint count overflowed usize",
+                        )]
+                    })?,
                 PortDirection::Output => reverse_projection
                     .ports(&active_port.node, &mut reverse_ports)
                     .len(),
@@ -892,20 +916,38 @@ impl HierarchyAnalyzer<'_> {
         }
 
         let mut projection = ProjectionMap::default();
+        let boundary_nodes: BTreeMap<_, _> = self
+            .boundary_ports
+            .iter()
+            .map(|port| (port.node.clone(), port.reference.clone()))
+            .collect();
         for active_port in &self.active_ports {
-            let endpoints = match active_port.direction {
-                PortDirection::Input => {
-                    forward_projection.ports(&active_port.node, &mut forward_ports)
-                }
-                PortDirection::Output => {
-                    reverse_projection.ports(&active_port.node, &mut reverse_ports)
-                }
-            };
+            let endpoints = forward_projection.ports(&active_port.node, &mut forward_ports);
+            let drivers = reverse_projection.ports(&active_port.node, &mut reverse_ports);
             projection.ports.insert(
                 active_port.reference.clone(),
                 ProjectionEntry {
                     direction: active_port.direction,
                     endpoints,
+                    drivers,
+                    upstream_boundaries: Vec::new(),
+                    direct_drivers: Vec::new(),
+                },
+            );
+        }
+        for boundary_port in &self.boundary_ports {
+            let endpoints = forward_projection.ports(&boundary_port.node, &mut forward_ports);
+            let drivers = reverse_projection.ports(&boundary_port.node, &mut reverse_ports);
+            let (upstream_boundaries, direct_drivers) =
+                self.boundary_sources(&boundary_port.node, &reverse, &boundary_nodes);
+            projection.boundaries.insert(
+                boundary_port.reference.clone(),
+                ProjectionEntry {
+                    direction: boundary_port.direction,
+                    endpoints,
+                    drivers,
+                    upstream_boundaries,
+                    direct_drivers,
                 },
             );
         }
@@ -915,6 +957,44 @@ impl HierarchyAnalyzer<'_> {
             projection,
             connection_provenance,
         })
+    }
+
+    fn boundary_sources(
+        &self,
+        start: &NodeKey,
+        reverse: &BTreeMap<NodeKey, BTreeMap<NodeKey, BTreeSet<QualifiedConnectionRef>>>,
+        boundary_nodes: &BTreeMap<NodeKey, QualifiedPortRef>,
+    ) -> (Vec<QualifiedPortRef>, Vec<FlatPortRef>) {
+        if let Some(NodeRole::PrimitiveOutput(driver)) = self.nodes.get(start) {
+            return (Vec::new(), vec![driver.clone()]);
+        }
+        let mut upstream_boundaries = BTreeSet::new();
+        let mut direct_drivers = BTreeSet::new();
+        let mut visited = BTreeSet::from([start.clone()]);
+        let mut queue = VecDeque::from([start.clone()]);
+        while let Some(node) = queue.pop_front() {
+            if let Some(predecessors) = reverse.get(&node) {
+                for predecessor in predecessors.keys() {
+                    if predecessor != start
+                        && let Some(boundary) = boundary_nodes.get(predecessor)
+                    {
+                        upstream_boundaries.insert(boundary.clone());
+                        continue;
+                    }
+                    if let Some(NodeRole::PrimitiveOutput(driver)) = self.nodes.get(predecessor) {
+                        direct_drivers.insert(driver.clone());
+                        continue;
+                    }
+                    if visited.insert(predecessor.clone()) {
+                        queue.push_back(predecessor.clone());
+                    }
+                }
+            }
+        }
+        (
+            upstream_boundaries.into_iter().collect(),
+            direct_drivers.into_iter().collect(),
+        )
     }
 
     fn references_between(
