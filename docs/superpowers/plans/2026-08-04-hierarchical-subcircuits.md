@@ -657,7 +657,7 @@ git commit -m "feat: adapt hierarchical wasm snapshots"
 - Modify: `apps/web/src/styles.css`
 - Modify: `apps/web/tests/app.test.tsx`
 
-- [ ] **Step 1: Write failing interaction tests**
+- [x] **Step 1: Write failing interaction tests**
 
 Assert accessible interactions for:
 
@@ -670,13 +670,13 @@ Assert accessible interactions for:
 - used module deletion block with reference count;
 - existing mobile drawers containing module controls without page overflow.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 npm --prefix apps/web test -- app.test.tsx
 ```
 
-- [ ] **Step 3: Implement focused UI components**
+- [x] **Step 3: Implement focused UI components**
 
 Migrate App from single document history to `ProjectEditorState`; only the
 active circuit maps to React Flow. Use Lucide `Plus`, `Pencil`, `Boxes`,
@@ -688,7 +688,7 @@ On validation failure set snapshot null before diagnostics render. Clicking a
 qualified diagnostic navigates to its circuit/instance path and selects the
 referenced item when present.
 
-- [ ] **Step 4: Run GREEN, build, and commit**
+- [x] **Step 4: Run GREEN, build, and commit**
 
 ```bash
 npm --prefix apps/web test
