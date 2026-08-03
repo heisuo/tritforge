@@ -235,6 +235,10 @@ export function parseCircuitDocument(json: string): CircuitDocument {
       `Circuit file is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+  return parseCircuitDocumentValue(parsed);
+}
+
+export function parseCircuitDocumentValue(parsed: unknown): CircuitDocument {
   const document = recordAt(parsed, "document");
   assertAllowedKeys(document, TOP_LEVEL_KEYS, "document");
   if (document.format !== "logsim-ternary") {

@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://logsim-ternary.local/schemas/project-v2.schema.json",
+  "title": "Logsim Ternary Project Document v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "rootCircuitId", "circuits"],
+  "properties": {
+    "format": { "const": "logsim-ternary" },
+    "version": { "const": 2 },
+    "rootCircuitId": { "$ref": "#/$defs/nonEmptyString" },
+    "circuits": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/circuit" },
+      "contains": {
+        "type": "object",
+        "required": ["kind"],
+        "properties": { "kind": { "const": "main" } }
+      },
+      "minContains": 1,
+      "maxContains": 1
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      }
+    },
+    "viewport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "zoom"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "zoom": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "knownTrit": { "enum": ["T", "0", "1"] },
+    "ordinaryProperties": {
+      "type": "object",
+      "properties": {
+        "value": { "$ref": "#/$defs/knownTrit" },
+        "label": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "moduleInputProperties": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["portId", "label", "previewValue"],
+      "properties": {
+        "portId": { "$ref": "#/$defs/nonEmptyString" },
+        "label": { "$ref": "#/$defs/nonEmptyString" },
+        "previewValue": { "$ref": "#/$defs/knownTrit" }
+      }
+    },
+    "moduleOutputProperties": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["portId", "label"],
+      "properties": {
+        "portId": { "$ref": "#/$defs/nonEmptyString" },
+        "label": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "moduleInstanceProperties": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["moduleId", "label"],
+      "properties": {
+        "moduleId": { "$ref": "#/$defs/nonEmptyString" },
+        "label": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "typeId", "position", "properties"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "typeId": { "$ref": "#/$defs/nonEmptyString" },
+        "position": { "$ref": "#/$defs/point" },
+        "properties": { "type": "object" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "typeId": { "const": "project.module_input" } }
+          },
+          "then": {
+            "properties": {
+              "properties": { "$ref": "#/$defs/moduleInputProperties" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "typeId": { "const": "project.module_output" } }
+          },
+          "then": {
+            "properties": {
+              "properties": { "$ref": "#/$defs/moduleOutputProperties" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "typeId": { "const": "project.module_instance" } }
+          },
+          "then": {
+            "properties": {
+              "properties": { "$ref": "#/$defs/moduleInstanceProperties" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "typeId": {
+                "not": {
+                  "enum": [
+                    "project.module_input",
+                    "project.module_output",
+                    "project.module_instance"
+                  ]
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "properties": { "$ref": "#/$defs/ordinaryProperties" }
+            }
+          }
+        }
+      ]
+    },
+    "connection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "sourceComponentId",
+        "sourcePortId",
+        "targetComponentId",
+        "targetPortId"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "sourceComponentId": { "$ref": "#/$defs/nonEmptyString" },
+        "sourcePortId": { "$ref": "#/$defs/nonEmptyString" },
+        "targetComponentId": { "$ref": "#/$defs/nonEmptyString" },
+        "targetPortId": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "circuit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "kind", "components", "connections"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "kind": { "enum": ["main", "module"] },
+        "components": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/component" }
+        },
+        "connections": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/connection" }
+        },
+        "viewport": { "$ref": "#/$defs/viewport" }
+      }
+    }
+  }
+}
