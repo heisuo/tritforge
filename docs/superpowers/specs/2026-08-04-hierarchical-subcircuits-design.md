@@ -223,6 +223,11 @@ compile_project(project, active_circuit_id)
 最大 projection 端点数   100,000
 ```
 
+为保证“空模块实例”不会绕过基础元件预算，分析器另设内部工作量护栏：最多展开
+10,000 个模块实例、50,000 个符号节点、100,000 条符号边和 2,000,000 个最终
+provenance 引用。这些项目只约束编译分析与诊断回投所需资源，不改变上述扁平
+电路与 projection 的公开容量；超限同样返回 `HIERARCHY_EXPANSION_LIMIT`。
+
 编译器先用记忆化计数和 checked addition/multiplication 分析模块实例倍增、边界
 驱动数与消费者数的笛卡尔积；溢出或任一预算超限时，在分配完整展开图之前返回
 `HIERARCHY_EXPANSION_LIMIT`。实际展开阶段继续维护同一组计数作为第二道保护。

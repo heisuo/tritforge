@@ -15,6 +15,10 @@ pub const MAX_HIERARCHY_DEPTH: usize = 32;
 pub const MAX_EXPANDED_COMPONENTS: usize = 10_000;
 pub const MAX_EXPANDED_CONNECTIONS: usize = 50_000;
 pub const MAX_PROJECTION_ENDPOINTS: usize = 100_000;
+const MAX_EXPANDED_INSTANCES: usize = 10_000;
+const MAX_ANALYSIS_NODES: usize = 50_000;
+const MAX_ANALYSIS_EDGES: usize = 100_000;
+const MAX_PROVENANCE_REFERENCES: usize = 2_000_000;
 
 const MODULE_INPUT: &str = "project.module_input";
 const MODULE_OUTPUT: &str = "project.module_output";
@@ -69,19 +73,22 @@ pub fn compile_project(
         return Err(vec![project_error(
             "INVALID_ACTIVE_CIRCUIT",
             format!("active circuit '{active_circuit_id}' does not exist"),
-            active_circuit_id,
+            None,
         )]);
     };
 
-    let counts = analyze_active_circuit(project, &active.id).ok_or_else(|| {
+    let fallback_location = growth_location(active);
+
+    let (counts, nested_counts) = analyze_active_circuit(project, &active.id).ok_or_else(|| {
         vec![limit_error(
-            active_circuit_id,
+            fallback_location.clone(),
             "hierarchy count overflowed usize",
         )]
     })?;
     if counts.depth > MAX_HIERARCHY_DEPTH {
         return Err(vec![limit_error(
-            active_circuit_id,
+            budget_growth_location(project, &active.id, &nested_counts, BudgetMetric::Depth)
+                .or_else(|| fallback_location.clone()),
             format!(
                 "hierarchy depth {} exceeds {}",
                 counts.depth, MAX_HIERARCHY_DEPTH
@@ -90,10 +97,61 @@ pub fn compile_project(
     }
     if counts.primitive_components > MAX_EXPANDED_COMPONENTS {
         return Err(vec![limit_error(
-            active_circuit_id,
+            budget_growth_location(
+                project,
+                &active.id,
+                &nested_counts,
+                BudgetMetric::PrimitiveComponents,
+            )
+            .or_else(|| fallback_location.clone()),
             format!(
                 "expanded component count {} exceeds {}",
                 counts.primitive_components, MAX_EXPANDED_COMPONENTS
+            ),
+        )]);
+    }
+    if counts.expanded_instances > MAX_EXPANDED_INSTANCES {
+        return Err(vec![limit_error(
+            budget_growth_location(
+                project,
+                &active.id,
+                &nested_counts,
+                BudgetMetric::ExpandedInstances,
+            )
+            .or_else(|| fallback_location.clone()),
+            format!(
+                "expanded module instance count {} exceeds {}",
+                counts.expanded_instances, MAX_EXPANDED_INSTANCES
+            ),
+        )]);
+    }
+    if counts.graph_nodes > MAX_ANALYSIS_NODES {
+        return Err(vec![limit_error(
+            budget_growth_location(
+                project,
+                &active.id,
+                &nested_counts,
+                BudgetMetric::GraphNodes,
+            )
+            .or_else(|| fallback_location.clone()),
+            format!(
+                "symbolic analysis node count {} exceeds {}",
+                counts.graph_nodes, MAX_ANALYSIS_NODES
+            ),
+        )]);
+    }
+    if counts.graph_edges > MAX_ANALYSIS_EDGES {
+        return Err(vec![limit_error(
+            budget_growth_location(
+                project,
+                &active.id,
+                &nested_counts,
+                BudgetMetric::GraphEdges,
+            )
+            .or_else(|| fallback_location.clone()),
+            format!(
+                "symbolic analysis edge count {} exceeds {}",
+                counts.graph_edges, MAX_ANALYSIS_EDGES
             ),
         )]);
     }
@@ -105,22 +163,29 @@ pub fn compile_project(
         .cloned()
         .map(|circuit| (circuit.id.clone(), circuit))
         .collect();
-    let mut builder = HierarchyBuilder {
+    let mut analyzer = HierarchyAnalyzer {
         project,
         circuits,
         nodes: BTreeMap::new(),
         edges: BTreeMap::new(),
-        flat_components: BTreeMap::new(),
         active_ports: Vec::new(),
-        provenance: ProvenanceMap::default(),
+        growth_location: budget_growth_location(
+            project,
+            &active.id,
+            &nested_counts,
+            BudgetMetric::GraphEdges,
+        )
+        .or(fallback_location),
     };
-    builder.expand_circuit(active_circuit_id, &[], true)?;
-    builder.finish(active_circuit_id)
+    analyzer.expand_circuit(active_circuit_id, &[], true)?;
+    let wiring = analyzer.analyze_wiring()?;
+    Ok(materialize_project(project, active_circuit_id, wiring))
 }
 
 #[derive(Debug, Clone, Copy)]
 struct ExpansionCounts {
     primitive_components: usize,
+    expanded_instances: usize,
     graph_nodes: usize,
     graph_edges: usize,
     depth: usize,
@@ -129,14 +194,15 @@ struct ExpansionCounts {
 fn analyze_active_circuit(
     project: &ValidatedProject,
     active_circuit_id: &str,
-) -> Option<ExpansionCounts> {
+) -> Option<(ExpansionCounts, BTreeMap<String, ExpansionCounts>)> {
     let order = dependency_postorder(active_circuit_id, &project.dependencies)?;
     let mut nested_counts = BTreeMap::new();
     for circuit_id in order {
         let counts = count_circuit(project, &circuit_id, false, &nested_counts)?;
         nested_counts.insert(circuit_id, counts);
     }
-    count_circuit(project, active_circuit_id, true, &nested_counts)
+    let active_counts = count_circuit(project, active_circuit_id, true, &nested_counts)?;
+    Some((active_counts, nested_counts))
 }
 
 fn dependency_postorder(
@@ -177,6 +243,7 @@ fn count_circuit(
         .find(|circuit| circuit.id == circuit_id)?;
     let mut counts = ExpansionCounts {
         primitive_components: 0,
+        expanded_instances: 0,
         graph_nodes: 0,
         graph_edges: circuit.connections.len(),
         depth: 1,
@@ -205,6 +272,10 @@ fn count_circuit(
                 counts.primitive_components = counts
                     .primitive_components
                     .checked_add(child.primitive_components)?;
+                counts.expanded_instances = counts
+                    .expanded_instances
+                    .checked_add(1)?
+                    .checked_add(child.expanded_instances)?;
                 counts.depth = counts.depth.max(child.depth.checked_add(1)?);
             }
             type_id => {
@@ -218,6 +289,73 @@ fn count_circuit(
     }
 
     Some(counts)
+}
+
+#[derive(Clone, Copy)]
+enum BudgetMetric {
+    PrimitiveComponents,
+    ExpandedInstances,
+    GraphNodes,
+    GraphEdges,
+    Depth,
+}
+
+fn budget_growth_location(
+    project: &ValidatedProject,
+    active_circuit_id: &str,
+    nested_counts: &BTreeMap<String, ExpansionCounts>,
+    metric: BudgetMetric,
+) -> Option<QualifiedComponentRef> {
+    let circuits: BTreeMap<_, _> = project
+        .project
+        .circuits
+        .iter()
+        .map(|circuit| (circuit.id.as_str(), circuit))
+        .collect();
+    let mut circuit_id = active_circuit_id;
+    let mut instance_path = Vec::new();
+    let mut location = None;
+
+    loop {
+        let circuit = circuits.get(circuit_id)?;
+        let selected = circuit
+            .components
+            .iter()
+            .filter(|component| component.type_id == MODULE_INSTANCE)
+            .filter_map(|component| {
+                let module_id = component.properties.module_id()?;
+                let child = nested_counts.get(module_id)?;
+                let port_count = project.interfaces.get(module_id)?.len();
+                let contribution = match metric {
+                    BudgetMetric::PrimitiveComponents => child.primitive_components,
+                    BudgetMetric::ExpandedInstances => child.expanded_instances.checked_add(1)?,
+                    BudgetMetric::GraphNodes => child.graph_nodes.checked_add(port_count)?,
+                    BudgetMetric::GraphEdges => child.graph_edges.checked_add(port_count)?,
+                    BudgetMetric::Depth => child.depth,
+                };
+                Some((contribution, component, module_id))
+            })
+            .max_by(|left, right| {
+                left.0
+                    .cmp(&right.0)
+                    .then_with(|| right.1.id.cmp(&left.1.id))
+            });
+        let Some((contribution, component, module_id)) = selected else {
+            break;
+        };
+        if contribution == 0 {
+            break;
+        }
+        location = Some(QualifiedComponentRef::new(
+            &circuit.id,
+            instance_path.iter().cloned(),
+            &component.id,
+        ));
+        instance_path.push(component.id.clone());
+        circuit_id = module_id;
+    }
+
+    location
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -252,17 +390,177 @@ struct ActivePort {
     direction: PortDirection,
 }
 
-struct HierarchyBuilder<'a> {
+struct HierarchyAnalyzer<'a> {
     project: &'a ValidatedProject,
     circuits: BTreeMap<String, ProjectCircuit>,
     nodes: BTreeMap<NodeKey, NodeRole>,
     edges: BTreeMap<NodeKey, BTreeMap<NodeKey, BTreeSet<QualifiedConnectionRef>>>,
-    flat_components: BTreeMap<String, ComponentInstance>,
     active_ports: Vec<ActivePort>,
-    provenance: ProvenanceMap,
+    growth_location: Option<QualifiedComponentRef>,
 }
 
-impl HierarchyBuilder<'_> {
+struct WiringPlan {
+    connections: Vec<Connection>,
+    projection: ProjectionMap,
+    connection_provenance: BTreeMap<String, Vec<QualifiedConnectionRef>>,
+}
+
+struct ReachabilityIndex {
+    node_indexes: BTreeMap<NodeKey, usize>,
+    scc_of: Vec<usize>,
+    roots: Vec<usize>,
+    expressions: Vec<EndpointExpression>,
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct EndpointExpression {
+    endpoints: Vec<FlatPortRef>,
+    children: Vec<usize>,
+}
+
+impl ReachabilityIndex {
+    fn new(
+        nodes: &BTreeMap<NodeKey, NodeRole>,
+        graph: &BTreeMap<NodeKey, BTreeMap<NodeKey, BTreeSet<QualifiedConnectionRef>>>,
+        want_inputs: bool,
+    ) -> Self {
+        let node_keys: Vec<_> = nodes.keys().cloned().collect();
+        let node_indexes: BTreeMap<_, _> = node_keys
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(index, node)| (node, index))
+            .collect();
+        let mut adjacency = vec![Vec::new(); node_keys.len()];
+        for (index, node) in node_keys.iter().enumerate() {
+            if endpoint_for_role(nodes.get(node), want_inputs).is_some() {
+                continue;
+            }
+            if let Some(targets) = graph.get(node) {
+                adjacency[index].extend(
+                    targets
+                        .keys()
+                        .filter_map(|target| node_indexes.get(target).copied()),
+                );
+            }
+        }
+        let mut reverse = vec![Vec::new(); node_keys.len()];
+        for (source, targets) in adjacency.iter().enumerate() {
+            for &target in targets {
+                reverse[target].push(source);
+            }
+        }
+        let order = graph_finish_order(&adjacency);
+        let (scc_count, scc_of) = graph_components(&reverse, &order);
+        let mut dag_sets = vec![BTreeSet::new(); scc_count];
+        for (source, targets) in adjacency.iter().enumerate() {
+            for &target in targets {
+                let from = scc_of[source];
+                let to = scc_of[target];
+                if from != to {
+                    dag_sets[from].insert(to);
+                }
+            }
+        }
+        let mut endpoints = vec![Vec::new(); scc_count];
+        for (index, node) in node_keys.iter().enumerate() {
+            if let Some(endpoint) = endpoint_for_role(nodes.get(node), want_inputs) {
+                endpoints[scc_of[index]].push(endpoint.clone());
+            }
+        }
+        let dag: Vec<Vec<_>> = dag_sets
+            .into_iter()
+            .map(|targets| targets.into_iter().collect())
+            .collect();
+        let mut expressions = vec![EndpointExpression {
+            endpoints: Vec::new(),
+            children: Vec::new(),
+        }];
+        let mut interned = BTreeMap::from([((Vec::new(), Vec::new()), 0_usize)]);
+        let mut roots = vec![0_usize; scc_count];
+        for scc in graph_finish_order(&dag) {
+            endpoints[scc].sort();
+            endpoints[scc].dedup();
+            let child_roots: Vec<_> = dag[scc]
+                .iter()
+                .map(|child| roots[*child])
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            if endpoints[scc].is_empty() && child_roots.len() == 1 {
+                roots[scc] = child_roots[0];
+                continue;
+            }
+            let key = (endpoints[scc].clone(), child_roots);
+            roots[scc] = match interned.get(&key) {
+                Some(root) => *root,
+                None => {
+                    let root = expressions.len();
+                    expressions.push(EndpointExpression {
+                        endpoints: key.0.clone(),
+                        children: key.1.clone(),
+                    });
+                    interned.insert(key, root);
+                    root
+                }
+            };
+        }
+        Self {
+            node_indexes,
+            scc_of,
+            roots,
+            expressions,
+        }
+    }
+
+    fn ports(
+        &self,
+        start: &NodeKey,
+        cache: &mut BTreeMap<usize, Vec<FlatPortRef>>,
+    ) -> Vec<FlatPortRef> {
+        let root = self.start_root(start);
+        if let Some(ports) = cache.get(&root) {
+            return ports.clone();
+        }
+        let mut visited = BTreeSet::from([root]);
+        let mut stack = vec![root];
+        let mut ports = BTreeSet::new();
+        while let Some(expression_id) = stack.pop() {
+            if let Some(cached) = cache.get(&expression_id) {
+                ports.extend(cached.iter().cloned());
+                continue;
+            }
+            let expression = &self.expressions[expression_id];
+            ports.extend(expression.endpoints.iter().cloned());
+            for &child in &expression.children {
+                if visited.insert(child) {
+                    stack.push(child);
+                }
+            }
+        }
+        let ports: Vec<_> = ports.into_iter().collect();
+        cache.insert(root, ports.clone());
+        ports
+    }
+
+    fn start_root(&self, start: &NodeKey) -> usize {
+        let index = self
+            .node_indexes
+            .get(start)
+            .expect("active port belongs to the analyzed graph");
+        self.roots[self.scc_of[*index]]
+    }
+}
+
+fn endpoint_for_role(role: Option<&NodeRole>, want_inputs: bool) -> Option<&FlatPortRef> {
+    match (role, want_inputs) {
+        (Some(NodeRole::PrimitiveInput(port)), true)
+        | (Some(NodeRole::PrimitiveOutput(port)), false) => Some(port),
+        _ => None,
+    }
+}
+
+impl HierarchyAnalyzer<'_> {
     fn expand_circuit(
         &mut self,
         circuit_id: &str,
@@ -323,49 +621,19 @@ impl HierarchyBuilder<'_> {
         let node = NodeKey::new(&circuit.id, path, &component.id, fixed_port);
         if is_root {
             let flat_id = flat_component_id(path, &component.id);
-            let (type_id, properties, role) = if is_input {
+            let role = if is_input {
                 let flat_port = FlatPortRef {
                     component_id: flat_id.clone(),
                     port_id: "out".into(),
                 };
-                (
-                    "source.trit_input".to_owned(),
-                    ComponentProperties {
-                        value: component.properties.preview_value(),
-                    },
-                    NodeRole::PrimitiveOutput(flat_port),
-                )
+                NodeRole::PrimitiveOutput(flat_port)
             } else {
                 let flat_port = FlatPortRef {
                     component_id: flat_id.clone(),
                     port_id: "in".into(),
                 };
-                (
-                    "sink.probe".to_owned(),
-                    ComponentProperties::default(),
-                    NodeRole::PrimitiveInput(flat_port),
-                )
+                NodeRole::PrimitiveInput(flat_port)
             };
-            self.flat_components.insert(
-                flat_id.clone(),
-                ComponentInstance {
-                    id: flat_id.clone(),
-                    type_id,
-                    properties,
-                },
-            );
-            let component_ref =
-                QualifiedComponentRef::new(&circuit.id, path.iter().cloned(), &component.id);
-            self.provenance
-                .components
-                .insert(flat_id.clone(), component_ref.clone());
-            if is_input {
-                self.provenance
-                    .source_copies
-                    .entry(component_ref)
-                    .or_default()
-                    .push(flat_id);
-            }
             self.nodes.insert(node.clone(), role);
         } else {
             self.nodes.insert(node.clone(), NodeRole::Virtual);
@@ -394,28 +662,6 @@ impl HierarchyBuilder<'_> {
         let kind = ComponentKind::from_type_id(&component.type_id)
             .expect("validated primitive component type");
         let flat_id = flat_component_id(path, &component.id);
-        self.flat_components.insert(
-            flat_id.clone(),
-            ComponentInstance {
-                id: flat_id.clone(),
-                type_id: component.type_id.clone(),
-                properties: ComponentProperties {
-                    value: component.properties.known_value(),
-                },
-            },
-        );
-        let component_ref =
-            QualifiedComponentRef::new(&circuit.id, path.iter().cloned(), &component.id);
-        self.provenance
-            .components
-            .insert(flat_id.clone(), component_ref.clone());
-        if matches!(kind, ComponentKind::TritInput | ComponentKind::Constant) {
-            self.provenance
-                .source_copies
-                .entry(component_ref)
-                .or_default()
-                .push(flat_id.clone());
-        }
 
         for port in kind.port_descriptors() {
             let flat_port = FlatPortRef {
@@ -529,10 +775,7 @@ impl HierarchyBuilder<'_> {
         }
     }
 
-    fn finish(
-        mut self,
-        active_circuit_id: &str,
-    ) -> Result<CompiledProject, Vec<ProjectDiagnostic>> {
+    fn analyze_wiring(&self) -> Result<WiringPlan, Vec<ProjectDiagnostic>> {
         let primitive_outputs: Vec<_> = self
             .nodes
             .iter()
@@ -540,30 +783,104 @@ impl HierarchyBuilder<'_> {
                 matches!(role, NodeRole::PrimitiveOutput(_)).then_some(node.clone())
             })
             .collect();
+        let reverse = reverse_graph(&self.edges);
+        let forward_projection = ReachabilityIndex::new(&self.nodes, &self.edges, true);
+        let reverse_projection = ReachabilityIndex::new(&self.nodes, &reverse, false);
+        let mut forward_ports = BTreeMap::new();
+        let mut reverse_ports = BTreeMap::new();
+
+        let mut connection_count = 0_usize;
+        for source in &primitive_outputs {
+            let additional = forward_projection.ports(source, &mut forward_ports).len();
+            connection_count = connection_count.checked_add(additional).ok_or_else(|| {
+                vec![limit_error(
+                    self.growth_location
+                        .clone()
+                        .or_else(|| Some(node_location(source))),
+                    "expanded connection count overflowed usize",
+                )]
+            })?;
+            if connection_count > MAX_EXPANDED_CONNECTIONS {
+                return Err(vec![limit_error(
+                    self.growth_location
+                        .clone()
+                        .or_else(|| Some(node_location(source))),
+                    format!(
+                        "expanded connection count is at least {connection_count}, exceeding {}",
+                        MAX_EXPANDED_CONNECTIONS
+                    ),
+                )]);
+            }
+        }
+
+        let mut projection_endpoints = 0_usize;
+        for active_port in &self.active_ports {
+            let additional = match active_port.direction {
+                PortDirection::Input => forward_projection
+                    .ports(&active_port.node, &mut forward_ports)
+                    .len(),
+                PortDirection::Output => reverse_projection
+                    .ports(&active_port.node, &mut reverse_ports)
+                    .len(),
+            };
+            projection_endpoints =
+                projection_endpoints
+                    .checked_add(additional)
+                    .ok_or_else(|| {
+                        vec![limit_error(
+                            self.growth_location
+                                .clone()
+                                .or_else(|| Some(port_location(&active_port.reference))),
+                            "projection endpoint count overflowed usize",
+                        )]
+                    })?;
+            if projection_endpoints > MAX_PROJECTION_ENDPOINTS {
+                return Err(vec![limit_error(
+                    self.growth_location
+                        .clone()
+                        .or_else(|| Some(port_location(&active_port.reference))),
+                    format!(
+                        "projection endpoint count is at least {projection_endpoints}, exceeding {}",
+                        MAX_PROJECTION_ENDPOINTS
+                    ),
+                )]);
+            }
+        }
+
         let mut flat_connections = Vec::new();
+        let mut connection_provenance = BTreeMap::new();
+        let primitive_inputs: BTreeMap<_, _> = self
+            .nodes
+            .iter()
+            .filter_map(|(node, role)| match role {
+                NodeRole::PrimitiveInput(port) => Some((port.clone(), node.clone())),
+                _ => None,
+            })
+            .collect();
+        let mut provenance_items = 0_usize;
         for source in primitive_outputs {
             let source_port = match self.nodes.get(&source) {
                 Some(NodeRole::PrimitiveOutput(port)) => port.clone(),
                 _ => unreachable!(),
             };
-            for (target, references) in self.trace_from(&source) {
-                let target_port = match self.nodes.get(&target) {
-                    Some(NodeRole::PrimitiveInput(port)) => port.clone(),
-                    _ => continue,
-                };
-                if flat_connections.len() == MAX_EXPANDED_CONNECTIONS {
-                    return Err(vec![limit_error(
-                        active_circuit_id,
-                        format!(
-                            "expanded connection count exceeds {}",
-                            MAX_EXPANDED_CONNECTIONS
-                        ),
-                    )]);
-                }
+            let targets = forward_projection.ports(&source, &mut forward_ports);
+            if targets.is_empty() {
+                continue;
+            }
+            let reachable = self.reachable_from(&source);
+            for target_port in targets {
+                let target = primitive_inputs
+                    .get(&target_port)
+                    .expect("reachable primitive input belongs to the analyzed graph");
+                let references = self.references_between(
+                    &source,
+                    target,
+                    &reachable,
+                    &reverse,
+                    &mut provenance_items,
+                )?;
                 let id = format!("flat-wire-{:05}", flat_connections.len());
-                self.provenance
-                    .connections
-                    .insert(id.clone(), references.into_iter().collect());
+                connection_provenance.insert(id.clone(), references.into_iter().collect());
                 flat_connections.push(Connection {
                     id,
                     source_component_id: source_port.component_id.clone(),
@@ -574,32 +891,18 @@ impl HierarchyBuilder<'_> {
             }
         }
 
-        let reverse = reverse_graph(&self.edges);
         let mut projection = ProjectionMap::default();
-        let mut projection_endpoints = 0_usize;
-        for active_port in self.active_ports {
+        for active_port in &self.active_ports {
             let endpoints = match active_port.direction {
                 PortDirection::Input => {
-                    reachable_primitive_ports(&active_port.node, &self.nodes, &self.edges, true)
+                    forward_projection.ports(&active_port.node, &mut forward_ports)
                 }
                 PortDirection::Output => {
-                    reachable_primitive_ports(&active_port.node, &self.nodes, &reverse, false)
+                    reverse_projection.ports(&active_port.node, &mut reverse_ports)
                 }
             };
-            projection_endpoints = projection_endpoints
-                .checked_add(endpoints.len())
-                .ok_or_else(|| vec![limit_error(active_circuit_id, "projection count overflow")])?;
-            if projection_endpoints > MAX_PROJECTION_ENDPOINTS {
-                return Err(vec![limit_error(
-                    active_circuit_id,
-                    format!(
-                        "projection endpoint count {} exceeds {}",
-                        projection_endpoints, MAX_PROJECTION_ENDPOINTS
-                    ),
-                )]);
-            }
             projection.ports.insert(
-                active_port.reference,
+                active_port.reference.clone(),
                 ProjectionEntry {
                     direction: active_port.direction,
                     endpoints,
@@ -607,56 +910,77 @@ impl HierarchyBuilder<'_> {
             );
         }
 
-        for copies in self.provenance.source_copies.values_mut() {
-            copies.sort();
-            copies.dedup();
-        }
-        let components = self.flat_components.into_values().collect();
-        Ok(CompiledProject {
-            circuit: CircuitDefinition {
-                components,
-                connections: flat_connections,
-            },
+        Ok(WiringPlan {
+            connections: flat_connections,
             projection,
-            provenance: self.provenance,
+            connection_provenance,
         })
     }
 
-    fn trace_from(&self, source: &NodeKey) -> BTreeMap<NodeKey, BTreeSet<QualifiedConnectionRef>> {
-        let mut reached: BTreeMap<NodeKey, BTreeSet<QualifiedConnectionRef>> = BTreeMap::new();
-        let mut queue = VecDeque::from([source.clone()]);
-        reached.insert(source.clone(), BTreeSet::new());
+    fn references_between(
+        &self,
+        source: &NodeKey,
+        target: &NodeKey,
+        reachable: &BTreeSet<NodeKey>,
+        reverse: &BTreeMap<NodeKey, BTreeMap<NodeKey, BTreeSet<QualifiedConnectionRef>>>,
+        provenance_items: &mut usize,
+    ) -> Result<BTreeSet<QualifiedConnectionRef>, Vec<ProjectDiagnostic>> {
+        let mut visited = BTreeSet::from([target.clone()]);
+        let mut queue = VecDeque::from([target.clone()]);
+        let mut references = BTreeSet::new();
+        while let Some(node) = queue.pop_front() {
+            if node == *source {
+                continue;
+            }
+            if let Some(predecessors) = reverse.get(&node) {
+                for (predecessor, edge_refs) in predecessors {
+                    if !reachable.contains(predecessor) {
+                        continue;
+                    }
+                    references.extend(edge_refs.iter().cloned());
+                    if visited.insert(predecessor.clone()) {
+                        queue.push_back(predecessor.clone());
+                    }
+                }
+            }
+        }
+        *provenance_items = provenance_items
+            .checked_add(references.len())
+            .ok_or_else(|| vec![self.provenance_limit_error(source, usize::MAX)])?;
+        if *provenance_items > MAX_PROVENANCE_REFERENCES {
+            return Err(vec![self.provenance_limit_error(source, *provenance_items)]);
+        }
+        Ok(references)
+    }
 
+    fn reachable_from(&self, source: &NodeKey) -> BTreeSet<NodeKey> {
+        let mut reached = BTreeSet::from([source.clone()]);
+        let mut queue = VecDeque::from([source.clone()]);
         while let Some(node) = queue.pop_front() {
             if node != *source && matches!(self.nodes.get(&node), Some(NodeRole::PrimitiveInput(_)))
             {
                 continue;
             }
-            let inherited = reached.get(&node).cloned().unwrap_or_default();
             if let Some(targets) = self.edges.get(&node) {
-                for (target, edge_refs) in targets {
-                    let mut next_refs = inherited.clone();
-                    next_refs.extend(edge_refs.iter().cloned());
-                    match reached.get_mut(target) {
-                        None => {
-                            reached.insert(target.clone(), next_refs);
-                            queue.push_back(target.clone());
-                        }
-                        Some(existing) => {
-                            let previous_len = existing.len();
-                            existing.extend(next_refs);
-                            if existing.len() != previous_len {
-                                queue.push_back(target.clone());
-                            }
-                        }
+                for target in targets.keys() {
+                    if reached.insert(target.clone()) {
+                        queue.push_back(target.clone());
                     }
                 }
             }
         }
-
-        reached.remove(source);
-        reached.retain(|node, _| matches!(self.nodes.get(node), Some(NodeRole::PrimitiveInput(_))));
         reached
+    }
+
+    fn provenance_limit_error(&self, source: &NodeKey, count: usize) -> ProjectDiagnostic {
+        limit_error(
+            self.growth_location
+                .clone()
+                .or_else(|| Some(node_location(source))),
+            format!(
+                "provenance reference count is at least {count}, exceeding {MAX_PROVENANCE_REFERENCES}"
+            ),
+        )
     }
 }
 
@@ -677,37 +1001,157 @@ fn reverse_graph(
     reverse
 }
 
-fn reachable_primitive_ports(
-    start: &NodeKey,
-    nodes: &BTreeMap<NodeKey, NodeRole>,
-    graph: &BTreeMap<NodeKey, BTreeMap<NodeKey, BTreeSet<QualifiedConnectionRef>>>,
-    want_inputs: bool,
-) -> Vec<FlatPortRef> {
-    let mut endpoints = BTreeSet::new();
-    let mut visited = BTreeSet::new();
-    let mut queue = VecDeque::from([start.clone()]);
-    visited.insert(start.clone());
-
-    while let Some(node) = queue.pop_front() {
-        let endpoint = match nodes.get(&node) {
-            Some(NodeRole::PrimitiveInput(port)) if want_inputs => Some(port),
-            Some(NodeRole::PrimitiveOutput(port)) if !want_inputs => Some(port),
-            _ => None,
-        };
-        if let Some(endpoint) = endpoint {
-            endpoints.insert(endpoint.clone());
+fn graph_finish_order(adjacency: &[Vec<usize>]) -> Vec<usize> {
+    let mut visited = vec![false; adjacency.len()];
+    let mut order = Vec::with_capacity(adjacency.len());
+    for start in 0..adjacency.len() {
+        if visited[start] {
             continue;
         }
-        if let Some(next_nodes) = graph.get(&node) {
-            for next in next_nodes.keys() {
-                if visited.insert(next.clone()) {
-                    queue.push_back(next.clone());
+        visited[start] = true;
+        let mut stack = vec![(start, 0_usize)];
+        while let Some((node, next_index)) = stack.last_mut() {
+            if let Some(&next) = adjacency[*node].get(*next_index) {
+                *next_index += 1;
+                if !visited[next] {
+                    visited[next] = true;
+                    stack.push((next, 0));
+                }
+            } else {
+                let (finished, _) = stack.pop().expect("DFS stack is not empty");
+                order.push(finished);
+            }
+        }
+    }
+    order
+}
+
+fn graph_components(reverse: &[Vec<usize>], order: &[usize]) -> (usize, Vec<usize>) {
+    let mut component_of = vec![usize::MAX; reverse.len()];
+    let mut component_count = 0_usize;
+    for &start in order.iter().rev() {
+        if component_of[start] != usize::MAX {
+            continue;
+        }
+        component_of[start] = component_count;
+        let mut stack = vec![start];
+        while let Some(node) = stack.pop() {
+            for &next in &reverse[node] {
+                if component_of[next] == usize::MAX {
+                    component_of[next] = component_count;
+                    stack.push(next);
+                }
+            }
+        }
+        component_count += 1;
+    }
+    (component_count, component_of)
+}
+
+fn materialize_project(
+    project: &ValidatedProject,
+    active_circuit_id: &str,
+    wiring: WiringPlan,
+) -> CompiledProject {
+    let circuits: BTreeMap<_, _> = project
+        .project
+        .circuits
+        .iter()
+        .map(|circuit| (circuit.id.as_str(), circuit))
+        .collect();
+    let mut components = BTreeMap::new();
+    let mut provenance = ProvenanceMap {
+        connections: wiring.connection_provenance,
+        ..ProvenanceMap::default()
+    };
+    let mut stack = vec![(active_circuit_id.to_owned(), Vec::<String>::new(), true)];
+
+    while let Some((circuit_id, path, is_root)) = stack.pop() {
+        let circuit = circuits
+            .get(circuit_id.as_str())
+            .expect("validated circuit exists");
+        for component in &circuit.components {
+            let flat_id = flat_component_id(&path, &component.id);
+            let component_ref =
+                QualifiedComponentRef::new(&circuit.id, path.iter().cloned(), &component.id);
+            match component.type_id.as_str() {
+                MODULE_INPUT | MODULE_OUTPUT if !is_root => {}
+                MODULE_INPUT => {
+                    components.insert(
+                        flat_id.clone(),
+                        ComponentInstance {
+                            id: flat_id.clone(),
+                            type_id: "source.trit_input".into(),
+                            properties: ComponentProperties {
+                                value: component.properties.preview_value(),
+                            },
+                        },
+                    );
+                    provenance
+                        .source_copies
+                        .entry(component_ref.clone())
+                        .or_default()
+                        .push(flat_id.clone());
+                    provenance.components.insert(flat_id, component_ref);
+                }
+                MODULE_OUTPUT => {
+                    components.insert(
+                        flat_id.clone(),
+                        ComponentInstance {
+                            id: flat_id.clone(),
+                            type_id: "sink.probe".into(),
+                            properties: ComponentProperties::default(),
+                        },
+                    );
+                    provenance.components.insert(flat_id, component_ref);
+                }
+                MODULE_INSTANCE => {
+                    let module_id = component
+                        .properties
+                        .module_id()
+                        .expect("validated module instance");
+                    let mut child_path = path.clone();
+                    child_path.push(component.id.clone());
+                    stack.push((module_id.to_owned(), child_path, false));
+                }
+                _ => {
+                    let kind = ComponentKind::from_type_id(&component.type_id)
+                        .expect("validated primitive component type");
+                    components.insert(
+                        flat_id.clone(),
+                        ComponentInstance {
+                            id: flat_id.clone(),
+                            type_id: component.type_id.clone(),
+                            properties: ComponentProperties {
+                                value: component.properties.known_value(),
+                            },
+                        },
+                    );
+                    if matches!(kind, ComponentKind::TritInput | ComponentKind::Constant) {
+                        provenance
+                            .source_copies
+                            .entry(component_ref.clone())
+                            .or_default()
+                            .push(flat_id.clone());
+                    }
+                    provenance.components.insert(flat_id, component_ref);
                 }
             }
         }
     }
 
-    endpoints.into_iter().collect()
+    for copies in provenance.source_copies.values_mut() {
+        copies.sort();
+        copies.dedup();
+    }
+    CompiledProject {
+        circuit: CircuitDefinition {
+            components: components.into_values().collect(),
+            connections: wiring.connections,
+        },
+        projection: wiring.projection,
+        provenance,
+    }
 }
 
 fn flat_component_id(path: &[String], component_id: &str) -> String {
@@ -722,22 +1166,49 @@ fn escape_segment(segment: &str) -> String {
     segment.replace('~', "~0").replace('/', "~1")
 }
 
-fn limit_error(active_circuit_id: &str, message: impl Into<String>) -> ProjectDiagnostic {
-    project_error(
-        "HIERARCHY_EXPANSION_LIMIT",
-        message.into(),
-        active_circuit_id,
+fn growth_location(active: &ProjectCircuit) -> Option<QualifiedComponentRef> {
+    active
+        .components
+        .iter()
+        .find(|component| component.type_id == MODULE_INSTANCE)
+        .or_else(|| active.components.last())
+        .map(|component| QualifiedComponentRef::new(&active.id, [] as [&str; 0], &component.id))
+}
+
+fn node_location(node: &NodeKey) -> QualifiedComponentRef {
+    QualifiedComponentRef::new(
+        &node.circuit_id,
+        node.instance_path.iter().cloned(),
+        &node.component_id,
     )
 }
 
-fn project_error(code: &str, message: String, circuit_id: &str) -> ProjectDiagnostic {
-    let location = QualifiedComponentRef::new(circuit_id, [] as [&str; 0], "");
+fn port_location(port: &QualifiedPortRef) -> QualifiedComponentRef {
+    QualifiedComponentRef::new(
+        &port.circuit_id,
+        port.instance_path.iter().cloned(),
+        &port.component_id,
+    )
+}
+
+fn limit_error(
+    location: Option<QualifiedComponentRef>,
+    message: impl Into<String>,
+) -> ProjectDiagnostic {
+    project_error("HIERARCHY_EXPANSION_LIMIT", message.into(), location)
+}
+
+fn project_error(
+    code: &str,
+    message: String,
+    location: Option<QualifiedComponentRef>,
+) -> ProjectDiagnostic {
     ProjectDiagnostic {
         code: code.into(),
         severity: Severity::Error,
         message,
-        primary_location: Some(ProjectLocation::Component(location.clone())),
-        component_refs: vec![location],
+        primary_location: location.clone().map(ProjectLocation::Component),
+        component_refs: location.into_iter().collect(),
         connection_refs: vec![],
         port_refs: vec![],
     }

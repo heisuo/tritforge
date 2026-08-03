@@ -89,17 +89,33 @@ fn identity_module(id: &str) -> ProjectCircuit {
     )
 }
 
-fn assert_limit(result: Result<impl Sized, Vec<ProjectDiagnostic>>) {
+fn assert_limit(result: Result<impl Sized, Vec<ProjectDiagnostic>>) -> ProjectDiagnostic {
     let diagnostics = match result {
         Ok(_) => panic!("hierarchy must exceed a fixed budget"),
         Err(diagnostics) => diagnostics,
     };
+    let diagnostic = diagnostics
+        .into_iter()
+        .find(|diagnostic| diagnostic.code == "HIERARCHY_EXPANSION_LIMIT")
+        .unwrap_or_else(|| panic!("unexpected diagnostics"));
     assert!(
-        diagnostics
+        diagnostic
+            .component_refs
             .iter()
-            .any(|diagnostic| diagnostic.code == "HIERARCHY_EXPANSION_LIMIT"),
-        "unexpected diagnostics: {diagnostics:?}"
+            .all(|reference| !reference.component_id.is_empty()),
+        "budget diagnostics must never contain fake empty component IDs: {diagnostic:?}"
     );
+    diagnostic
+}
+
+#[test]
+fn rejects_a_missing_active_circuit_without_a_fake_component_location() {
+    let main = circuit("main", ProjectCircuitKind::Main, vec![], vec![]);
+    let diagnostics = compile_project(&validated(vec![main]), "missing").unwrap_err();
+
+    assert_eq!(diagnostics[0].code, "INVALID_ACTIVE_CIRCUIT");
+    assert!(diagnostics[0].primary_location.is_none());
+    assert!(diagnostics[0].component_refs.is_empty());
 }
 
 #[test]
@@ -253,6 +269,92 @@ fn rewiring_forms_the_driver_consumer_cartesian_product() {
 }
 
 #[test]
+fn compiles_a_large_transparent_alias_cycle_with_bounded_provenance_work() {
+    const INSTANCE_COUNT: usize = 2_000;
+    let mut components = vec![
+        component(
+            "source",
+            "source.constant",
+            serde_json::json!({"value": "1"}),
+        ),
+        component("probe", "sink.probe", serde_json::json!({})),
+    ];
+    components.extend(
+        (0..INSTANCE_COUNT).map(|index| module_instance(&format!("identity-{index}"), "identity")),
+    );
+    let mut connections = vec![
+        connection("drive", "source", "out", "identity-0", "a"),
+        connection(
+            "tap",
+            format!("identity-{}", INSTANCE_COUNT / 2),
+            "y",
+            "probe",
+            "in",
+        ),
+    ];
+    connections.extend((0..INSTANCE_COUNT).map(|index| {
+        connection(
+            format!("cycle-{index}"),
+            format!("identity-{index}"),
+            "y",
+            format!("identity-{}", (index + 1) % INSTANCE_COUNT),
+            "a",
+        )
+    }));
+    let main = circuit("main", ProjectCircuitKind::Main, components, connections);
+
+    let compiled = compile_project(&validated(vec![main, identity_module("identity")]), "main")
+        .expect("bounded alias cycle should compile");
+    assert_eq!(compiled.circuit.connections.len(), 1);
+    assert_eq!(
+        compiled.provenance.connections["flat-wire-00000"].len(),
+        (INSTANCE_COUNT * 2) + 2
+    );
+}
+
+#[test]
+fn compiles_a_long_transparent_chain_without_quadratic_provenance_storage() {
+    const INSTANCE_COUNT: usize = 2_000;
+    let mut components = vec![
+        component(
+            "source",
+            "source.constant",
+            serde_json::json!({"value": "1"}),
+        ),
+        component("probe", "sink.probe", serde_json::json!({})),
+    ];
+    components.extend(
+        (0..INSTANCE_COUNT).map(|index| module_instance(&format!("identity-{index}"), "identity")),
+    );
+    let mut connections = vec![connection("drive", "source", "out", "identity-0", "a")];
+    connections.extend((0..INSTANCE_COUNT - 1).map(|index| {
+        connection(
+            format!("link-{index}"),
+            format!("identity-{index}"),
+            "y",
+            format!("identity-{}", index + 1),
+            "a",
+        )
+    }));
+    connections.push(connection(
+        "read",
+        format!("identity-{}", INSTANCE_COUNT - 1),
+        "y",
+        "probe",
+        "in",
+    ));
+    let main = circuit("main", ProjectCircuitKind::Main, components, connections);
+
+    let compiled = compile_project(&validated(vec![main, identity_module("identity")]), "main")
+        .expect("long transparent chain should compile");
+    assert_eq!(compiled.circuit.connections.len(), 1);
+    assert_eq!(
+        compiled.provenance.connections["flat-wire-00000"].len(),
+        (INSTANCE_COUNT * 2) + 1
+    );
+}
+
+#[test]
 fn rejects_depth_thirty_three_before_expansion() {
     let mut circuits = Vec::new();
     circuits.push(circuit(
@@ -275,7 +377,9 @@ fn rejects_depth_thirty_three_before_expansion() {
         ));
     }
     let project = validated(circuits);
-    assert_limit(compile_project(&project, "main"));
+    let diagnostic = assert_limit(compile_project(&project, "main"));
+    assert!(diagnostic.message.contains("depth 33"));
+    assert!(!diagnostic.component_refs.is_empty());
 }
 
 #[test]
@@ -307,6 +411,42 @@ fn rejects_a_five_thousand_level_chain_without_recursive_counting() {
 }
 
 #[test]
+fn rejects_exponential_empty_instances_before_symbolic_expansion() {
+    let leaf = circuit("leaf", ProjectCircuitKind::Module, vec![], vec![]);
+    let level_one = circuit(
+        "level-one",
+        ProjectCircuitKind::Module,
+        (0..101)
+            .map(|index| module_instance(&format!("leaf-{index}"), "leaf"))
+            .collect(),
+        vec![],
+    );
+    let level_two = circuit(
+        "level-two",
+        ProjectCircuitKind::Module,
+        (0..101)
+            .map(|index| module_instance(&format!("one-{index}"), "level-one"))
+            .collect(),
+        vec![],
+    );
+    let main = circuit(
+        "main",
+        ProjectCircuitKind::Main,
+        (0..101)
+            .map(|index| module_instance(&format!("two-{index}"), "level-two"))
+            .collect(),
+        vec![],
+    );
+
+    let diagnostic = assert_limit(compile_project(
+        &validated(vec![main, level_two, level_one, leaf]),
+        "main",
+    ));
+    assert!(diagnostic.message.contains("instance count"));
+    assert!(diagnostic.message.contains("1040603"));
+}
+
+#[test]
 fn rejects_ten_thousand_and_one_flat_components() {
     let components = (0..10_001)
         .map(|index| {
@@ -319,7 +459,8 @@ fn rejects_ten_thousand_and_one_flat_components() {
         .collect();
     let main = circuit("main", ProjectCircuitKind::Main, components, vec![]);
     let project = validated(vec![main]);
-    assert_limit(compile_project(&project, "main"));
+    let diagnostic = assert_limit(compile_project(&project, "main"));
+    assert!(diagnostic.message.contains("10001"));
 }
 
 #[test]
@@ -360,7 +501,63 @@ fn rejects_fifty_thousand_and_one_flat_connections() {
         components,
         connections,
     )]);
-    assert_limit(compile_project(&project, "main"));
+    let diagnostic = assert_limit(compile_project(&project, "main"));
+    assert!(diagnostic.message.contains("at least"));
+    assert!(diagnostic.message.contains("exceeding 50000"));
+}
+
+#[test]
+fn rejects_a_boundary_cartesian_product_during_analysis() {
+    let mut fanout_components = vec![module_input("input", "a")];
+    let mut fanout_connections = Vec::new();
+    for target in 0..200 {
+        fanout_components.push(component(
+            &format!("target-{target}"),
+            "sink.probe",
+            serde_json::json!({}),
+        ));
+        fanout_connections.push(connection(
+            format!("fanout-{target}"),
+            "input",
+            "out",
+            format!("target-{target}"),
+            "in",
+        ));
+    }
+    let fanout = circuit(
+        "fanout",
+        ProjectCircuitKind::Module,
+        fanout_components,
+        fanout_connections,
+    );
+
+    let mut main_components = vec![module_instance("fanout-1", "fanout")];
+    let mut main_connections = Vec::new();
+    for source in 0..251 {
+        main_components.push(component(
+            &format!("source-{source}"),
+            "source.constant",
+            serde_json::json!({"value": "0"}),
+        ));
+        main_connections.push(connection(
+            format!("driver-{source}"),
+            format!("source-{source}"),
+            "out",
+            "fanout-1",
+            "a",
+        ));
+    }
+    let main = circuit(
+        "main",
+        ProjectCircuitKind::Main,
+        main_components,
+        main_connections,
+    );
+
+    let diagnostic = assert_limit(compile_project(&validated(vec![main, fanout]), "main"));
+    assert!(diagnostic.message.contains("at least"));
+    assert!(diagnostic.message.contains("exceeding 50000"));
+    assert_eq!(diagnostic.component_refs[0].component_id, "fanout-1");
 }
 
 #[test]
@@ -396,7 +593,9 @@ fn rejects_one_hundred_thousand_and_one_projection_endpoints() {
         vec![],
     );
     let project = validated(vec![main, many_outputs]);
-    assert_limit(compile_project(&project, "main"));
+    let diagnostic = assert_limit(compile_project(&project, "main"));
+    assert!(diagnostic.message.contains("symbolic analysis node count"));
+    assert!(diagnostic.message.contains("200003"));
 }
 
 #[test]
