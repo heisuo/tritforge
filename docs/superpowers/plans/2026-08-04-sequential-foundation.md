@@ -270,33 +270,33 @@ git commit -m "feat: tick stateful ternary circuits"
 - Modify: `crates/sim-core/tests/project_simulation.rs`
 - Modify: `crates/sim-core/tests/project_validation.rs`
 
-- [ ] **Step 1: Write failing hierarchical DFF compilation tests**
+- [x] **Step 1: Write failing hierarchical DFF compilation tests**
 
 Create a `BitCell` module containing Module Input `d/en/rst/clk`, one DFF, and Module Output
 `q`. Instantiate it twice. Assert both flattened DFF IDs exist and differ, while each module
 output projects to its own DFF Q.
 
-- [ ] **Step 2: Write failing independent-state and lifecycle tests**
+- [x] **Step 2: Write failing independent-state and lifecycle tests**
 
 Drive the two instances with different D values and the same top-level Clock; after one
 project tick assert `q0=1`, `q1=T`. Change only D and assert state is retained until the next
 tick. Assert an unreachable module edit preserves tick count/state, while active structure
 edit and `switch_active` reset them to zero.
 
-- [ ] **Step 3: Run RED**
+- [x] **Step 3: Run RED**
 
 ```bash
 cargo test -p sim-core --test hierarchy_compilation dff
 cargo test -p sim-core --test project_simulation tick
 ```
 
-- [ ] **Step 4: Extend project validation and flattening**
+- [x] **Step 4: Extend project validation and flattening**
 
 Treat Clock/DFF as ordinary builtins with empty runtime properties. Ensure the flattening
 match that creates `ComponentProperties` accepts both kinds and keeps their unique structured
 flat IDs/provenance.
 
-- [ ] **Step 5: Add project tick and projected count**
+- [x] **Step 5: Add project tick and projected count**
 
 Add `tick_count: u64` to `ProjectSnapshot` and:
 
@@ -307,7 +307,7 @@ pub fn tick(&mut self) -> Result<ProjectSnapshot, ProjectDiagnostic>;
 Return `PROJECT_NOT_READY` when invalid. Delegate to the flat simulator and pass the flat
 snapshot through `project_snapshot`; compile count must not change.
 
-- [ ] **Step 6: Run GREEN and commit**
+- [x] **Step 6: Run GREEN and commit**
 
 ```bash
 cargo test -p sim-core --test hierarchy_compilation
