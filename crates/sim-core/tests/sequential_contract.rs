@@ -50,10 +50,17 @@ fn reset_meta_states_override_every_current_data_and_enable_state() {
 fn positive_enable_captures_each_data_state_when_reset_is_deasserted() {
     for rst in [Trit::Neg, Trit::Zero] {
         for current in TRITS {
-            for d in TRITS {
+            for (d, expected) in [
+                (Trit::Neg, Trit::Neg),
+                (Trit::Zero, Trit::Zero),
+                (Trit::Pos, Trit::Pos),
+                (Trit::Unknown, Trit::Unknown),
+                (Trit::HighZ, Trit::Unknown),
+                (Trit::Error, Trit::Error),
+            ] {
                 assert_eq!(
                     dff_next(current, d, Trit::Pos, rst),
-                    d.normalize_gate_input(),
+                    expected,
                     "unexpected capture for current={current:?}, d={d:?}, rst={rst:?}"
                 );
             }
