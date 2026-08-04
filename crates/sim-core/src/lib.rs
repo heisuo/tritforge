@@ -6,6 +6,7 @@ pub mod hierarchy;
 pub mod project;
 pub mod project_simulator;
 pub mod project_validation;
+pub mod sequential;
 pub mod simulator;
 pub mod trit;
 
