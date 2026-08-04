@@ -708,7 +708,7 @@ git commit -m "feat: edit and navigate reusable subcircuits"
 - Modify: `apps/web/playwright.config.ts`
 - Create: `docs/images/phase2a-hierarchy.png`
 
-- [ ] **Step 1: Add failing example contracts**
+- [x] **Step 1: Add failing example contracts**
 
 Freeze composition:
 
@@ -721,14 +721,14 @@ Main:       3 Trit Input + 1 Full Adder instance + 2 Probe
 Enumerate all 27 known inputs through Rust/WASM and assert
 `a + b + cin = sum + 3 * carry`.
 
-- [ ] **Step 2: Add failing Playwright acceptance**
+- [x] **Step 2: Add failing Playwright acceptance**
 
 Automate load, output verification, Full Adder -> Half Adder navigation,
 breadcrumb return, shared-definition update, port/module deletion protection,
 v2 export/clear/import, recursive import diagnostics, and no console errors or
 overflow at 1440x900, 900x700, and 390x844.
 
-- [ ] **Step 3: Add 100-Full-Adder performance test**
+- [x] **Step 3: Add 100-Full-Adder performance test**
 
 ```typescript
 expect(result.fullAdderInstances).toBe(100);
@@ -740,13 +740,13 @@ expect(result.compileCountAfterInputs).toBe(result.compileCountBeforeInputs);
 Print expanded components, connections, projection endpoints, compile time,
 propagation time, and compile counts.
 
-- [ ] **Step 4: Implement example and capture screenshot**
+- [x] **Step 4: Implement example and capture screenshot**
 
 Add `hierarchy.spec.ts` to Playwright matching. Capture the Half Adder internal
 view at 1440x900 to `docs/images/phase2a-hierarchy.png`; inspect it with
 `view_image` before documentation references it.
 
-- [ ] **Step 5: Run GREEN and commit**
+- [x] **Step 5: Run GREEN and commit**
 
 ```bash
 npm --prefix apps/web test
