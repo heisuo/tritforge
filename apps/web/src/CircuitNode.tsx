@@ -3,7 +3,9 @@ import {
   Box,
   Boxes,
   CircleDot,
+  Clock3,
   Gauge,
+  PanelTop,
   Radio,
   Triangle,
   Workflow,
@@ -49,6 +51,12 @@ function ComponentIcon({ typeId }: { typeId: string }) {
   if (typeId === "source.constant") {
     return <Box aria-hidden="true" />;
   }
+  if (typeId === "source.clock") {
+    return <Clock3 aria-hidden="true" />;
+  }
+  if (typeId === "sequential.dff") {
+    return <PanelTop aria-hidden="true" />;
+  }
   if (typeId === "sink.probe") {
     return <Gauge aria-hidden="true" />;
   }
@@ -74,12 +82,18 @@ export function CircuitNode({
   const primarySignal =
     data.typeId === "sink.probe" || data.typeId === "project.module_output"
       ? inputs.in ?? "Z"
+      : data.typeId === "sequential.dff"
+        ? outputs.q ?? "Z"
       : outputs.out ?? outputs.y ?? outputs.sum ?? data.sourceValue ?? "Z";
 
   return (
     <div
       className={`circuit-node signal-${primarySignal} ${
         data.typeId.startsWith("project.module_") ? "is-project-node" : ""
+      } ${
+        data.typeId === "source.clock" || data.typeId === "sequential.dff"
+          ? "is-sequential-node"
+          : ""
       } ${
         selected ? "is-selected" : ""
       }`}

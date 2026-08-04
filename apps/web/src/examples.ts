@@ -6,6 +6,7 @@ import type {
 } from "./editor-model";
 import { toEditorDocument } from "./editor/circuit-document";
 import { cloneHierarchicalAdderProject } from "./examples/hierarchical-adder";
+import { cloneSequentialDffProject } from "./examples/sequential-dff";
 import type { ProjectDocumentV2 } from "./project/project-document";
 
 export type ExampleId =
@@ -17,7 +18,8 @@ export type ExampleId =
   | "full-adder"
   | "hierarchical-adder"
   | "ripple-adder-3"
-  | "driver-conflict";
+  | "driver-conflict"
+  | "sequential-dff";
 
 export interface TernaryExample {
   id: ExampleId;
@@ -66,6 +68,15 @@ const hierarchicalRootDocument = toEditorDocument({
   components: hierarchicalRoot.components,
   connections: hierarchicalRoot.connections,
   ...(hierarchicalRoot.viewport ? { viewport: hierarchicalRoot.viewport } : {}),
+});
+const sequentialDffProject = cloneSequentialDffProject();
+const sequentialDffRoot = sequentialDffProject.circuits[0];
+const sequentialDffDocument = toEditorDocument({
+  format: "logsim-ternary",
+  version: 1,
+  components: sequentialDffRoot.components,
+  connections: sequentialDffRoot.connections,
+  ...(sequentialDffRoot.viewport ? { viewport: sequentialDffRoot.viewport } : {}),
 });
 
 export const EXAMPLES: TernaryExample[] = [
@@ -296,6 +307,16 @@ export const EXAMPLES: TernaryExample[] = [
       ],
     },
   },
+  {
+    id: "sequential-dff",
+    name: "单 trit DFF",
+    category: "时序电路",
+    description: "用 D、Clock、EN 和同步 RST 驱动一个可单步观察的 D 型触发器。",
+    composition: "D Input + Clock + EN + RST → DFF → Q Probe",
+    expected: "默认 D=1、EN=1、RST=0，载入时 Q=0，单步后 Q=1",
+    document: sequentialDffDocument,
+    project: cloneSequentialDffProject(),
+  },
 ];
 
 export function cloneExampleDocument(id: ExampleId): EditorDocument {
@@ -314,5 +335,7 @@ export function cloneExampleDocument(id: ExampleId): EditorDocument {
 }
 
 export function cloneExampleProject(id: ExampleId): ProjectDocumentV2 | null {
-  return id === "hierarchical-adder" ? cloneHierarchicalAdderProject() : null;
+  if (id === "hierarchical-adder") return cloneHierarchicalAdderProject();
+  if (id === "sequential-dff") return cloneSequentialDffProject();
+  return null;
 }

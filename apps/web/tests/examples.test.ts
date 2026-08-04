@@ -9,6 +9,7 @@ import {
 const TYPE_IDS = [
   "source.trit_input",
   "source.constant",
+  "source.clock",
   "sink.probe",
   "gate.buf",
   "gate.neg",
@@ -37,6 +38,7 @@ describe("example library", () => {
       "hierarchical-adder",
       "ripple-adder-3",
       "driver-conflict",
+      "sequential-dff",
     ]);
   });
 

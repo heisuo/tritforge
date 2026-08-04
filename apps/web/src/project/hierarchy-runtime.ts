@@ -124,6 +124,23 @@ export class HierarchyRuntime {
     }
   }
 
+  tick(): ProjectSimulationSnapshot {
+    this.requireLoaded();
+    if (!this.projectValid) {
+      throw new HierarchyRuntimeError({
+        name: "SimulationError",
+        code: "PROJECT_NOT_READY",
+        message: "project simulation is unavailable until validation succeeds",
+        diagnostics: [],
+      });
+    }
+    try {
+      return this.accept(this.wasm.tick());
+    } catch (error) {
+      throw new HierarchyRuntimeError(wasmProjectError(error));
+    }
+  }
+
   switchActive(activeCircuitId: string): ProjectSimulationSnapshot {
     const project = this.requireLoaded();
     if (!this.wasmProjectSynchronized) {
@@ -150,6 +167,11 @@ export class HierarchyRuntime {
 
   snapshot(): ProjectSimulationSnapshot | null {
     return this.currentSnapshot;
+  }
+
+  private accept(snapshot: ProjectSimulationSnapshot): ProjectSimulationSnapshot {
+    this.currentSnapshot = snapshot;
+    return snapshot;
   }
 
   private requireLoaded(): ProjectDocumentV2 {

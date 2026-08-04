@@ -127,6 +127,19 @@ describe("hierarchy runtime", () => {
     expect(wasm.switchActive).toHaveBeenCalledWith("half-adder");
   });
 
+  it("ticks through WASM and accepts the returned tick count", () => {
+    const wasm = binding();
+    const runtime = new HierarchyRuntime(wasm);
+    runtime.load(project(), "main");
+    const ticked = { ...snapshot(1), tickCount: 3 };
+    wasm.tick.mockReturnValueOnce(ticked);
+
+    expect(runtime.tick()).toBe(ticked);
+    expect(wasm.tick).toHaveBeenCalledTimes(1);
+    expect(runtime.snapshot()).toBe(ticked);
+    expect(runtime.snapshot()?.tickCount).toBe(3);
+  });
+
   it("defers a zero-copy source until its module is about to become active", () => {
     const wasm = binding();
     const runtime = new HierarchyRuntime(wasm);

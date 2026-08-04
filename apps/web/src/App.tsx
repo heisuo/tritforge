@@ -17,6 +17,7 @@ import {
   Activity,
   Box,
   CircleDot,
+  Clock3,
   Download,
   Gauge,
   Library,
@@ -25,9 +26,11 @@ import {
   MousePointer2,
   PanelLeft,
   PanelRight,
+  PanelTop,
   Plus,
   Radio,
   Redo2,
+  StepForward,
   RotateCcw,
   Trash2,
   Triangle,
@@ -108,6 +111,7 @@ const DEFAULT_EDGE_OPTIONS = { type: "logic" as const };
 const DISPLAY_NAMES: Record<string, string> = {
   "source.trit_input": "Trit Input",
   "source.constant": "Constant",
+  "source.clock": "Clock",
   "sink.probe": "Probe",
   "gate.buf": "BUF",
   "gate.neg": "NEG",
@@ -122,6 +126,7 @@ const DISPLAY_NAMES: Record<string, string> = {
   "gate.mux3": "MUX3",
   "module.half_adder": "Half Adder",
   "module.full_adder": "Full Adder",
+  "sequential.dff": "DFF",
   "project.module_input": "Module Input",
   "project.module_output": "Module Output",
   "project.module_instance": "Module Instance",
@@ -163,6 +168,8 @@ function circuitDocument(circuit: ProjectCircuit): CircuitDocument {
 function descriptorIcon(descriptor: CatalogComponent) {
   if (descriptor.type_id === "source.trit_input") return Radio;
   if (descriptor.type_id === "source.constant") return Box;
+  if (descriptor.type_id === "source.clock") return Clock3;
+  if (descriptor.type_id === "sequential.dff") return PanelTop;
   if (descriptor.type_id === "sink.probe") return Gauge;
   if (descriptor.type_id.includes("mux")) return Triangle;
   if (descriptor.category === "module" || descriptor.category === "project-module") {
@@ -325,6 +332,17 @@ function Workbench() {
       runtimeFailure("工程校验失败", error);
     }
   }, [runtimeFailure, setSuccessfulSnapshot, store]);
+
+  const tickSimulation = useCallback(() => {
+    const runtime = runtimeRef.current;
+    if (!runtime) return;
+    try {
+      setSuccessfulSnapshot(runtime.tick());
+      setStatusMessage("已完成单步 Tick");
+    } catch (error) {
+      runtimeFailure("单步 Tick 失败", error);
+    }
+  }, [runtimeFailure, setSuccessfulSnapshot]);
 
   const restoreActiveCircuit = useCallback(() => {
     const state = store.getState();
@@ -547,7 +565,10 @@ function Workbench() {
             : { x: 420, y: 280 };
       }
       const id = makeComponentId(typeId, nodes);
-      const sourceValue = descriptor.category === "source" ? ("0" as KnownTrit) : undefined;
+      const sourceValue =
+        typeId === "source.trit_input" || typeId === "source.constant"
+          ? ("0" as KnownTrit)
+          : undefined;
       applyEditorDocument({
         nodes: [
           ...nodes,
@@ -1165,6 +1186,7 @@ function Workbench() {
           <div className="toolbar-menu" id="mobile-toolbar-menu">
             <button className="icon-button" type="button" title="撤销" aria-label="撤销" disabled={!canUndo} onClick={() => historyStep("undo")}><Undo2 aria-hidden="true" /></button>
             <button className="icon-button" type="button" title="重做" aria-label="重做" disabled={!canRedo} onClick={() => historyStep("redo")}><Redo2 aria-hidden="true" /></button>
+            <button className="icon-button" type="button" title="单步 Tick" aria-label="单步 Tick" disabled={wasmState !== "ready" || !snapshot} onClick={tickSimulation}><StepForward aria-hidden="true" /></button>
             <button type="button" onClick={() => setExampleLibraryOpen(true)}><Library aria-hidden="true" />示例库</button>
             <button type="button" onClick={() => loadExample("neg")}><RotateCcw aria-hidden="true" />默认示例</button>
             <button type="button" onClick={clearCircuit}><Trash2 aria-hidden="true" />清空</button>
@@ -1196,9 +1218,9 @@ function Workbench() {
             onAddInput={() => addBoundary("input")}
             onAddOutput={() => addBoundary("output")}
           />
-          {["source", "gate", "module", "sink"].map((category) => (
+          {["source", "gate", "module", "sequential", "sink"].map((category) => (
             <section className="palette-group" key={category}>
-              <h2>{category === "source" ? "输入与常量" : category === "sink" ? "观测" : category === "module" ? "算术模块" : "逻辑门"}</h2>
+              <h2>{category === "source" ? "输入与常量" : category === "sink" ? "观测" : category === "module" ? "算术模块" : category === "sequential" ? "时序" : "逻辑门"}</h2>
               {baseCatalog.filter((item) => item.category === category).map((descriptor) => {
                 const Icon = descriptorIcon(descriptor);
                 return (
@@ -1251,7 +1273,7 @@ function Workbench() {
       </div>
 
       {exampleLibraryOpen && <ExampleLibrary examples={EXAMPLES} onClose={() => setExampleLibraryOpen(false)} onLoad={loadExample} />}
-      <footer className="statusbar"><span className={`status-dot state-${wasmState}`} /><strong>{statusMessage}</strong><span className="status-separator" /><span>{snapshot ? snapshot.stable ? "STABLE" : "UNSTABLE" : "NO SNAPSHOT"}</span><span>{snapshot?.compileCount ?? 0} COMPILES</span><span>{diagnostics.length} DIAGNOSTICS</span><span className="status-spacer" /><span>{nodes.length} NODES</span><span>{edges.length} WIRES</span></footer>
+      <footer className="statusbar"><span className={`status-dot state-${wasmState}`} /><strong>{statusMessage}</strong><span className="status-separator" /><span>{snapshot ? snapshot.stable ? "STABLE" : "UNSTABLE" : "NO SNAPSHOT"}</span><span>{snapshot?.tickCount ?? 0} TICKS</span><span>{snapshot?.compileCount ?? 0} COMPILES</span><span>{diagnostics.length} DIAGNOSTICS</span><span className="status-spacer" /><span>{nodes.length} NODES</span><span>{edges.length} WIRES</span></footer>
     </main>
   );
 }

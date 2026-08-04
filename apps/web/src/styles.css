@@ -542,6 +542,11 @@ button {
   background: #fbfdfd;
 }
 
+.circuit-node.is-sequential-node {
+  border-color: #8caaa5;
+  box-shadow: 0 2px 8px rgb(35 112 102 / 12%);
+}
+
 .node-heading {
   display: flex;
   gap: 6px;

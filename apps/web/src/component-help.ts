@@ -12,6 +12,10 @@ export const COMPONENT_HELP: Record<string, ComponentHelp> = {
     summary: "输出固定三进制值的常量源，用于提供稳定的数据输入。",
     details: "常量不会随仿真变化，适合搭建选择器数据端和可重复的测试条件。",
   },
+  "source.clock": {
+    summary: "为时序电路提供统一单步时钟的时钟源。",
+    details: "每次点击单步 Tick 都完成一次 0→1→0 的完整时钟脉冲，Clock 不需要 value 属性。",
+  },
   "sink.probe": {
     summary: "观察输入网络当前状态的探针，不会驱动或改变电路。",
     details: "Probe 可以显示 T、0、1，也会直接显示未知 X、高阻 Z 和冲突 E。",
@@ -67,5 +71,9 @@ export const COMPONENT_HELP: Record<string, ComponentHelp> = {
   "module.full_adder": {
     summary: "单 trit 全加器，在半加器基础上额外接收低位传来的 cin。",
     details: "满足 a+b+cin=sum+3×carry。多个全加器首尾连接，就能构成多 trit 行波进位加法器。",
+  },
+  "sequential.dff": {
+    summary: "带写使能和同步复位的单 trit D 型触发器。",
+    details: "DFF 在时钟正沿采样；同步复位优先于写使能，且一次点击 Tick 会完成完整 0→1→0 脉冲并更新 Q。",
   },
 };
