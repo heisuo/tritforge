@@ -287,6 +287,23 @@ fn gates_and_probe_reject_any_value_property() {
 }
 
 #[test]
+fn sequential_components_accept_empty_properties_and_reject_value() {
+    for type_id in ["source.clock", "sequential.dff"] {
+        assert!(
+            validate_circuit(definition(vec![component("valid", type_id)], vec![])).is_ok(),
+            "{type_id} must accept no value"
+        );
+
+        let diagnostic = only_error(definition(
+            vec![component_with_value("invalid", type_id, Some(Trit::Zero))],
+            vec![],
+        ));
+        assert_eq!(diagnostic.code, "INVALID_PROPERTY");
+        assert_eq!(diagnostic.component_ids, vec!["invalid"]);
+    }
+}
+
+#[test]
 fn circuit_definition_and_diagnostic_serde_round_trip() {
     let circuit_json = r#"{
         "components": [

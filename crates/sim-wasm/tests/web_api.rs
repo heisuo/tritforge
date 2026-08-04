@@ -33,7 +33,7 @@ fn connection(
 
 #[wasm_bindgen_test]
 fn api_version_and_catalog_are_available() {
-    assert_eq!(api_version(), 1);
+    assert_eq!(api_version(), 2);
     assert!(component_catalog_json().contains("gate.neg"));
 }
 

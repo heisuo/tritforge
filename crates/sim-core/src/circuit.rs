@@ -276,7 +276,9 @@ fn property_is_valid(kind: ComponentKind, properties: &ComponentProperties) -> b
         | ComponentKind::Mux2
         | ComponentKind::Mux3
         | ComponentKind::HalfAdder
-        | ComponentKind::FullAdder => properties.value.is_none(),
+        | ComponentKind::FullAdder
+        | ComponentKind::Clock
+        | ComponentKind::Dff => properties.value.is_none(),
     }
 }
 

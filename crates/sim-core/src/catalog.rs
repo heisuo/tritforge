@@ -36,6 +36,8 @@ pub enum ComponentKind {
     Mux3,
     HalfAdder,
     FullAdder,
+    Clock,
+    Dff,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,6 +80,8 @@ impl ComponentKind {
             Self::Mux3 => "gate.mux3",
             Self::HalfAdder => "module.half_adder",
             Self::FullAdder => "module.full_adder",
+            Self::Clock => "source.clock",
+            Self::Dff => "sequential.dff",
         }
     }
 
@@ -99,13 +103,17 @@ impl ComponentKind {
             "gate.mux3" => Some(Self::Mux3),
             "module.half_adder" => Some(Self::HalfAdder),
             "module.full_adder" => Some(Self::FullAdder),
+            "source.clock" => Some(Self::Clock),
+            "sequential.dff" => Some(Self::Dff),
             _ => None,
         }
     }
 
     pub fn port_descriptors(self) -> Vec<PortDescriptor> {
         match self {
-            Self::TritInput | Self::Constant => vec![port("out", PortDirection::Output)],
+            Self::TritInput | Self::Constant | Self::Clock => {
+                vec![port("out", PortDirection::Output)]
+            }
             Self::Probe => vec![port("in", PortDirection::Input)],
             Self::Buf | Self::Neg | Self::IsNeg | Self::IsZero | Self::IsPos => vec![
                 port("a", PortDirection::Input),
@@ -142,6 +150,13 @@ impl ComponentKind {
                 port("sum", PortDirection::Output),
                 port("carry", PortDirection::Output),
             ],
+            Self::Dff => vec![
+                port("d", PortDirection::Input),
+                port("clk", PortDirection::Input),
+                port("en", PortDirection::Input),
+                port("rst", PortDirection::Input),
+                port("q", PortDirection::Output),
+            ],
         }
     }
 }
@@ -164,6 +179,8 @@ pub fn component_catalog() -> Vec<ComponentDescriptor> {
         (ComponentKind::Mux3, "3-Way Multiplexer", "gate"),
         (ComponentKind::HalfAdder, "Half Adder", "module"),
         (ComponentKind::FullAdder, "Full Adder", "module"),
+        (ComponentKind::Clock, "Clock", "source"),
+        (ComponentKind::Dff, "D Flip-Flop", "sequential"),
     ]
     .into_iter()
     .map(|(kind, display_name, category)| descriptor(kind, display_name, category))

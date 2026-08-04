@@ -54,6 +54,8 @@ fn phase_one_catalog_has_exact_stable_ids_and_type_lookup() {
             "gate.mux3",
             "module.half_adder",
             "module.full_adder",
+            "source.clock",
+            "sequential.dff",
         ]
     );
 
@@ -181,6 +183,18 @@ fn catalog_has_exact_categories_ports_and_truth_table_sizes() {
             ],
             27_usize,
         ),
+        ("source", vec![("out", PortDirection::Output)], 0_usize),
+        (
+            "sequential",
+            vec![
+                ("d", PortDirection::Input),
+                ("clk", PortDirection::Input),
+                ("en", PortDirection::Input),
+                ("rst", PortDirection::Input),
+                ("q", PortDirection::Output),
+            ],
+            0_usize,
+        ),
     ];
 
     let catalog = component_catalog();
@@ -211,6 +225,11 @@ fn catalog_has_exact_categories_ports_and_truth_table_sizes() {
             descriptor.type_id
         );
     }
+}
+
+#[test]
+fn sequential_foundation_bumps_the_core_api_version() {
+    assert_eq!(sim_core::api_version(), 2);
 }
 
 #[test]
