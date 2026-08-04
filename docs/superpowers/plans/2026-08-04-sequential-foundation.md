@@ -178,7 +178,7 @@ git commit -m "feat: define ternary dff state transitions"
 - Modify: `crates/sim-core/src/simulator.rs`
 - Modify: `crates/sim-core/tests/simulator_propagation.rs`
 
-- [ ] **Step 1: Add failing load, capture, enable, reset, and tick-count tests**
+- [x] **Step 1: Add failing load, capture, enable, reset, and tick-count tests**
 
 Build a circuit with data/enable/reset Trit Inputs, Clock, DFF, and Probe. Assert:
 
@@ -196,19 +196,19 @@ assert_eq!(captured.tick_count, 1);
 
 Then prove `EN=0` holds, `RST=1` overrides, and `reset()` restores Q/tick count.
 
-- [ ] **Step 2: Add the failing simultaneous-capture regression**
+- [x] **Step 2: Add the failing simultaneous-capture regression**
 
 Connect two DFFs as a swap register (`q0 -> d1`, `q1 -> d0`) and initialize them through
 one reset/capture sequence. On the next tick assert they swap. Repeat with reversed component
 IDs and definition order; snapshots must match. This fails if DFFs commit one at a time.
 
-- [ ] **Step 3: Add failing edge and overflow tests**
+- [x] **Step 3: Add failing edge and overflow tests**
 
 Prove a DFF whose `clk` stays at 1 does not sample, a clock passing through BUF does sample,
 and `tick_count == u64::MAX` returns `TICK_COUNT_OVERFLOW` without changing state. Add a
 test-only constructor/helper under `#[cfg(test)]` for the overflow setup.
 
-- [ ] **Step 4: Run RED**
+- [x] **Step 4: Run RED**
 
 ```bash
 cargo test -p sim-core --test simulator_propagation tick
@@ -216,7 +216,7 @@ cargo test -p sim-core --test simulator_propagation tick
 
 Expected: no `tick`, no `tick_count`, Clock/DFF are not runtime-evaluable.
 
-- [ ] **Step 5: Implement session state and runtime outputs**
+- [x] **Step 5: Implement session state and runtime outputs**
 
 Add private maps and initialize from validated component kinds:
 
@@ -229,7 +229,7 @@ clock_levels: BTreeMap<String, Trit>,
 In `evaluate_component`, Clock reads `clock_levels`, DFF reads `dff_outputs`, and all other
 kinds use `gates::evaluate`. Include `tick_count` in `SimulationSnapshot`.
 
-- [ ] **Step 6: Implement transactional `tick()`**
+- [x] **Step 6: Implement transactional `tick()`**
 
 ```rust
 #[allow(clippy::result_large_err)]
@@ -240,7 +240,7 @@ Capture old clock inputs, raise all clocks and settle, compute every rising-edge
 into a separate `BTreeMap`, commit together, settle changed Q outputs, lower clocks, settle,
 then increment the checked count. Do not call `set_sources` for Clock.
 
-- [ ] **Step 7: Extend reset and run GREEN**
+- [x] **Step 7: Extend reset and run GREEN**
 
 Reset DFF maps to zero, Clock maps to zero, and tick count to zero before the existing source
 reset settle.
@@ -251,7 +251,7 @@ cargo test -p sim-core
 cargo clippy -p sim-core --all-targets -- -D warnings
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add crates/sim-core/src/simulator.rs crates/sim-core/tests/simulator_propagation.rs
