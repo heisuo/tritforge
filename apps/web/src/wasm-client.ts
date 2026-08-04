@@ -45,6 +45,13 @@ export interface WasmProjectSimulatorBinding {
     value: KnownTrit,
   ): ProjectSimulationSnapshot;
   snapshot(): ProjectSimulationSnapshot;
+  metrics(): ProjectCompileMetrics;
+}
+
+export interface ProjectCompileMetrics {
+  expandedComponents: number;
+  expandedConnections: number;
+  projectionEndpoints: number;
 }
 
 export interface WasmRuntime {

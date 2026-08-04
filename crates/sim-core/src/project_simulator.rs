@@ -25,6 +25,14 @@ pub struct ProjectSnapshot {
     pub compile_count: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectCompileMetrics {
+    pub expanded_components: usize,
+    pub expanded_connections: usize,
+    pub projection_endpoints: usize,
+}
+
 pub struct ProjectSimulator {
     project: ProjectDocument,
     active_circuit_id: String,
@@ -233,6 +241,25 @@ impl ProjectSimulator {
 
     pub fn snapshot(&self) -> Option<ProjectSnapshot> {
         self.snapshot.clone()
+    }
+
+    pub fn metrics(&self) -> Option<ProjectCompileMetrics> {
+        let compiled = self.compiled.as_ref()?;
+        let projection_endpoints = compiled
+            .projection
+            .ports
+            .values()
+            .chain(compiled.projection.boundaries.values())
+            .map(|entry| match entry.direction {
+                PortDirection::Input => entry.endpoints.len() + entry.drivers.len(),
+                PortDirection::Output => entry.drivers.len(),
+            })
+            .sum();
+        Some(ProjectCompileMetrics {
+            expanded_components: compiled.circuit.components.len(),
+            expanded_connections: compiled.circuit.connections.len(),
+            projection_endpoints,
+        })
     }
 
     fn rebuild(&mut self) -> Result<(), Vec<ProjectDiagnostic>> {

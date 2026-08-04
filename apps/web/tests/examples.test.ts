@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { COMPONENT_HELP } from "../src/component-help";
-import { EXAMPLES, cloneExampleDocument } from "../src/examples";
+import {
+  EXAMPLES,
+  cloneExampleDocument,
+  cloneExampleProject,
+} from "../src/examples";
 
 const TYPE_IDS = [
   "source.trit_input",
@@ -30,6 +34,7 @@ describe("example library", () => {
       "mux3",
       "half-adder",
       "full-adder",
+      "hierarchical-adder",
       "ripple-adder-3",
       "driver-conflict",
     ]);
@@ -107,6 +112,99 @@ describe("example library", () => {
           node.data.typeId === "gate.mux3",
       ),
     ).toBe(false);
+  });
+
+  it("freezes the editable Half Adder -> Full Adder -> Main hierarchy", () => {
+    const project = cloneExampleProject("hierarchical-adder")!;
+    const halfAdder = project.circuits.find((circuit) => circuit.id === "half-adder")!;
+    const fullAdder = project.circuits.find((circuit) => circuit.id === "full-adder")!;
+    const main = project.circuits.find((circuit) => circuit.id === "main")!;
+
+    expect(halfAdder.components.map((component) => component.typeId)).toEqual([
+      "project.module_input",
+      "project.module_input",
+      "gate.mod_sum",
+      "gate.consensus",
+      "project.module_output",
+      "project.module_output",
+    ]);
+    expect(
+      fullAdder.components.filter(
+        (component) => component.typeId === "project.module_input",
+      ),
+    ).toHaveLength(3);
+    expect(
+      fullAdder.components.filter(
+        (component) =>
+          component.typeId === "project.module_instance" &&
+          component.properties.moduleId === "half-adder",
+      ),
+    ).toHaveLength(2);
+    expect(
+      fullAdder.components.filter(
+        (component) => component.typeId === "gate.mod_sum",
+      ),
+    ).toHaveLength(1);
+    expect(fullAdder.components.map((component) => component.typeId)).toEqual([
+      "project.module_input",
+      "project.module_input",
+      "project.module_input",
+      "project.module_instance",
+      "project.module_instance",
+      "gate.mod_sum",
+      "project.module_output",
+      "project.module_output",
+    ]);
+    expect(
+      fullAdder.connections.map((connection) => [
+        connection.sourceComponentId,
+        connection.sourcePortId,
+        connection.targetComponentId,
+        connection.targetPortId,
+      ]),
+    ).toEqual([
+      ["input-a", "out", "half-adder-1", "a"],
+      ["input-b", "out", "half-adder-1", "b"],
+      ["half-adder-1", "sum", "half-adder-2", "a"],
+      ["input-cin", "out", "half-adder-2", "b"],
+      ["half-adder-2", "sum", "output-sum", "in"],
+      ["half-adder-1", "carry", "carry-merge", "a"],
+      ["half-adder-2", "carry", "carry-merge", "b"],
+      ["carry-merge", "y", "output-carry", "in"],
+    ]);
+    expect(main.components.map((component) => component.typeId)).toEqual([
+      "source.trit_input",
+      "source.trit_input",
+      "source.trit_input",
+      "project.module_instance",
+      "sink.probe",
+      "sink.probe",
+    ]);
+    expect(
+      project.circuits.flatMap((circuit) => circuit.components).some(
+        (component) => component.typeId === "module.full_adder",
+      ),
+    ).toBe(false);
+  });
+
+  it("deep-clones the hierarchical project template", () => {
+    const copy = cloneExampleProject("hierarchical-adder")!;
+    copy.circuits[0].components[0].properties.value = "T";
+    expect(
+      cloneExampleProject("hierarchical-adder")!.circuits[0].components[0]
+        .properties.value,
+    ).toBe("1");
+    expect(cloneExampleProject("neg")).toBeNull();
+
+    const exposed = EXAMPLES.find(
+      (example) => example.id === "hierarchical-adder",
+    )!.project!;
+    exposed.circuits[0].components[0].properties.value = "T";
+    expect(
+      cloneExampleProject("hierarchical-adder")!.circuits[0].components[0]
+        .properties.value,
+    ).toBe("1");
+    exposed.circuits[0].components[0].properties.value = "1";
   });
 });
 

@@ -2,7 +2,7 @@ use serde::Deserialize;
 use sim_core::project::{
     ProjectCircuit, ProjectCircuitKind, ProjectComponent, ProjectDiagnostic, ProjectDocument,
 };
-use sim_core::project_simulator::ProjectSnapshot;
+use sim_core::project_simulator::{ProjectCompileMetrics, ProjectSnapshot};
 use sim_wasm::WasmProjectSimulator;
 use wasm_bindgen_test::wasm_bindgen_test;
 
@@ -84,6 +84,10 @@ fn project_handle_loads_updates_and_switches_active_roots() {
     assert_eq!(first.compile_count, 1);
     assert_eq!(second.compile_count, 1);
     assert_eq!(third.compile_count, 2);
+    let metrics: ProjectCompileMetrics =
+        serde_wasm_bindgen::from_value(simulator.metrics().expect("compiled project metrics"))
+            .unwrap();
+    assert_eq!(metrics.expanded_components, 1);
 }
 
 #[derive(Deserialize)]

@@ -190,6 +190,23 @@ impl WasmProjectSimulator {
             })?;
         to_js_value(&snapshot)
     }
+
+    pub fn metrics(&self) -> Result<JsValue, JsValue> {
+        let metrics = self
+            .simulator
+            .as_ref()
+            .ok_or_else(|| BoundaryError::<ProjectDiagnostic>::project_not_loaded().into_js())?
+            .metrics()
+            .ok_or_else(|| {
+                BoundaryError::<ProjectDiagnostic>::new(
+                    "PROJECT_NOT_READY",
+                    "project compile metrics are unavailable until validation succeeds".into(),
+                    Vec::new(),
+                )
+                .into_js()
+            })?;
+        to_js_value(&metrics)
+    }
 }
 
 impl Default for WasmProjectSimulator {

@@ -4,6 +4,9 @@ import type {
   EditorNode,
   KnownTrit,
 } from "./editor-model";
+import { toEditorDocument } from "./editor/circuit-document";
+import { cloneHierarchicalAdderProject } from "./examples/hierarchical-adder";
+import type { ProjectDocumentV2 } from "./project/project-document";
 
 export type ExampleId =
   | "neg"
@@ -12,6 +15,7 @@ export type ExampleId =
   | "mux3"
   | "half-adder"
   | "full-adder"
+  | "hierarchical-adder"
   | "ripple-adder-3"
   | "driver-conflict";
 
@@ -23,6 +27,7 @@ export interface TernaryExample {
   composition: string;
   expected: string;
   document: EditorDocument;
+  project?: ProjectDocumentV2;
 }
 
 function node(
@@ -50,6 +55,18 @@ function edge(
 ): EditorEdge {
   return { id, source, sourceHandle, target, targetHandle };
 }
+
+const hierarchicalProject = cloneHierarchicalAdderProject();
+const hierarchicalRoot = hierarchicalProject.circuits.find(
+  (circuit) => circuit.id === hierarchicalProject.rootCircuitId,
+)!;
+const hierarchicalRootDocument = toEditorDocument({
+  format: "logsim-ternary",
+  version: 1,
+  components: hierarchicalRoot.components,
+  connections: hierarchicalRoot.connections,
+  ...(hierarchicalRoot.viewport ? { viewport: hierarchicalRoot.viewport } : {}),
+});
 
 export const EXAMPLES: TernaryExample[] = [
   {
@@ -206,6 +223,16 @@ export const EXAMPLES: TernaryExample[] = [
     },
   },
   {
+    id: "hierarchical-adder",
+    name: "可展开的层级全加器",
+    category: "层级子电路",
+    description: "主电路实例化 Full Adder，内部再由两个可进入、可编辑的 Half Adder 组成。",
+    composition: "Main → Full Adder → 2 × Half Adder → 基础门",
+    expected: "默认 1 + 1 + 0：SUM=T，CARRY=1；双击实例可逐层查看",
+    document: hierarchicalRootDocument,
+    project: cloneHierarchicalAdderProject(),
+  },
+  {
     id: "ripple-adder-3",
     name: "3-trit 行波进位加法器",
     category: "多 trit 算术",
@@ -280,8 +307,12 @@ export function cloneExampleDocument(id: ExampleId): EditorDocument {
     nodes: example.document.nodes.map((item) => ({
       ...item,
       position: { ...item.position },
-      data: { ...item.data },
+      data: structuredClone(item.data),
     })),
     edges: example.document.edges.map((item) => ({ ...item })),
   };
+}
+
+export function cloneExampleProject(id: ExampleId): ProjectDocumentV2 | null {
+  return id === "hierarchical-adder" ? cloneHierarchicalAdderProject() : null;
 }

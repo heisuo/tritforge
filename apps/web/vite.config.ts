@@ -6,6 +6,11 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: "./tests/setup.ts",
-    exclude: ["tests/phase1.spec.ts", "node_modules/**", "dist/**"],
+    exclude: [
+      "tests/phase1.spec.ts",
+      "tests/hierarchy.spec.ts",
+      "node_modules/**",
+      "dist/**",
+    ],
   },
 });

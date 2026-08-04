@@ -76,6 +76,7 @@ import {
 import {
   EXAMPLES,
   cloneExampleDocument,
+  cloneExampleProject,
   type ExampleId,
   type TernaryExample,
 } from "./examples";
@@ -916,7 +917,9 @@ function Workbench() {
 
   const loadExample = useCallback(
     (exampleId: ExampleId) => {
-      const next = migrateV1ToV2(fromEditorDocument(cloneExampleDocument(exampleId)));
+      const next =
+        cloneExampleProject(exampleId) ??
+        migrateV1ToV2(fromEditorDocument(cloneExampleDocument(exampleId)));
       const example = EXAMPLES.find((item) => item.id === exampleId);
       loadProject(next, `已载入示例: ${example?.name ?? exampleId}`);
       setActiveExampleId(exampleId);

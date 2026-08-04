@@ -124,6 +124,13 @@ fn projects_active_canvas_signals_to_logical_module_ports() {
             .keys()
             .all(|id| !id.contains('/'))
     );
+
+    let metrics = simulator
+        .metrics()
+        .expect("loaded project has compile metrics");
+    assert_eq!(metrics.expanded_components, 3);
+    assert_eq!(metrics.expanded_connections, 2);
+    assert_eq!(metrics.projection_endpoints, 9);
 }
 
 #[test]

@@ -96,6 +96,11 @@ function binding() {
         snapshot(count),
     ),
     snapshot: vi.fn(() => snapshot(count)),
+    metrics: vi.fn(() => ({
+      expandedComponents: 0,
+      expandedConnections: 0,
+      projectionEndpoints: 0,
+    })),
   } satisfies WasmProjectSimulatorBinding;
 }
 

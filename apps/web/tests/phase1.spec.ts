@@ -40,6 +40,7 @@ async function connect(page: Page, sourceTestId: string, targetTestId: string) {
 test("edits and simulates a ternary circuit through Rust/WASM", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
   const consoleErrors = watchConsoleErrors(page);
   await waitForSimulator(page);
 
@@ -77,10 +78,17 @@ test("edits and simulates a ternary circuit through Rust/WASM", async ({
   const inputItem = page.locator(".palette-item").filter({ hasText: "Trit Input" });
   const minItem = page.locator(".palette-item").filter({ hasText: /^MIN/ });
   const probeItem = page.locator(".palette-item").filter({ hasText: "Probe" });
-  await inputItem.dragTo(canvas, { targetPosition: { x: 120, y: 160 } });
-  await inputItem.dragTo(canvas, { targetPosition: { x: 120, y: 430 } });
-  await minItem.dragTo(canvas, { targetPosition: { x: 430, y: 290 } });
-  await probeItem.dragTo(canvas, { targetPosition: { x: 740, y: 290 } });
+  await inputItem.dragTo(canvas, { targetPosition: { x: 80, y: 160 } });
+  const widthBeforeZoom =
+    (await node(page, "trit-input-1").boundingBox())?.width ?? 0;
+  await canvas.hover({ position: { x: 440, y: 320 } });
+  await page.mouse.wheel(0, 600);
+  await expect
+    .poll(async () => (await node(page, "trit-input-1").boundingBox())?.width ?? 0)
+    .toBeLessThan(widthBeforeZoom * 0.9);
+  await inputItem.dragTo(canvas, { targetPosition: { x: 80, y: 430 } });
+  await minItem.dragTo(canvas, { targetPosition: { x: 600, y: 290 } });
+  await probeItem.dragTo(canvas, { targetPosition: { x: 800, y: 290 } });
   await expect(page.locator(".react-flow__node")).toHaveCount(4);
 
   await node(page, "trit-input-2").click();
@@ -90,11 +98,13 @@ test("edits and simulates a ternary circuit through Rust/WASM", async ({
     "handle-trit-input-1-output-out",
     "handle-min-1-input-a",
   );
+  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
   await connect(
     page,
     "handle-trit-input-2-output-out",
     "handle-min-1-input-b",
   );
+  await expect(page.locator(".react-flow__edge")).toHaveCount(2);
   await connect(page, "handle-min-1-output-y", "handle-probe-1-input-in");
   await expect(page.locator(".react-flow__edge")).toHaveCount(3);
   await expect(node(page, "probe-1").locator(".node-signal")).toHaveText("0");
