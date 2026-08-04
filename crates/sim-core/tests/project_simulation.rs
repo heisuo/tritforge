@@ -90,6 +90,146 @@ fn inverter_module() -> ProjectCircuit {
     )
 }
 
+fn bit_cell_module() -> ProjectCircuit {
+    circuit(
+        "bit-cell",
+        ProjectCircuitKind::Module,
+        vec![
+            module_input("d-input", "d"),
+            module_input("en-input", "en"),
+            module_input("rst-input", "rst"),
+            module_input("clk-input", "clk"),
+            component("dff", "sequential.dff", serde_json::json!({})),
+            module_output("q-output", "q"),
+        ],
+        vec![
+            connection("d", "d-input", "out", "dff", "d"),
+            connection("en", "en-input", "out", "dff", "en"),
+            connection("rst", "rst-input", "out", "dff", "rst"),
+            connection("clk", "clk-input", "out", "dff", "clk"),
+            connection("q", "dff", "q", "q-output", "in"),
+        ],
+    )
+}
+
+fn sequential_project() -> ProjectDocument {
+    let main = circuit(
+        "main",
+        ProjectCircuitKind::Main,
+        vec![
+            component("d0", "source.trit_input", serde_json::json!({"value": "1"})),
+            component("d1", "source.trit_input", serde_json::json!({"value": "T"})),
+            component("en", "source.constant", serde_json::json!({"value": "1"})),
+            component("rst", "source.constant", serde_json::json!({"value": "0"})),
+            component("clock", "source.clock", serde_json::json!({})),
+            module_instance("cell-0", "bit-cell"),
+            module_instance("cell-1", "bit-cell"),
+        ],
+        vec![
+            connection("d0", "d0", "out", "cell-0", "d"),
+            connection("d1", "d1", "out", "cell-1", "d"),
+            connection("en0", "en", "out", "cell-0", "en"),
+            connection("en1", "en", "out", "cell-1", "en"),
+            connection("rst0", "rst", "out", "cell-0", "rst"),
+            connection("rst1", "rst", "out", "cell-1", "rst"),
+            connection("clk0", "clock", "out", "cell-0", "clk"),
+            connection("clk1", "clock", "out", "cell-1", "clk"),
+        ],
+    );
+    let spare = circuit("spare", ProjectCircuitKind::Module, vec![], vec![]);
+    project(vec![main, bit_cell_module(), spare])
+}
+
+#[test]
+fn ticks_shared_dff_instances_independently_and_retains_state_for_value_updates() {
+    let initial = sequential_project();
+    let mut simulator = ProjectSimulator::load(initial.clone(), "main").unwrap();
+
+    let captured = simulator.tick().unwrap();
+    assert_eq!(captured.component_outputs["cell-0"]["q"], Trit::Pos);
+    assert_eq!(captured.component_outputs["cell-1"]["q"], Trit::Neg);
+    assert_eq!(captured.tick_count, 1);
+    assert_eq!(captured.compile_count, 1);
+    let serialized = serde_json::to_value(&captured).unwrap();
+    assert_eq!(serialized["tickCount"], 1);
+    assert!(serialized.get("tick_count").is_none());
+
+    let mut changed_data = initial;
+    changed_data.circuits[0].components[0] =
+        component("d0", "source.trit_input", serde_json::json!({"value": "T"}));
+    let retained = simulator.update_project(changed_data).unwrap();
+    assert_eq!(retained.component_outputs["cell-0"]["q"], Trit::Pos);
+    assert_eq!(retained.component_outputs["cell-1"]["q"], Trit::Neg);
+    assert_eq!(retained.tick_count, 1);
+    assert_eq!(retained.compile_count, 1);
+
+    let next = simulator.tick().unwrap();
+    assert_eq!(next.component_outputs["cell-0"]["q"], Trit::Neg);
+    assert_eq!(next.component_outputs["cell-1"]["q"], Trit::Neg);
+    assert_eq!(next.tick_count, 2);
+    assert_eq!(next.compile_count, 1);
+}
+
+#[test]
+fn preserves_sequential_runtime_for_unreachable_edits_but_resets_for_active_structure() {
+    let initial = sequential_project();
+    let mut simulator = ProjectSimulator::load(initial.clone(), "main").unwrap();
+    simulator.tick().unwrap();
+
+    let mut unreachable_edit = initial;
+    unreachable_edit.circuits[2].components.push(component(
+        "unused",
+        "source.constant",
+        serde_json::json!({"value": "0"}),
+    ));
+    let retained = simulator.update_project(unreachable_edit.clone()).unwrap();
+    assert_eq!(retained.component_outputs["cell-0"]["q"], Trit::Pos);
+    assert_eq!(retained.component_outputs["cell-1"]["q"], Trit::Neg);
+    assert_eq!(retained.tick_count, 1);
+    assert_eq!(retained.compile_count, 1);
+
+    unreachable_edit.circuits[0].components.push(component(
+        "unused-probe",
+        "sink.probe",
+        serde_json::json!({}),
+    ));
+    let rebuilt = simulator.update_project(unreachable_edit).unwrap();
+    assert_eq!(rebuilt.component_outputs["cell-0"]["q"], Trit::Zero);
+    assert_eq!(rebuilt.component_outputs["cell-1"]["q"], Trit::Zero);
+    assert_eq!(rebuilt.tick_count, 0);
+    assert_eq!(rebuilt.compile_count, 2);
+}
+
+#[test]
+fn switching_active_circuits_resets_sequential_runtime() {
+    let mut simulator = ProjectSimulator::load(sequential_project(), "main").unwrap();
+    let captured = simulator.tick().unwrap();
+    assert_eq!(captured.tick_count, 1);
+
+    let switched = simulator.switch_active("bit-cell").unwrap();
+    assert_eq!(switched.component_outputs["dff"]["q"], Trit::Zero);
+    assert_eq!(switched.tick_count, 0);
+    assert_eq!(switched.compile_count, 2);
+}
+
+#[test]
+fn tick_returns_project_not_ready_after_runtime_invalidation() {
+    let initial = sequential_project();
+    let mut simulator = ProjectSimulator::load(initial.clone(), "main").unwrap();
+    simulator.tick().unwrap();
+    let mut invalid = initial;
+    invalid.circuits[2].components.push(component(
+        "invalid",
+        "gate.not_real",
+        serde_json::json!({}),
+    ));
+    simulator.update_project(invalid).unwrap_err();
+
+    let diagnostic = simulator.tick().unwrap_err();
+    assert_eq!(diagnostic.code, "PROJECT_NOT_READY");
+    assert!(simulator.snapshot().is_none());
+}
+
 #[test]
 fn projects_active_canvas_signals_to_logical_module_ports() {
     let main = circuit(

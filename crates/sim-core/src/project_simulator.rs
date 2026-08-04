@@ -22,6 +22,7 @@ pub struct ProjectSnapshot {
     pub input_nets: BTreeMap<String, BTreeMap<String, Trit>>,
     pub diagnostics: Vec<ProjectDiagnostic>,
     pub stable: bool,
+    pub tick_count: u64,
     pub compile_count: u64,
 }
 
@@ -239,6 +240,40 @@ impl ProjectSimulator {
         Ok(self.snapshot.clone().expect("ready project has a snapshot"))
     }
 
+    #[allow(clippy::result_large_err)]
+    pub fn tick(&mut self) -> Result<ProjectSnapshot, ProjectDiagnostic> {
+        if self.validated.is_none() || self.simulator.is_none() || self.compiled.is_none() {
+            return Err(project_error(
+                "PROJECT_NOT_READY",
+                "project simulation is unavailable until validation succeeds",
+                None,
+            ));
+        }
+
+        let flat = match self
+            .simulator
+            .as_mut()
+            .expect("ready project has a flat simulator")
+            .tick()
+        {
+            Ok(flat) => flat,
+            Err(diagnostic) => {
+                let compiled = self
+                    .compiled
+                    .as_ref()
+                    .expect("ready project has compiled provenance");
+                let network_index = FlatNetworkIndex::new(compiled);
+                return Err(project_flat_diagnostic(
+                    &diagnostic,
+                    compiled,
+                    &network_index,
+                ));
+            }
+        };
+        self.snapshot = Some(self.project_snapshot(&flat));
+        Ok(self.snapshot.clone().expect("ready project has a snapshot"))
+    }
+
     pub fn snapshot(&self) -> Option<ProjectSnapshot> {
         self.snapshot.clone()
     }
@@ -389,6 +424,7 @@ impl ProjectSimulator {
             input_nets,
             diagnostics: diagnostics.into_vec(),
             stable: flat.stable,
+            tick_count: flat.tick_count,
             compile_count: self.compile_count,
         }
     }

@@ -1,7 +1,7 @@
-use sim_core::hierarchy::compile_project;
+use sim_core::hierarchy::{FlatPortRef, compile_project};
 use sim_core::project::{
     ProjectCircuit, ProjectCircuitKind, ProjectComponent, ProjectConnection, ProjectDiagnostic,
-    ProjectDocument,
+    ProjectDocument, QualifiedComponentRef, QualifiedPortRef,
 };
 use sim_core::project_validation::{ValidatedProject, validate_project};
 use sim_core::simulator::Simulator;
@@ -89,6 +89,28 @@ fn identity_module(id: &str) -> ProjectCircuit {
     )
 }
 
+fn bit_cell_module() -> ProjectCircuit {
+    circuit(
+        "bit-cell",
+        ProjectCircuitKind::Module,
+        vec![
+            module_input("d-input", "d"),
+            module_input("en-input", "en"),
+            module_input("rst-input", "rst"),
+            module_input("clk-input", "clk"),
+            component("dff", "sequential.dff", serde_json::json!({})),
+            module_output("q-output", "q"),
+        ],
+        vec![
+            connection("d", "d-input", "out", "dff", "d"),
+            connection("en", "en-input", "out", "dff", "en"),
+            connection("rst", "rst-input", "out", "dff", "rst"),
+            connection("clk", "clk-input", "out", "dff", "clk"),
+            connection("q", "dff", "q", "q-output", "in"),
+        ],
+    )
+}
+
 fn assert_limit(result: Result<impl Sized, Vec<ProjectDiagnostic>>) -> ProjectDiagnostic {
     let diagnostics = match result {
         Ok(_) => panic!("hierarchy must exceed a fixed budget"),
@@ -155,6 +177,47 @@ fn compiles_two_levels_by_rewiring_boundaries_without_buffers() {
         simulator.snapshot().input_value("probe", "in"),
         Some(Trit::Pos)
     );
+}
+
+#[test]
+fn compiles_shared_dff_modules_to_distinct_flat_state_and_output_projections() {
+    let main = circuit(
+        "main",
+        ProjectCircuitKind::Main,
+        vec![
+            module_instance("left", "bit-cell"),
+            module_instance("right", "bit-cell"),
+        ],
+        vec![],
+    );
+
+    let compiled = compile_project(&validated(vec![main, bit_cell_module()]), "main").unwrap();
+    let dff_ids: Vec<_> = compiled
+        .circuit
+        .components
+        .iter()
+        .filter(|component| component.type_id == "sequential.dff")
+        .map(|component| component.id.clone())
+        .collect();
+
+    assert_eq!(dff_ids, ["left/dff", "right/dff"]);
+    assert_ne!(dff_ids[0], dff_ids[1]);
+    for instance_id in ["left", "right"] {
+        let flat_id = format!("{instance_id}/dff");
+        assert_eq!(
+            compiled.provenance.components[&flat_id],
+            QualifiedComponentRef::new("bit-cell", [instance_id], "dff")
+        );
+        assert_eq!(
+            compiled.projection.ports
+                [&QualifiedPortRef::new("main", [] as [&str; 0], instance_id, "q")]
+                .drivers,
+            [FlatPortRef {
+                component_id: flat_id,
+                port_id: "q".into(),
+            }]
+        );
+    }
 }
 
 #[test]

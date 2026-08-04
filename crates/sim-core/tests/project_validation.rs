@@ -375,6 +375,26 @@ fn validates_builtin_reserved_properties_in_unreachable_modules() {
 }
 
 #[test]
+fn clock_and_dff_require_empty_runtime_properties() {
+    let valid = main_circuit(vec![
+        component("clock", "source.clock", serde_json::json!({})),
+        component("dff", "sequential.dff", serde_json::json!({})),
+    ]);
+    assert!(validate_project(project(vec![valid])).is_ok());
+
+    for type_id in ["source.clock", "sequential.dff"] {
+        assert_code(
+            validate_project(project(vec![main_circuit(vec![component(
+                "stateful",
+                type_id,
+                serde_json::json!({"value": "1"}),
+            )])])),
+            "INVALID_PROPERTY",
+        );
+    }
+}
+
+#[test]
 fn rejects_reserved_properties_that_do_not_belong_to_a_special_component() {
     let malformed = component(
         "output",
