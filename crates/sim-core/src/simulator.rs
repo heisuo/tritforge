@@ -8,6 +8,7 @@ use crate::circuit::{
 };
 use crate::diagnostic::Diagnostic;
 use crate::gates::evaluate;
+use crate::sequential::dff_next;
 use crate::trit::{Trit, resolve_drivers};
 
 pub struct Simulator {
@@ -20,6 +21,9 @@ pub struct Simulator {
     diagnostics: Vec<Diagnostic>,
     processed_events: usize,
     stable: bool,
+    tick_count: u64,
+    dff_outputs: BTreeMap<String, Trit>,
+    clock_levels: BTreeMap<String, Trit>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,6 +34,7 @@ pub struct SimulationSnapshot {
     pub input_nets: BTreeMap<String, BTreeMap<String, Trit>>,
     pub diagnostics: Vec<Diagnostic>,
     pub processed_events: usize,
+    pub tick_count: u64,
 }
 
 impl SimulationSnapshot {
@@ -65,13 +70,30 @@ impl Simulator {
         let source_properties = original_source_properties.clone();
         let (component_outputs, input_nets) = signal_maps(&circuit);
         let base_diagnostics = baseline_diagnostics(&circuit, warnings);
+        let dff_outputs = circuit
+            .components()
+            .iter()
+            .filter(|component| circuit.component_kind(&component.id) == Some(ComponentKind::Dff))
+            .map(|component| (component.id.clone(), Trit::Zero))
+            .collect();
+        let clock_levels = circuit
+            .components()
+            .iter()
+            .filter(|component| circuit.component_kind(&component.id) == Some(ComponentKind::Clock))
+            .map(|component| (component.id.clone(), Trit::Zero))
+            .collect();
         let component_ids = circuit
             .components()
             .iter()
             .filter(|component| {
                 matches!(
                     circuit.component_kind(&component.id),
-                    Some(ComponentKind::TritInput | ComponentKind::Constant)
+                    Some(
+                        ComponentKind::TritInput
+                            | ComponentKind::Constant
+                            | ComponentKind::Clock
+                            | ComponentKind::Dff
+                    )
                 )
             })
             .map(|component| component.id.clone())
@@ -87,6 +109,9 @@ impl Simulator {
             base_diagnostics,
             processed_events: 0,
             stable: false,
+            tick_count: 0,
+            dff_outputs,
+            clock_levels,
         };
         simulator.settle(component_ids);
         Ok(simulator)
@@ -183,6 +208,13 @@ impl Simulator {
     pub fn reset(&mut self) -> SimulationSnapshot {
         self.source_properties
             .clone_from(&self.original_source_properties);
+        for value in self.dff_outputs.values_mut() {
+            *value = Trit::Zero;
+        }
+        for value in self.clock_levels.values_mut() {
+            *value = Trit::Zero;
+        }
+        self.tick_count = 0;
         (self.component_outputs, self.input_nets) = signal_maps(&self.circuit);
         let component_ids = self
             .circuit
@@ -191,13 +223,97 @@ impl Simulator {
             .filter(|component| {
                 matches!(
                     self.circuit.component_kind(&component.id),
-                    Some(ComponentKind::TritInput | ComponentKind::Constant)
+                    Some(
+                        ComponentKind::TritInput
+                            | ComponentKind::Constant
+                            | ComponentKind::Clock
+                            | ComponentKind::Dff
+                    )
                 )
             })
             .map(|component| component.id.clone())
             .collect::<Vec<_>>();
         self.settle(component_ids);
         self.snapshot()
+    }
+
+    #[allow(clippy::result_large_err)]
+    pub fn tick(&mut self) -> Result<SimulationSnapshot, Diagnostic> {
+        let next_tick_count = self.tick_count.checked_add(1).ok_or_else(|| {
+            Diagnostic::error(
+                "TICK_COUNT_OVERFLOW",
+                "tick count cannot exceed u64::MAX".to_owned(),
+                vec![],
+                vec![],
+                vec![],
+            )
+        })?;
+        let dff_ids = self.dff_outputs.keys().cloned().collect::<Vec<_>>();
+        let clock_ids = self.clock_levels.keys().cloned().collect::<Vec<_>>();
+        let clock_inputs_before_rise = dff_ids
+            .iter()
+            .map(|component_id| {
+                let value = self
+                    .input_nets
+                    .get(&PortRef::new(component_id, "clk"))
+                    .copied()
+                    .expect("DFF clock input has a signal");
+                (component_id.clone(), value)
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut phase_failures = BTreeSet::new();
+
+        for value in self.clock_levels.values_mut() {
+            *value = Trit::Pos;
+        }
+        self.settle(clock_ids.iter().cloned());
+        self.record_phase_failures(&mut phase_failures);
+
+        let mut next_dff_outputs = self.dff_outputs.clone();
+        for component_id in &dff_ids {
+            let clock_before = clock_inputs_before_rise
+                .get(component_id)
+                .copied()
+                .expect("captured every DFF clock input");
+            let clock_after = self
+                .input_nets
+                .get(&PortRef::new(component_id, "clk"))
+                .copied()
+                .expect("DFF clock input has a signal");
+            if clock_before == Trit::Pos || clock_after != Trit::Pos {
+                continue;
+            }
+
+            let current = self.dff_outputs[component_id];
+            let d = self.input_nets[&PortRef::new(component_id, "d")];
+            let en = self.input_nets[&PortRef::new(component_id, "en")];
+            let rst = self.input_nets[&PortRef::new(component_id, "rst")];
+            next_dff_outputs.insert(component_id.clone(), dff_next(current, d, en, rst));
+        }
+
+        let changed_dffs = next_dff_outputs
+            .iter()
+            .filter(|(component_id, value)| self.dff_outputs.get(*component_id) != Some(*value))
+            .map(|(component_id, _)| component_id.clone())
+            .collect::<Vec<_>>();
+        self.dff_outputs = next_dff_outputs;
+        self.settle(changed_dffs);
+        self.record_phase_failures(&mut phase_failures);
+
+        for value in self.clock_levels.values_mut() {
+            *value = Trit::Zero;
+        }
+        self.settle(clock_ids);
+        self.record_phase_failures(&mut phase_failures);
+
+        if !phase_failures.is_empty() {
+            let mut diagnostics = self.diagnostics.iter().cloned().collect::<BTreeSet<_>>();
+            diagnostics.extend(phase_failures);
+            self.diagnostics = diagnostics.into_iter().collect();
+            self.stable = false;
+        }
+        self.tick_count = next_tick_count;
+        Ok(self.snapshot())
     }
 
     pub fn snapshot(&self) -> SimulationSnapshot {
@@ -208,7 +324,20 @@ impl Simulator {
             input_nets: nested_signals(&self.input_nets),
             diagnostics: self.diagnostics.clone(),
             processed_events: self.processed_events,
+            tick_count: self.tick_count,
         }
+    }
+
+    fn record_phase_failures(&self, failures: &mut BTreeSet<Diagnostic>) {
+        if self.stable {
+            return;
+        }
+        failures.extend(
+            self.diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "NON_CONVERGENT_COMBINATIONAL_LOOP")
+                .cloned(),
+        );
     }
 
     fn settle(&mut self, component_ids: impl IntoIterator<Item = String>) {
@@ -274,7 +403,23 @@ impl Simulator {
                 (port.id, value)
             })
             .collect();
-        let evaluated_outputs = evaluate(kind, properties, &inputs);
+        let evaluated_outputs = match kind {
+            ComponentKind::Clock => BTreeMap::from([(
+                "out".to_owned(),
+                self.clock_levels
+                    .get(component_id)
+                    .copied()
+                    .expect("validated Clock has runtime state"),
+            )]),
+            ComponentKind::Dff => BTreeMap::from([(
+                "q".to_owned(),
+                self.dff_outputs
+                    .get(component_id)
+                    .copied()
+                    .expect("validated DFF has runtime state"),
+            )]),
+            _ => evaluate(kind, properties, &inputs),
+        };
 
         for (port_id, value) in evaluated_outputs {
             let output = PortRef::new(component_id, &port_id);
@@ -513,4 +658,41 @@ fn nested_signals(signals: &BTreeMap<PortRef, Trit>) -> BTreeMap<String, BTreeMa
             .insert(port.port_id.clone(), *value);
     }
     nested
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::circuit::ComponentInstance;
+
+    #[test]
+    fn tick_count_overflow_fails_without_mutating_session_state() {
+        let mut simulator = Simulator::load(CircuitDefinition {
+            components: vec![
+                ComponentInstance {
+                    id: "clock".to_owned(),
+                    type_id: "source.clock".to_owned(),
+                    properties: ComponentProperties::default(),
+                },
+                ComponentInstance {
+                    id: "dff".to_owned(),
+                    type_id: "sequential.dff".to_owned(),
+                    properties: ComponentProperties::default(),
+                },
+            ],
+            connections: vec![],
+        })
+        .expect("valid sequential circuit");
+        simulator.tick_count = u64::MAX;
+        let before_snapshot = simulator.snapshot();
+        let before_dff_outputs = simulator.dff_outputs.clone();
+        let before_clock_levels = simulator.clock_levels.clone();
+
+        let diagnostic = simulator.tick().expect_err("tick count must not wrap");
+
+        assert_eq!(diagnostic.code, "TICK_COUNT_OVERFLOW");
+        assert_eq!(simulator.snapshot(), before_snapshot);
+        assert_eq!(simulator.dff_outputs, before_dff_outputs);
+        assert_eq!(simulator.clock_levels, before_clock_levels);
+    }
 }

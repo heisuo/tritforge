@@ -73,6 +73,182 @@ fn oscillator_definition() -> CircuitDefinition {
     )
 }
 
+fn dff_definition(clock_through_buffer: bool) -> CircuitDefinition {
+    let mut components = vec![
+        valued_component("data", "source.trit_input", Trit::Pos),
+        valued_component("enable", "source.trit_input", Trit::Pos),
+        valued_component("reset", "source.trit_input", Trit::Zero),
+        component("clock", "source.clock"),
+        component("dff", "sequential.dff"),
+        component("probe", "sink.probe"),
+    ];
+    let mut connections = vec![
+        connection("data-dff", "data", "out", "dff", "d"),
+        connection("enable-dff", "enable", "out", "dff", "en"),
+        connection("reset-dff", "reset", "out", "dff", "rst"),
+        connection("dff-probe", "dff", "q", "probe", "in"),
+    ];
+
+    if clock_through_buffer {
+        components.push(component("clock-buffer", "gate.buf"));
+        connections.extend([
+            connection("clock-buffer", "clock", "out", "clock-buffer", "a"),
+            connection("buffer-dff", "clock-buffer", "y", "dff", "clk"),
+        ]);
+    } else {
+        connections.push(connection("clock-dff", "clock", "out", "dff", "clk"));
+    }
+
+    definition(components, connections)
+}
+
+fn run_swap(dff0_id: &str, dff1_id: &str, reverse_definition: bool) -> (Trit, Trit) {
+    let mut components = vec![
+        component("clock", "source.clock"),
+        valued_component("enable", "source.constant", Trit::Pos),
+        valued_component("reset", "source.constant", Trit::Zero),
+        valued_component("select", "source.trit_input", Trit::Neg),
+        valued_component("init-0", "source.constant", Trit::Pos),
+        valued_component("init-1", "source.constant", Trit::Zero),
+        component("mux-0", "gate.mux2"),
+        component("mux-1", "gate.mux2"),
+        component(dff0_id, "sequential.dff"),
+        component(dff1_id, "sequential.dff"),
+    ];
+    let mut connections = vec![
+        connection("init-0-mux-0", "init-0", "out", "mux-0", "a"),
+        connection("dff-1-mux-0", dff1_id, "q", "mux-0", "b"),
+        connection("select-mux-0", "select", "out", "mux-0", "s"),
+        connection("mux-0-dff-0", "mux-0", "y", dff0_id, "d"),
+        connection("init-1-mux-1", "init-1", "out", "mux-1", "a"),
+        connection("dff-0-mux-1", dff0_id, "q", "mux-1", "b"),
+        connection("select-mux-1", "select", "out", "mux-1", "s"),
+        connection("mux-1-dff-1", "mux-1", "y", dff1_id, "d"),
+        connection("clock-dff-0", "clock", "out", dff0_id, "clk"),
+        connection("clock-dff-1", "clock", "out", dff1_id, "clk"),
+        connection("enable-dff-0", "enable", "out", dff0_id, "en"),
+        connection("enable-dff-1", "enable", "out", dff1_id, "en"),
+        connection("reset-dff-0", "reset", "out", dff0_id, "rst"),
+        connection("reset-dff-1", "reset", "out", dff1_id, "rst"),
+    ];
+
+    if reverse_definition {
+        components.reverse();
+        connections.reverse();
+    }
+
+    let mut simulator = Simulator::load(definition(components, connections)).expect("valid swap");
+    let initialized = simulator.tick().expect("initialize both DFFs");
+    assert_eq!(initialized.output_value(dff0_id, "q"), Some(Trit::Pos));
+    assert_eq!(initialized.output_value(dff1_id, "q"), Some(Trit::Zero));
+
+    simulator
+        .set_input("select", Trit::Pos)
+        .expect("select feedback inputs");
+    let swapped = simulator.tick().expect("capture swap");
+    (
+        swapped.output_value(dff0_id, "q").unwrap(),
+        swapped.output_value(dff1_id, "q").unwrap(),
+    )
+}
+
+#[test]
+fn dff_loads_low_and_tick_captures_on_a_complete_clock_pulse() {
+    let mut simulator = Simulator::load(dff_definition(false)).expect("valid DFF circuit");
+
+    let initial = simulator.snapshot();
+    assert_eq!(initial.output_value("clock", "out"), Some(Trit::Zero));
+    assert_eq!(initial.output_value("dff", "q"), Some(Trit::Zero));
+    assert_eq!(initial.input_value("probe", "in"), Some(Trit::Zero));
+    assert_eq!(initial.tick_count, 0);
+
+    let captured = simulator.tick().expect("tick succeeds");
+    assert_eq!(captured.output_value("dff", "q"), Some(Trit::Pos));
+    assert_eq!(captured.input_value("probe", "in"), Some(Trit::Pos));
+    assert_eq!(captured.output_value("clock", "out"), Some(Trit::Zero));
+    assert_eq!(captured.input_value("dff", "clk"), Some(Trit::Zero));
+    assert_eq!(captured.tick_count, 1);
+}
+
+#[test]
+fn dff_enable_reset_priority_and_reset_restore_session_state() {
+    let mut simulator = Simulator::load(dff_definition(false)).expect("valid DFF circuit");
+
+    simulator.tick().expect("capture initial one");
+    simulator.set_input("data", Trit::Neg).unwrap();
+    simulator.set_input("enable", Trit::Zero).unwrap();
+    let held = simulator.tick().expect("disabled tick");
+    assert_eq!(held.output_value("dff", "q"), Some(Trit::Pos));
+    assert_eq!(held.tick_count, 2);
+
+    simulator.set_input("enable", Trit::Pos).unwrap();
+    simulator.set_input("reset", Trit::Pos).unwrap();
+    let reset_wins = simulator.tick().expect("synchronous reset tick");
+    assert_eq!(reset_wins.output_value("dff", "q"), Some(Trit::Zero));
+    assert_eq!(reset_wins.tick_count, 3);
+
+    simulator.set_input("reset", Trit::Zero).unwrap();
+    simulator.set_input("data", Trit::Pos).unwrap();
+    let recaptured = simulator.tick().expect("capture after reset");
+    assert_eq!(recaptured.output_value("dff", "q"), Some(Trit::Pos));
+
+    let reset = simulator.reset();
+    assert_eq!(reset.output_value("dff", "q"), Some(Trit::Zero));
+    assert_eq!(reset.output_value("clock", "out"), Some(Trit::Zero));
+    assert_eq!(reset.input_value("dff", "clk"), Some(Trit::Zero));
+    assert_eq!(reset.tick_count, 0);
+}
+
+#[test]
+fn dffs_swap_with_one_simultaneous_commit_independent_of_ids_and_definition_order() {
+    let ascending_ids = run_swap("a-dff", "z-dff", false);
+    let reversed_ids_and_definition = run_swap("z-dff", "a-dff", true);
+
+    assert_eq!(ascending_ids, (Trit::Zero, Trit::Pos));
+    assert_eq!(reversed_ids_and_definition, ascending_ids);
+}
+
+#[test]
+fn tick_does_not_sample_a_dff_whose_clock_is_already_positive() {
+    let mut simulator = Simulator::load(definition(
+        vec![
+            valued_component("data", "source.constant", Trit::Pos),
+            valued_component("clock-high", "source.constant", Trit::Pos),
+            valued_component("enable", "source.constant", Trit::Pos),
+            valued_component("reset", "source.constant", Trit::Zero),
+            component("dff", "sequential.dff"),
+        ],
+        vec![
+            connection("data-dff", "data", "out", "dff", "d"),
+            connection("clock-dff", "clock-high", "out", "dff", "clk"),
+            connection("enable-dff", "enable", "out", "dff", "en"),
+            connection("reset-dff", "reset", "out", "dff", "rst"),
+        ],
+    ))
+    .expect("valid constant-clock DFF");
+
+    let initial = simulator.snapshot();
+    assert_eq!(initial.input_value("dff", "clk"), Some(Trit::Pos));
+    assert_eq!(initial.output_value("dff", "q"), Some(Trit::Zero));
+
+    let ticked = simulator.tick().expect("tick without a clock source");
+    assert_eq!(ticked.output_value("dff", "q"), Some(Trit::Zero));
+    assert_eq!(ticked.tick_count, 1);
+}
+
+#[test]
+fn clock_through_a_buffer_produces_a_rising_edge() {
+    let mut simulator = Simulator::load(dff_definition(true)).expect("valid buffered clock");
+
+    let captured = simulator.tick().expect("buffered clock tick");
+
+    assert_eq!(captured.output_value("dff", "q"), Some(Trit::Pos));
+    assert_eq!(captured.output_value("clock", "out"), Some(Trit::Zero));
+    assert_eq!(captured.output_value("clock-buffer", "y"), Some(Trit::Zero));
+    assert_eq!(captured.input_value("dff", "clk"), Some(Trit::Zero));
+    assert_eq!(captured.tick_count, 1);
+}
+
 #[test]
 fn input_through_neg_reaches_probe_at_a_stable_value() {
     let simulator = Simulator::load(definition(
@@ -649,4 +825,5 @@ fn snapshot_round_trips_through_serde() {
 
     assert_eq!(round_trip, snapshot);
     assert!(json.contains(r#""api_version":2"#));
+    assert!(json.contains(r#""tick_count":0"#));
 }
