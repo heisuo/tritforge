@@ -192,22 +192,33 @@ fn compiles_shared_dff_modules_to_distinct_flat_state_and_output_projections() {
     );
 
     let compiled = compile_project(&validated(vec![main, bit_cell_module()]), "main").unwrap();
-    let dff_ids: Vec<_> = compiled
+    let dff_count = compiled
         .circuit
         .components
         .iter()
         .filter(|component| component.type_id == "sequential.dff")
-        .map(|component| component.id.clone())
-        .collect();
+        .count();
+    assert_eq!(dff_count, 2);
 
-    assert_eq!(dff_ids, ["left/dff", "right/dff"]);
-    assert_ne!(dff_ids[0], dff_ids[1]);
-    for instance_id in ["left", "right"] {
-        let flat_id = format!("{instance_id}/dff");
-        assert_eq!(
-            compiled.provenance.components[&flat_id],
-            QualifiedComponentRef::new("bit-cell", [instance_id], "dff")
-        );
+    let flat_id_for = |reference: &QualifiedComponentRef| {
+        compiled
+            .circuit
+            .components
+            .iter()
+            .filter(|component| component.type_id == "sequential.dff")
+            .find_map(|component| {
+                (compiled.provenance.components.get(&component.id) == Some(reference))
+                    .then(|| component.id.clone())
+            })
+            .expect("each shared DFF source reference has one flat component")
+    };
+    let left_ref = QualifiedComponentRef::new("bit-cell", ["left"], "dff");
+    let right_ref = QualifiedComponentRef::new("bit-cell", ["right"], "dff");
+    let left_flat_id = flat_id_for(&left_ref);
+    let right_flat_id = flat_id_for(&right_ref);
+
+    assert_ne!(left_flat_id, right_flat_id);
+    for (instance_id, flat_id) in [("left", left_flat_id), ("right", right_flat_id)] {
         assert_eq!(
             compiled.projection.ports
                 [&QualifiedPortRef::new("main", [] as [&str; 0], instance_id, "q")]

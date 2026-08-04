@@ -156,7 +156,7 @@ fn ticks_shared_dff_instances_independently_and_retains_state_for_value_updates(
 
     let mut changed_data = initial;
     changed_data.circuits[0].components[0] =
-        component("d0", "source.trit_input", serde_json::json!({"value": "T"}));
+        component("d0", "source.trit_input", serde_json::json!({"value": "0"}));
     let retained = simulator.update_project(changed_data).unwrap();
     assert_eq!(retained.component_outputs["cell-0"]["q"], Trit::Pos);
     assert_eq!(retained.component_outputs["cell-1"]["q"], Trit::Neg);
@@ -164,7 +164,7 @@ fn ticks_shared_dff_instances_independently_and_retains_state_for_value_updates(
     assert_eq!(retained.compile_count, 1);
 
     let next = simulator.tick().unwrap();
-    assert_eq!(next.component_outputs["cell-0"]["q"], Trit::Neg);
+    assert_eq!(next.component_outputs["cell-0"]["q"], Trit::Zero);
     assert_eq!(next.component_outputs["cell-1"]["q"], Trit::Neg);
     assert_eq!(next.tick_count, 2);
     assert_eq!(next.compile_count, 1);
