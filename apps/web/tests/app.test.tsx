@@ -6,36 +6,42 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ProjectSimulationSnapshot } from "../src/editor-model";
+import type { WasmProjectSimulatorBinding } from "../src/wasm-client";
 
 const runtimeMock = vi.hoisted(() => {
-  const snapshot = (): {
-    componentOutputs: Record<string, Record<string, string>>;
-    inputNets: Record<string, Record<string, string>>;
-    diagnostics: Array<Record<string, unknown>>;
-    stable: boolean;
-    compileCount: number;
-  } => ({
+  const snapshot = (): ProjectSimulationSnapshot => ({
     componentOutputs: {},
     inputNets: {},
     diagnostics: [],
     stable: true,
+    tickCount: 0,
     compileCount: 1,
   });
-  return {
-    makeSnapshot: snapshot,
+  const projectSimulator = {
     loadProject: vi.fn((_project?: unknown, _active?: string) => snapshot()),
     updateProject: vi.fn((_project?: unknown) => snapshot()),
     switchActive: vi.fn((_active?: string) => snapshot()),
     setSource: vi.fn(
       (_circuit?: string, _component?: string, _value?: string) => snapshot(),
     ),
+    tick: vi.fn(snapshot),
     snapshot: vi.fn(snapshot),
+    metrics: vi.fn(() => ({
+      expandedComponents: 0,
+      expandedConnections: 0,
+      projectionEndpoints: 0,
+    })),
+  } satisfies WasmProjectSimulatorBinding;
+  return {
+    makeSnapshot: snapshot,
+    ...projectSimulator,
   };
 });
 
 vi.mock("../src/wasm-client", () => ({
   createWasmRuntime: vi.fn(async () => ({
-    apiVersion: 1,
+    apiVersion: 2,
     catalog: [
       {
         type_id: "source.trit_input",

@@ -166,6 +166,8 @@ fn project_handle_ticks_and_projects_dff_state() {
             .expect("deserialize project snapshot");
 
     assert_eq!(snapshot.component_outputs["dff"]["q"], Trit::Pos);
+    assert_eq!(snapshot.component_outputs["clock"]["out"], Trit::Zero);
+    assert_eq!(snapshot.input_nets["dff"]["clk"], Trit::Zero);
     assert_eq!(snapshot.tick_count, 1);
 }
 
@@ -174,6 +176,18 @@ fn project_handle_ticks_and_projects_dff_state() {
 struct ProjectBoundaryErrorView {
     code: String,
     diagnostics: Vec<ProjectDiagnostic>,
+}
+
+#[wasm_bindgen_test]
+fn tick_before_project_load_returns_a_structured_not_loaded_error() {
+    let error = WasmProjectSimulator::new()
+        .tick()
+        .expect_err("tick before project load must fail");
+    let error: ProjectBoundaryErrorView =
+        serde_wasm_bindgen::from_value(error).expect("deserialize project boundary error");
+
+    assert_eq!(error.code, "SIMULATOR_NOT_LOADED");
+    assert!(error.diagnostics.is_empty());
 }
 
 #[wasm_bindgen_test]
