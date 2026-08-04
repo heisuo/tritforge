@@ -329,19 +329,19 @@ git commit -m "feat: simulate dff state through module hierarchy"
 - Modify: `apps/web/src/wasm-client.ts`
 - Modify: `apps/web/tests/wasm-client.test.ts`
 
-- [ ] **Step 1: Write failing flat and project WASM tests**
+- [x] **Step 1: Write failing flat and project WASM tests**
 
 For both handles load a DFF circuit/project, call `tick()`, deserialize the snapshot, and
 assert API v2, Q, and tick count. Call tick before load and assert structured `NOT_LOADED` or
 `PROJECT_NOT_READY` without a JS trap.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 wasm-pack test --node crates/sim-wasm
 ```
 
-- [ ] **Step 3: Add binding methods and TypeScript contracts**
+- [x] **Step 3: Add binding methods and TypeScript contracts**
 
 ```rust
 pub fn tick(&mut self) -> Result<JsValue, JsValue> {
@@ -354,7 +354,7 @@ Add the corresponding project method. Extend TypeScript snapshots with `tick_cou
 and `tickCount` for project, and add `tick()` to both binding interfaces. Update WASM mocks to
 API version 2.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 ```bash
 wasm-pack test --node crates/sim-wasm
