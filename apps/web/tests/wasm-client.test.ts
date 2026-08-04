@@ -1,11 +1,45 @@
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, expectTypeOf, it, vi } from "vitest";
+
+import type {
+  SimulationSnapshot,
+  WasmProjectSimulatorBinding,
+  WasmSimulatorBinding,
+} from "../src/wasm-client";
+import type { ProjectSimulationSnapshot } from "../src/editor-model";
 
 const wasmMock = vi.hoisted(() => {
-  class WasmSimulator {}
-  class WasmProjectSimulator {}
+  const flatSnapshot = {
+    api_version: 2,
+    stable: true,
+    component_outputs: { dff: { q: "1" } },
+    input_nets: { dff: { clk: "0" } },
+    diagnostics: [],
+    processed_events: 6,
+    tick_count: 1,
+  };
+  const projectSnapshot = {
+    componentOutputs: { dff: { q: "1" } },
+    inputNets: { dff: { clk: "0" } },
+    diagnostics: [],
+    stable: true,
+    tickCount: 1,
+    compileCount: 1,
+  };
+  class WasmSimulator {
+    tick() {
+      return flatSnapshot;
+    }
+  }
+  class WasmProjectSimulator {
+    tick() {
+      return projectSnapshot;
+    }
+  }
 
   return {
+    flatSnapshot,
     initialize: vi.fn(async () => undefined),
+    projectSnapshot,
     WasmSimulator,
     WasmProjectSimulator,
   };
@@ -13,7 +47,7 @@ const wasmMock = vi.hoisted(() => {
 
 vi.mock("../src/wasm/pkg/sim_wasm", () => ({
   default: wasmMock.initialize,
-  apiVersion: () => 1,
+  apiVersion: () => 2,
   componentCatalog: () => [],
   WasmSimulator: wasmMock.WasmSimulator,
   WasmProjectSimulator: wasmMock.WasmProjectSimulator,
@@ -33,12 +67,57 @@ describe("WASM runtime initialization", () => {
     ]);
 
     expect(wasmMock.initialize).toHaveBeenCalledTimes(1);
-    expect(first.apiVersion).toBe(1);
-    expect(second.apiVersion).toBe(1);
+    expect(first.apiVersion).toBe(2);
+    expect(second.apiVersion).toBe(2);
     expect(first.simulator).toBeInstanceOf(wasmMock.WasmSimulator);
     expect(second.simulator).toBeInstanceOf(wasmMock.WasmSimulator);
     expect(first.projectSimulator).toBeInstanceOf(
       wasmMock.WasmProjectSimulator,
     );
+  });
+
+  it("exposes API v2 tick snapshots with boundary-specific field names", async () => {
+    const { createWasmRuntime } = await import("../src/wasm-client");
+    const runtime = await createWasmRuntime();
+
+    const flat = runtime.simulator.tick();
+    const project = runtime.projectSimulator.tick();
+
+    expect(flat).toEqual(wasmMock.flatSnapshot);
+    expect(flat.tick_count).toBe(1);
+    expect(project).toEqual(wasmMock.projectSnapshot);
+    expect(project.tickCount).toBe(1);
+    expectTypeOf(flat).toEqualTypeOf<SimulationSnapshot>();
+    expectTypeOf(project).toEqualTypeOf<ProjectSimulationSnapshot>();
+    expectTypeOf(runtime.simulator).toMatchTypeOf<WasmSimulatorBinding>();
+    expectTypeOf(runtime.projectSimulator).toMatchTypeOf<WasmProjectSimulatorBinding>();
+  });
+});
+
+describe("WASM error decoding", () => {
+  it("preserves a structured project-not-ready tick error", async () => {
+    const { wasmProjectError } = await import("../src/wasm-client");
+    const diagnostic = {
+      code: "PROJECT_NOT_READY",
+      severity: "error" as const,
+      message: "project simulation is unavailable until validation succeeds",
+      primaryLocation: null,
+      componentRefs: [],
+      connectionRefs: [],
+      portRefs: [],
+    };
+
+    expect(
+      wasmProjectError({
+        code: "PROJECT_NOT_READY",
+        message: diagnostic.message,
+        diagnostics: [diagnostic],
+      }),
+    ).toEqual({
+      name: "SimulationError",
+      code: "PROJECT_NOT_READY",
+      message: diagnostic.message,
+      diagnostics: [diagnostic],
+    });
   });
 });

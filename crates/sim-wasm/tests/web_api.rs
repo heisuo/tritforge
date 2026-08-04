@@ -61,10 +61,54 @@ fn loads_and_updates_a_circuit_across_the_wasm_boundary() {
     assert_eq!(snapshot.input_value("probe", "in"), Some(Trit::Pos));
 }
 
+#[wasm_bindgen_test]
+fn ticks_a_dff_and_returns_the_clock_low_across_the_wasm_boundary() {
+    let definition = CircuitDefinition {
+        components: vec![
+            component("data", "source.constant", Some(Trit::Pos)),
+            component("enable", "source.constant", Some(Trit::Pos)),
+            component("reset", "source.constant", Some(Trit::Zero)),
+            component("clock", "source.clock", None),
+            component("dff", "sequential.dff", None),
+        ],
+        connections: vec![
+            connection("data-dff", "data", "out", "dff", "d"),
+            connection("enable-dff", "enable", "out", "dff", "en"),
+            connection("reset-dff", "reset", "out", "dff", "rst"),
+            connection("clock-dff", "clock", "out", "dff", "clk"),
+        ],
+    };
+    let value = serde_wasm_bindgen::to_value(&definition).expect("serialize definition");
+    let mut simulator = WasmSimulator::new();
+    simulator.load_circuit(value).expect("load circuit");
+
+    let snapshot: SimulationSnapshot =
+        serde_wasm_bindgen::from_value(simulator.tick().expect("tick circuit"))
+            .expect("deserialize snapshot");
+
+    assert_eq!(snapshot.api_version, 2);
+    assert_eq!(snapshot.output_value("dff", "q"), Some(Trit::Pos));
+    assert_eq!(snapshot.output_value("clock", "out"), Some(Trit::Zero));
+    assert_eq!(snapshot.input_value("dff", "clk"), Some(Trit::Zero));
+    assert_eq!(snapshot.tick_count, 1);
+}
+
 #[derive(Deserialize)]
 struct BoundaryErrorView {
     code: String,
     diagnostics: Vec<Diagnostic>,
+}
+
+#[wasm_bindgen_test]
+fn tick_before_load_returns_a_structured_not_loaded_error() {
+    let error = WasmSimulator::new()
+        .tick()
+        .expect_err("tick before load must fail");
+    let error: BoundaryErrorView =
+        serde_wasm_bindgen::from_value(error).expect("deserialize boundary error");
+
+    assert_eq!(error.code, "SIMULATOR_NOT_LOADED");
+    assert!(error.diagnostics.is_empty());
 }
 
 #[wasm_bindgen_test]

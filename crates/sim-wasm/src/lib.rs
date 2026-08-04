@@ -71,19 +71,17 @@ impl WasmSimulator {
         let snapshot = self
             .simulator_mut()?
             .set_input(component_id, value)
-            .map_err(|diagnostic| {
-                BoundaryError::new(
-                    &diagnostic.code.clone(),
-                    diagnostic.message.clone(),
-                    vec![diagnostic],
-                )
-                .into_js()
-            })?;
+            .map_err(boundary_diagnostic)?;
         to_js_value(&snapshot)
     }
 
     pub fn reset(&mut self) -> Result<JsValue, JsValue> {
         let snapshot = self.simulator_mut()?.reset();
+        to_js_value(&snapshot)
+    }
+
+    pub fn tick(&mut self) -> Result<JsValue, JsValue> {
+        let snapshot = self.simulator_mut()?.tick().map_err(boundary_diagnostic)?;
         to_js_value(&snapshot)
     }
 
@@ -163,14 +161,7 @@ impl WasmProjectSimulator {
         let snapshot = self
             .simulator_mut()?
             .set_source(circuit_id, component_id, value)
-            .map_err(|diagnostic| {
-                BoundaryError::new(
-                    &diagnostic.code.clone(),
-                    diagnostic.message.clone(),
-                    vec![diagnostic],
-                )
-                .into_js()
-            })?;
+            .map_err(project_boundary_diagnostic)?;
         to_js_value(&snapshot)
     }
 
@@ -188,6 +179,14 @@ impl WasmProjectSimulator {
                 )
                 .into_js()
             })?;
+        to_js_value(&snapshot)
+    }
+
+    pub fn tick(&mut self) -> Result<JsValue, JsValue> {
+        let snapshot = self
+            .simulator_mut()?
+            .tick()
+            .map_err(project_boundary_diagnostic)?;
         to_js_value(&snapshot)
     }
 
@@ -240,6 +239,18 @@ fn project_diagnostics_error(diagnostics: Vec<ProjectDiagnostic>) -> JsValue {
         .map(|diagnostic| diagnostic.code.clone())
         .unwrap_or_else(|| "PROJECT_VALIDATION_FAILED".into());
     BoundaryError::new(&code, "project operation failed".into(), diagnostics).into_js()
+}
+
+fn boundary_diagnostic(diagnostic: Diagnostic) -> JsValue {
+    let code = diagnostic.code.clone();
+    let message = diagnostic.message.clone();
+    BoundaryError::new(&code, message, vec![diagnostic]).into_js()
+}
+
+fn project_boundary_diagnostic(diagnostic: ProjectDiagnostic) -> JsValue {
+    let code = diagnostic.code.clone();
+    let message = diagnostic.message.clone();
+    BoundaryError::new(&code, message, vec![diagnostic]).into_js()
 }
 
 impl Default for WasmSimulator {

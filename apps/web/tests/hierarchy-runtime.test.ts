@@ -16,6 +16,7 @@ function snapshot(compileCount: number): ProjectSimulationSnapshot {
     inputNets: {},
     diagnostics: [],
     stable: true,
+    tickCount: 0,
     compileCount,
   };
 }
@@ -95,6 +96,7 @@ function binding() {
       (_circuitId: string, _componentId: string, _value: KnownTrit) =>
         snapshot(count),
     ),
+    tick: vi.fn(() => snapshot(count)),
     snapshot: vi.fn(() => snapshot(count)),
     metrics: vi.fn(() => ({
       expandedComponents: 0,

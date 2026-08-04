@@ -43,6 +43,7 @@ export interface ProjectSimulationSnapshot {
   inputNets: Record<string, Record<string, TritSymbol>>;
   diagnostics: ProjectSimulationDiagnostic[];
   stable: boolean;
+  tickCount: number;
   compileCount: number;
 }
 

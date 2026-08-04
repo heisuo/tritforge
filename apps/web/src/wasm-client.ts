@@ -23,12 +23,14 @@ export interface SimulationSnapshot {
   input_nets: Record<string, Record<string, TritSymbol>>;
   diagnostics: SimulationDiagnostic[];
   processed_events: number;
+  tick_count: number;
 }
 
-interface WasmSimulatorBinding {
+export interface WasmSimulatorBinding {
   loadCircuit(definition: CircuitDefinition): SimulationSnapshot;
   setInput(componentId: string, value: KnownTrit): SimulationSnapshot;
   reset(): SimulationSnapshot;
+  tick(): SimulationSnapshot;
   snapshot(): SimulationSnapshot;
 }
 
@@ -44,6 +46,7 @@ export interface WasmProjectSimulatorBinding {
     componentId: string,
     value: KnownTrit,
   ): ProjectSimulationSnapshot;
+  tick(): ProjectSimulationSnapshot;
   snapshot(): ProjectSimulationSnapshot;
   metrics(): ProjectCompileMetrics;
 }
