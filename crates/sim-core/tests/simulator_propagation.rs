@@ -73,6 +73,27 @@ fn oscillator_definition() -> CircuitDefinition {
     )
 }
 
+fn clock_activated_oscillator_definition() -> CircuitDefinition {
+    definition(
+        vec![
+            component("clock", "source.clock"),
+            valued_component("data", "source.constant", Trit::Neg),
+            component("clock-is-pos", "gate.is_pos"),
+            component("mux", "gate.mux2"),
+            component("neg", "gate.neg"),
+            component("probe", "sink.probe"),
+        ],
+        vec![
+            connection("data-mux-a", "data", "out", "mux", "a"),
+            connection("clock-is-pos", "clock", "out", "clock-is-pos", "a"),
+            connection("is-pos-mux-s", "clock-is-pos", "y", "mux", "s"),
+            connection("neg-mux-b", "neg", "y", "mux", "b"),
+            connection("mux-neg", "mux", "y", "neg", "a"),
+            connection("mux-probe", "mux", "y", "probe", "in"),
+        ],
+    )
+}
+
 fn dff_definition(clock_through_buffer: bool) -> CircuitDefinition {
     let mut components = vec![
         valued_component("data", "source.trit_input", Trit::Pos),
@@ -167,6 +188,7 @@ fn dff_loads_low_and_tick_captures_on_a_complete_clock_pulse() {
     assert_eq!(captured.input_value("probe", "in"), Some(Trit::Pos));
     assert_eq!(captured.output_value("clock", "out"), Some(Trit::Zero));
     assert_eq!(captured.input_value("dff", "clk"), Some(Trit::Zero));
+    assert_eq!(captured.processed_events, 6);
     assert_eq!(captured.tick_count, 1);
 }
 
@@ -568,6 +590,77 @@ fn active_mux_neg_oscillator_hits_the_event_bound_and_propagates_error() {
     assert_eq!(recovered.output_value("neg", "y"), Some(Trit::Pos));
     assert_eq!(recovered.input_value("probe", "in"), Some(Trit::Neg));
     assert!(!diagnostic_codes(&recovered).contains(&"NON_CONVERGENT_COMBINATIONAL_LOOP"));
+}
+
+#[test]
+fn tick_without_clocks_preserves_a_preexisting_non_convergent_failure() {
+    let mut simulator = Simulator::load(oscillator_definition()).expect("valid oscillator");
+    let failed = simulator
+        .set_input("selector", Trit::Pos)
+        .expect("activate feedback");
+    assert!(!failed.stable);
+    assert_eq!(failed.processed_events, 1024);
+
+    let ticked = simulator.tick().expect("tick without clocks");
+
+    assert!(!ticked.stable);
+    assert_eq!(
+        diagnostic_codes(&ticked),
+        vec!["NON_CONVERGENT_COMBINATIONAL_LOOP"]
+    );
+    assert_eq!(ticked.processed_events, failed.processed_events);
+    assert_eq!(ticked.output_value("mux", "y"), Some(Trit::Error));
+    assert_eq!(ticked.output_value("neg", "y"), Some(Trit::Error));
+    assert_eq!(ticked.input_value("probe", "in"), Some(Trit::Error));
+}
+
+#[test]
+fn unrelated_clock_tick_preserves_a_preexisting_non_convergent_failure() {
+    let mut circuit = oscillator_definition();
+    circuit
+        .components
+        .push(component("unrelated-clock", "source.clock"));
+    let mut simulator = Simulator::load(circuit).expect("valid oscillator with clock");
+    let failed = simulator
+        .set_input("selector", Trit::Pos)
+        .expect("activate feedback");
+    assert!(!failed.stable);
+    assert_eq!(failed.processed_events, 1024);
+
+    let ticked = simulator.tick().expect("tick unrelated clock");
+
+    assert!(!ticked.stable);
+    assert_eq!(
+        diagnostic_codes(&ticked),
+        vec!["NON_CONVERGENT_COMBINATIONAL_LOOP"]
+    );
+    assert_eq!(ticked.processed_events, failed.processed_events + 2);
+    assert_eq!(ticked.output_value("mux", "y"), Some(Trit::Error));
+    assert_eq!(ticked.output_value("neg", "y"), Some(Trit::Error));
+    assert_eq!(ticked.input_value("probe", "in"), Some(Trit::Error));
+    assert_eq!(
+        ticked.output_value("unrelated-clock", "out"),
+        Some(Trit::Zero)
+    );
+}
+
+#[test]
+fn tick_sums_all_phase_events_when_clock_rise_triggers_non_convergence() {
+    let mut simulator = Simulator::load(clock_activated_oscillator_definition())
+        .expect("valid clock-activated oscillator");
+    let initial = simulator.snapshot();
+    assert!(initial.stable);
+    assert_eq!(initial.output_value("clock", "out"), Some(Trit::Zero));
+
+    let ticked = simulator.tick().expect("tick oscillator");
+
+    assert!(!ticked.stable);
+    assert_eq!(
+        diagnostic_codes(&ticked),
+        vec!["NON_CONVERGENT_COMBINATIONAL_LOOP"]
+    );
+    assert_eq!(ticked.processed_events, 1030);
+    assert_eq!(ticked.output_value("clock", "out"), Some(Trit::Zero));
 }
 
 #[test]

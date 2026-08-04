@@ -262,12 +262,16 @@ impl Simulator {
             })
             .collect::<BTreeMap<_, _>>();
         let mut phase_failures = BTreeSet::new();
+        let mut tick_processed_events = 0;
+        if !self.stable {
+            self.record_tick_phase(&mut phase_failures, &mut tick_processed_events);
+        }
 
         for value in self.clock_levels.values_mut() {
             *value = Trit::Pos;
         }
         self.settle(clock_ids.iter().cloned());
-        self.record_phase_failures(&mut phase_failures);
+        self.record_tick_phase(&mut phase_failures, &mut tick_processed_events);
 
         let mut next_dff_outputs = self.dff_outputs.clone();
         for component_id in &dff_ids {
@@ -298,13 +302,13 @@ impl Simulator {
             .collect::<Vec<_>>();
         self.dff_outputs = next_dff_outputs;
         self.settle(changed_dffs);
-        self.record_phase_failures(&mut phase_failures);
+        self.record_tick_phase(&mut phase_failures, &mut tick_processed_events);
 
         for value in self.clock_levels.values_mut() {
             *value = Trit::Zero;
         }
         self.settle(clock_ids);
-        self.record_phase_failures(&mut phase_failures);
+        self.record_tick_phase(&mut phase_failures, &mut tick_processed_events);
 
         if !phase_failures.is_empty() {
             let mut diagnostics = self.diagnostics.iter().cloned().collect::<BTreeSet<_>>();
@@ -312,6 +316,7 @@ impl Simulator {
             self.diagnostics = diagnostics.into_iter().collect();
             self.stable = false;
         }
+        self.processed_events = tick_processed_events;
         self.tick_count = next_tick_count;
         Ok(self.snapshot())
     }
@@ -328,16 +333,16 @@ impl Simulator {
         }
     }
 
-    fn record_phase_failures(&self, failures: &mut BTreeSet<Diagnostic>) {
-        if self.stable {
-            return;
+    fn record_tick_phase(&self, failures: &mut BTreeSet<Diagnostic>, processed_events: &mut usize) {
+        *processed_events = processed_events.saturating_add(self.processed_events);
+        if !self.stable {
+            failures.extend(
+                self.diagnostics
+                    .iter()
+                    .filter(|diagnostic| diagnostic.code == "NON_CONVERGENT_COMBINATIONAL_LOOP")
+                    .cloned(),
+            );
         }
-        failures.extend(
-            self.diagnostics
-                .iter()
-                .filter(|diagnostic| diagnostic.code == "NON_CONVERGENT_COMBINATIONAL_LOOP")
-                .cloned(),
-        );
     }
 
     fn settle(&mut self, component_ids: impl IntoIterator<Item = String>) {
