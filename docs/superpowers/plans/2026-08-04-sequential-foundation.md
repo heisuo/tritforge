@@ -36,7 +36,7 @@
 - Modify: `crates/sim-core/tests/circuit_validation.rs`
 - Modify: `crates/sim-wasm/tests/web_api.rs`
 
-- [ ] **Step 1: Write failing catalog and API tests**
+- [x] **Step 1: Write failing catalog and API tests**
 
 Extend the stable ID assertion with:
 
@@ -73,7 +73,7 @@ assert_eq!(sim_wasm::api_version(), 2);
 Add validation cases proving Clock and DFF accept empty runtime properties and reject a
 `value` property.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 cargo test -p sim-core --test catalog_contract
@@ -83,7 +83,7 @@ cargo test -p sim-wasm --test web_api api_version
 
 Expected: missing variants/IDs and API version mismatch.
 
-- [ ] **Step 3: Implement stable kinds and ports**
+- [x] **Step 3: Implement stable kinds and ports**
 
 Add `Clock` and `Dff` to `ComponentKind`, map exact type IDs and ports, and append catalog
 entries without reordering existing IDs:
@@ -96,7 +96,7 @@ entries without reordering existing IDs:
 Truth tables remain empty because neither component is a stateless gate. Update
 `property_is_valid` so Clock/DFF require `value.is_none()`. Change `api_version()` to 2.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 ```bash
 cargo test -p sim-core --test catalog_contract
