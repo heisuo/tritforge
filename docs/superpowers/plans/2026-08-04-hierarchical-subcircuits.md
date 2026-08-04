@@ -765,14 +765,14 @@ git commit -m "test: demonstrate nested ternary adders"
 - Modify: `.github/workflows/ci.yml`
 - Modify: `docs/superpowers/specs/2026-08-04-hierarchical-subcircuits-design.md`
 
-- [ ] **Step 1: Update documentation**
+- [x] **Step 1: Update documentation**
 
 Document Project v2 migration, module creation and fixed handles, nesting,
 breadcrumbs, protected deletion, Rust flattening, compile behavior, all four
 resource limits, the phase 2A screenshot, and exclusions: recursion, buses,
 sequential logic, and one-click packaging.
 
-- [ ] **Step 2: Preserve the clean-checkout CI command chain**
+- [x] **Step 2: Preserve the clean-checkout CI command chain**
 
 ```bash
 cargo fmt --all -- --check
@@ -788,13 +788,13 @@ npm --prefix apps/web run test:e2e
 
 `npm test` must still build the ignored WASM package first.
 
-- [ ] **Step 3: Append actual acceptance results**
+- [x] **Step 3: Append actual acceptance results**
 
 Record date, test counts, three viewports, exact expanded benchmark size,
 compile/propagation timings, compile-count result, and residual third-party
 warnings. Never rewrite requirements to match implementation.
 
-- [ ] **Step 4: Run final verification**
+- [x] **Step 4: Run final verification**
 
 ```bash
 cargo fmt --all -- --check
@@ -842,13 +842,13 @@ Expected: no output.
 
 ## 3. Completion Checklist
 
-- [ ] A user can create module ports and internal gates from an empty module.
-- [ ] Modules can be repeated and nested at least three levels.
-- [ ] Recursive, oversized, malformed, and stale-reference projects fail safely.
-- [ ] v1 files migrate losslessly and v2 files round-trip.
-- [ ] Input changes never increment compile count.
-- [ ] Z/X/E and diagnostics cross boundaries without semantic drift.
-- [ ] Qualified diagnostics navigate to the correct shared instance path.
-- [ ] The hierarchical Full Adder passes all 27 known input combinations.
-- [ ] Desktop, compact, and mobile browser acceptance passes.
-- [ ] Full Rust, WASM, Web, build, and Playwright verification passes.
+- [x] A user can create module ports and internal gates from an empty module.
+- [x] Modules can be repeated and nested at least three levels.
+- [x] Recursive, oversized, malformed, and stale-reference projects fail safely.
+- [x] v1 files migrate losslessly and v2 files round-trip.
+- [x] Input changes never increment compile count.
+- [x] Z/X/E and diagnostics cross boundaries without semantic drift.
+- [x] Qualified diagnostics navigate to the correct shared instance path.
+- [x] The hierarchical Full Adder passes all 27 known input combinations.
+- [x] Desktop, compact, and mobile browser acceptance passes.
+- [x] Full Rust, WASM, Web, build, and Playwright verification passes.

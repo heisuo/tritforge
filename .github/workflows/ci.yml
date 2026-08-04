@@ -71,3 +71,5 @@ jobs:
 
       - name: Run browser acceptance tests
         run: npm --prefix apps/web run test:e2e
+        env:
+          CI: true

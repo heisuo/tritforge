@@ -469,3 +469,29 @@ a + b + cin = sum + 3 * carry
 - 删除保护、递归诊断、撤销重做和层次导航通过浏览器验收。
 - Rust、WASM、Vitest、生产构建和 Playwright 全部通过。
 - 设计文档记录实际测试数量、性能结果和残余限制。
+
+## 11. 实际验收结果
+
+验收日期：2026-08-04。
+
+- Rust workspace：126 项测试通过，`rustfmt` 与全 workspace `clippy -D warnings`
+  通过。
+- WASM Node：6 项边界测试通过；项目级 metrics 来自实际展开产物。
+- Web：96 项 Vitest 测试通过，TypeScript 检查与 Vite 生产构建通过。
+- Playwright：13 项 Chromium 验收通过，覆盖 `1440x900`、`900x700`、
+  `390x844` 三种视口，无页面横向溢出和未处理控制台错误。
+- 层级加法器：27 组已知输入全部满足
+  `a + b + cin = sum + 3 * carry`，共享 Half Adder 定义更新同时作用于两个实例。
+- 性能工程：100 个 Full Adder 实例真实展开为 507 个基础元件、1,004 条连接、
+  3,811 个 projection 端点。三次层次编译样本为 34.5、33.7、34.4 ms，
+  中位数 34.4 ms；单次输入传播 3.3 ms；compile count 保持 `1 -> 1`。
+
+残余工具提示不影响结果：`wasm-pack` 会提示 crate 缺少可选的 description、
+repository 和 crate 目录内的 LICENSE 文件；Playwright 启动的 Node 进程会提示
+`FORCE_COLOR` 覆盖 `NO_COLOR`。阶段 2A 仍明确不包含递归模块、多-trit 总线、
+时序逻辑和框选后一键封装。
+
+本机执行 `playwright install --with-deps chromium` 时，系统包安装需要交互式
+sudo 密码，因此该条不能在当前非提权会话完成；`playwright install chromium`
+和全部浏览器验收均通过。CI 保留 `--with-deps`，在 GitHub runner 的可提权环境
+安装系统依赖。
