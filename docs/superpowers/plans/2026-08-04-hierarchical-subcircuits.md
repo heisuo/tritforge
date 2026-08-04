@@ -812,7 +812,7 @@ git status --short
 Expected: every command exits 0; only documented wasm-pack metadata notices
 remain; status lists only intended Task 12 files before commit.
 
-- [ ] **Step 5: Commit and verify clean status**
+- [x] **Step 5: Commit and verify clean status**
 
 ```bash
 git add README.md .github docs/superpowers/specs/2026-08-04-hierarchical-subcircuits-design.md
