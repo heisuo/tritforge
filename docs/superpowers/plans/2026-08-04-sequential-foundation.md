@@ -116,7 +116,7 @@ git commit -m "feat: define clock and dff contracts"
 - Create: `crates/sim-core/tests/sequential_contract.rs`
 - Modify: `crates/sim-core/src/lib.rs`
 
-- [ ] **Step 1: Write the exhaustive failing state-table tests**
+- [x] **Step 1: Write the exhaustive failing state-table tests**
 
 Test the frozen priority and all auxiliary states:
 
@@ -132,7 +132,7 @@ assert_eq!(dff_next(Trit::Pos, Trit::Neg, Trit::Unknown, Trit::Zero), Trit::Unkn
 Loop across all six trit states to prove `rst=1` always wins and both `0/T` mean
 deasserted for `en` and `rst`.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 cargo test -p sim-core --test sequential_contract
@@ -140,7 +140,7 @@ cargo test -p sim-core --test sequential_contract
 
 Expected: unresolved import `sim_core::sequential`.
 
-- [ ] **Step 3: Implement `dff_next`**
+- [x] **Step 3: Implement `dff_next`**
 
 ```rust
 pub fn dff_next(current: Trit, d: Trit, en: Trit, rst: Trit) -> Trit {
@@ -161,7 +161,7 @@ pub fn dff_next(current: Trit, d: Trit, en: Trit, rst: Trit) -> Trit {
 Use the existing public `Trit::normalize_gate_input` helper so the `Z -> X` rule remains shared
 with combinational gates.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 ```bash
 cargo test -p sim-core --test sequential_contract
