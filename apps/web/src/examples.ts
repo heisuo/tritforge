@@ -6,6 +6,7 @@ import type {
 } from "./editor-model";
 import { toEditorDocument } from "./editor/circuit-document";
 import { cloneHierarchicalAdderProject } from "./examples/hierarchical-adder";
+import { cloneRegister3Project } from "./examples/register3";
 import { cloneSequentialDffProject } from "./examples/sequential-dff";
 import type { ProjectDocumentV2 } from "./project/project-document";
 
@@ -19,7 +20,8 @@ export type ExampleId =
   | "hierarchical-adder"
   | "ripple-adder-3"
   | "driver-conflict"
-  | "sequential-dff";
+  | "sequential-dff"
+  | "register3";
 
 export interface TernaryExample {
   id: ExampleId;
@@ -77,6 +79,15 @@ const sequentialDffDocument = toEditorDocument({
   components: sequentialDffRoot.components,
   connections: sequentialDffRoot.connections,
   ...(sequentialDffRoot.viewport ? { viewport: sequentialDffRoot.viewport } : {}),
+});
+const register3Project = cloneRegister3Project();
+const register3Root = register3Project.circuits[0];
+const register3Document = toEditorDocument({
+  format: "logsim-ternary",
+  version: 1,
+  components: register3Root.components,
+  connections: register3Root.connections,
+  ...(register3Root.viewport ? { viewport: register3Root.viewport } : {}),
 });
 
 export const EXAMPLES: TernaryExample[] = [
@@ -317,6 +328,16 @@ export const EXAMPLES: TernaryExample[] = [
     document: sequentialDffDocument,
     project: cloneSequentialDffProject(),
   },
+  {
+    id: "register3",
+    name: "3-trit 并行寄存器",
+    category: "时序电路",
+    description: "用三个共享 Clock、EN 和同步 RST 的 DFF 并行保存一个 3-trit 字。",
+    composition: "D2:D0 + Clock + EN + RST → 3 × DFF → Q2:Q0",
+    expected: "默认 D=1T0，载入时 Q=000，单步后 Q=1T0（十进制 6）",
+    document: register3Document,
+    project: cloneRegister3Project(),
+  },
 ];
 
 export function cloneExampleDocument(id: ExampleId): EditorDocument {
@@ -337,5 +358,6 @@ export function cloneExampleDocument(id: ExampleId): EditorDocument {
 export function cloneExampleProject(id: ExampleId): ProjectDocumentV2 | null {
   if (id === "hierarchical-adder") return cloneHierarchicalAdderProject();
   if (id === "sequential-dff") return cloneSequentialDffProject();
+  if (id === "register3") return cloneRegister3Project();
   return null;
 }

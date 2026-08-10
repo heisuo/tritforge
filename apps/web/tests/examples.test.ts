@@ -39,6 +39,7 @@ describe("example library", () => {
       "ripple-adder-3",
       "driver-conflict",
       "sequential-dff",
+      "register3",
     ]);
   });
 

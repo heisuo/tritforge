@@ -28,13 +28,13 @@
 - Create: `apps/web/src/examples/register3.ts`
 - Modify: `apps/web/src/examples.ts`
 
-- [ ] **Step 1: Write the failing example contract test**
+- [x] **Step 1: Write the failing example contract test**
 
 Require example ID `register3`, root defaults `D2=1/D1=T/D0=0/EN=1/RST=0`, one Clock,
 one `register3` module instance, three Q Probes, exact stable port IDs, exactly three DFFs, and
 shared `clk/en/rst` fanout connections.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 npm --prefix apps/web test -- --run tests/register3.test.ts
@@ -42,13 +42,13 @@ npm --prefix apps/web test -- --run tests/register3.test.ts
 
 Expected: fail because `register3` is not an `ExampleId` and no cloned project exists.
 
-- [ ] **Step 3: Implement the Project v2 fixture**
+- [x] **Step 3: Implement the Project v2 fixture**
 
 Create `register3.ts` using the established `component()` and `connection()` helpers. Freeze
 module port IDs as `d2/d1/d0/clk/en/rst/q2/q1/q0`; connect three DFFs and register the example
 in `examples.ts` with expected result `1T0` (decimal 6).
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 ```bash
 npm --prefix apps/web test -- --run tests/register3.test.ts tests/examples.test.ts
@@ -173,4 +173,3 @@ git commit -m "docs: complete three-trit register phase"
 Require a clean feature worktree, preserve unrelated main changes before merging, fast-forward
 `feature/register3-foundation` into `main`, verify both refs match, and start the Web server from
 main at `http://localhost:5173/`.
-
