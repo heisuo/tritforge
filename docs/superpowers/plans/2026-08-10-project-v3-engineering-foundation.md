@@ -269,14 +269,14 @@ undo for width/mapping edits, and unchanged document/runtime after invalid edits
 - Test: `apps/web/tests/app.test.tsx`
 - Test: `apps/web/tests/bus-wiring.spec.ts`
 
-- [ ] Write a 1440x900 RED browser flow that places a width-3 input, Splitter, three Probes, Junction, and two
+- [x] Write a 1440x900 RED browser flow that places a width-3 input, Splitter, three Probes, Junction, and two
 same-name Tunnels; assert word/scalar values and an atomic width-rejection message.
-- [ ] Add wiring palette entries and property controls using icon buttons, steppers, text fields, and mapping menus.
-- [ ] Render stable 2 px scalar and 6 px bus routes, width/value labels, dynamic handles, and tooltips without
+- [x] Add wiring palette entries and property controls using icon buttons, steppers, text fields, and mapping menus.
+- [x] Render stable 2 px scalar and 6 px bus routes, width/value labels, dynamic handles, and tooltips without
 changing route geometry when values change.
-- [ ] Add one 1024x720 compact acceptance for no overlap or hidden status controls.
-- [ ] Run Playwright, Vitest, production build, and inspect screenshots.
-- [ ] Commit `feat: add bus splitter and tunnel workbench`.
+- [x] Add one 1024x720 compact acceptance for no overlap or hidden status controls.
+- [x] Run Playwright, Vitest, production build, and inspect screenshots.
+- [x] Commit `feat: add bus splitter and tunnel workbench`.
 
 ### Task 8: Add a Bus and Tunnel Teaching Example
 
