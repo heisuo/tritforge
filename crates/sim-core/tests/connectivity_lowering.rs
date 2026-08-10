@@ -1,6 +1,7 @@
 use sim_core::connectivity::{
-    CompiledProjectV3, QualifiedWireBitRef, compile_project_v3, lower_project_v3,
+    CompiledProjectV3, QualifiedWireBitRef, ScalarBitEndpoint, compile_project_v3, lower_project_v3,
 };
+use sim_core::hierarchy::FlatPortRef;
 use sim_core::project::{
     ProjectCircuitKind, ProjectCircuitV3, ProjectComponent, ProjectDocumentV3, ProjectWire,
     QualifiedPortRef, WireEndpoint,
@@ -86,6 +87,18 @@ fn probe_word(result: &CompiledProjectV3, component_id: &str) -> Vec<Trit> {
                 .unwrap()
         })
         .collect()
+}
+
+fn helper_endpoints<'a>(
+    result: &'a CompiledProjectV3,
+    bit: &ScalarBitEndpoint,
+) -> &'a [FlatPortRef] {
+    let net = &result.reassembly.nets[bit.scalar_net.as_ref().unwrap()];
+    if net.flat_consumers.is_empty() {
+        &net.flat_drivers
+    } else {
+        &net.flat_consumers
+    }
 }
 
 fn diagnostics(project: ProjectDocumentV3) -> Vec<sim_core::project::ProjectDiagnostic> {
@@ -345,9 +358,10 @@ fn helper_bits_reassemble_from_compiled_driver_or_consumer_nets() {
 
     let driven = QualifiedPortRef::new("main", [] as [&str; 0], "driven-junction", "net");
     let driven_bit = &result.reassembly.ports[&driven][0];
-    assert_eq!(driven_bit.flat_endpoints.len(), 2);
-    let driver_values = driven_bit
-        .flat_endpoints
+    assert!(driven_bit.flat_endpoints.is_empty());
+    let driven_endpoints = helper_endpoints(&result, driven_bit);
+    assert_eq!(driven_endpoints.len(), 2);
+    let driver_values = driven_endpoints
         .iter()
         .map(|driver| {
             snapshot
@@ -363,8 +377,10 @@ fn helper_bits_reassemble_from_compiled_driver_or_consumer_nets() {
 
     let floating = QualifiedPortRef::new("main", [] as [&str; 0], "floating-junction", "net");
     let floating_bit = &result.reassembly.ports[&floating][0];
-    assert_eq!(floating_bit.flat_endpoints.len(), 1);
-    let consumer = &floating_bit.flat_endpoints[0];
+    assert!(floating_bit.flat_endpoints.is_empty());
+    let floating_endpoints = helper_endpoints(&result, floating_bit);
+    assert_eq!(floating_endpoints.len(), 1);
+    let consumer = &floating_endpoints[0];
     assert_eq!(
         snapshot.input_value(&consumer.component_id, &consumer.port_id),
         Some(Trit::HighZ)
@@ -380,6 +396,81 @@ fn helper_bits_reassemble_from_compiled_driver_or_consumer_nets() {
     assert!(isolated_bit.flat_endpoints.is_empty());
     assert!(isolated_net.flat_drivers.is_empty());
     assert_eq!(resolve_drivers(&[]), Trit::HighZ);
+}
+
+#[test]
+fn shared_helper_net_stores_fanout_endpoints_once() {
+    let mut components = vec![component(
+        "source",
+        "source.constant",
+        serde_json::json!({"value": "1"}),
+    )];
+    components.extend((0..100).map(|index| {
+        component(
+            &format!("probe-{index:03}"),
+            "sink.probe",
+            serde_json::json!({}),
+        )
+    }));
+    components.extend((0..2000).map(|index| {
+        component(
+            &format!("tunnel-{index:04}"),
+            "wiring.tunnel",
+            serde_json::json!({"label": "shared"}),
+        )
+    }));
+
+    let mut wires = vec![wire("source-wire", "source", "out", "tunnel-0000", "net")];
+    wires.extend((0..100).map(|index| {
+        wire(
+            &format!("probe-wire-{index:03}"),
+            &format!("tunnel-{index:04}"),
+            "net",
+            &format!("probe-{index:03}"),
+            "in",
+        )
+    }));
+
+    let result = compile_project_v3(
+        project(vec![circuit(
+            "main",
+            ProjectCircuitKind::Main,
+            components,
+            wires,
+        )]),
+        "main",
+    )
+    .unwrap();
+
+    let helper_bits = (0..2000)
+        .map(|index| {
+            let logical =
+                QualifiedPortRef::new("main", [] as [&str; 0], format!("tunnel-{index:04}"), "net");
+            &result.reassembly.ports[&logical][0]
+        })
+        .collect::<Vec<_>>();
+    let net_refs = helper_bits
+        .iter()
+        .map(|bit| bit.scalar_net.as_ref().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(net_refs.len(), 1);
+    assert_eq!(
+        helper_bits
+            .iter()
+            .map(|bit| bit.flat_endpoints.len())
+            .sum::<usize>(),
+        0,
+        "helper bits must reference shared net endpoints instead of cloning them"
+    );
+
+    let net = &result.reassembly.nets[*net_refs.first().unwrap()];
+    assert_eq!(net.flat_drivers.len(), 1);
+    assert_eq!(net.flat_consumers.len(), 100);
+    let simulator = Simulator::load(result.compiled.circuit.clone()).unwrap();
+    let snapshot = simulator.snapshot();
+    assert!(net.flat_consumers.iter().all(|consumer| {
+        snapshot.input_value(&consumer.component_id, &consumer.port_id) == Some(Trit::Pos)
+    }));
 }
 
 #[test]
@@ -718,16 +809,24 @@ fn three_level_bus_hierarchy_reassembles_qualified_helper_nets_per_outer_instanc
     let right_bits = &result.reassembly.ports[&right_tunnel];
     assert_eq!(left_bits.len(), 3);
     assert_eq!(right_bits.len(), 3);
-    assert!(left_bits.iter().all(|bit| !bit.flat_endpoints.is_empty()));
-    assert!(right_bits.iter().all(|bit| !bit.flat_endpoints.is_empty()));
+    assert!(
+        left_bits
+            .iter()
+            .all(|bit| !helper_endpoints(&result, bit).is_empty())
+    );
+    assert!(
+        right_bits
+            .iter()
+            .all(|bit| !helper_endpoints(&result, bit).is_empty())
+    );
     let left_components = left_bits
         .iter()
-        .flat_map(|bit| bit.flat_endpoints.iter())
+        .flat_map(|bit| helper_endpoints(&result, bit))
         .map(|endpoint| endpoint.component_id.as_str())
         .collect::<std::collections::BTreeSet<_>>();
     let right_components = right_bits
         .iter()
-        .flat_map(|bit| bit.flat_endpoints.iter())
+        .flat_map(|bit| helper_endpoints(&result, bit))
         .map(|endpoint| endpoint.component_id.as_str())
         .collect::<std::collections::BTreeSet<_>>();
     assert!(left_components.is_disjoint(&right_components));

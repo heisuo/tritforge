@@ -1986,7 +1986,7 @@ fn expand_reassembly(
                     let scalar_net = bit.scalar_net.as_ref().map(|net| {
                         QualifiedNetRef::new(&net.circuit_id, path.iter().cloned(), &net.net_id)
                     });
-                    let mut flat_endpoints = scalar_port
+                    let flat_endpoints = scalar_port
                         .as_ref()
                         .map(|port| {
                             flat_endpoints_with_boundary_alias(
@@ -1997,16 +1997,6 @@ fn expand_reassembly(
                             )
                         })
                         .unwrap_or_default();
-                    if flat_endpoints.is_empty()
-                        && let Some(net_ref) = &scalar_net
-                        && let Some(net) = result.nets.get(net_ref)
-                    {
-                        flat_endpoints = if net.flat_consumers.is_empty() {
-                            net.flat_drivers.clone()
-                        } else {
-                            net.flat_consumers.clone()
-                        };
-                    }
                     ScalarBitEndpoint {
                         scalar_port,
                         scalar_net,
