@@ -23,7 +23,7 @@ function node(page: Page, id: string) {
 
 async function waitForSimulator(page: Page) {
   await page.goto("/");
-  await expect(page.getByText("WASM v1")).toBeVisible();
+  await expect(page.getByText("WASM v2")).toBeVisible();
 }
 
 async function loadHierarchicalAdder(page: Page) {

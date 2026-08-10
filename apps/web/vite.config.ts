@@ -9,6 +9,7 @@ export default defineConfig({
     exclude: [
       "tests/phase1.spec.ts",
       "tests/hierarchy.spec.ts",
+      "tests/sequential.spec.ts",
       "node_modules/**",
       "dist/**",
     ],

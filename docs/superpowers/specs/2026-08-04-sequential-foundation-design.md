@@ -190,3 +190,24 @@ Trit Input、DFF 和 Q Probe。默认 `D=1, EN=1, RST=0`；载入时 Q 为 0，�
 - reset、结构重编译、导航和 source 更新的状态生命周期有确定测试。
 - API v2、项目快照和 Web 状态栏对 tick count 的命名一致。
 - Rust、WASM、Vitest、生产构建和 Playwright 全部通过。
+
+## 11. 实际验收记录（2026-08-10）
+
+Phase 3A 已实现 Clock、单-trit DFF、同步复位、写使能、事务式完整周期 tick、
+层级实例独立状态、WASM API v2、网页 Tick 命令和可编辑 DFF 示例。fresh 验证结果：
+
+- `cargo fmt --all -- --check`：通过。
+- workspace Clippy `-D warnings`：通过。
+- `cargo test --workspace`：148 项通过，其中 sim-core 146 项、sim-wasm 原生 2 项。
+- `wasm-pack test --node crates/sim-wasm`：真实 WASM 11 项通过。
+- Vitest：13 个测试文件、104 项通过。
+- TypeScript 与 Vite production build：通过。
+- Chromium 1440x900：真实 WASM 下完成 `Q=0 → 捕获1 → EN保持 → RST清零 → 捕获T`
+  和重新载入归零；Clock 每拍回到 0，tick count 连续，页面无横向溢出、无 console/page error。
+- 截图 `docs/images/phase3a-dff.png` 已人工检查，节点、端口、连线、工具栏、状态栏和
+  检查器无重叠或裁切。
+
+根据用户 2026-08-10 的快速推进决定，本次只把桌面 Chromium 作为发布阻断项。
+紧凑/移动视口以及层级双实例的浏览器级重复验收延期；多实例独立状态仍由 Rust
+层次编译与 ProjectSimulator 测试覆盖。该缩减不改变仿真语义，只减少当前 UI
+加固范围。3-trit 寄存器、波形、自动连续时钟、传播延迟和多时钟域仍不属于 3A。
