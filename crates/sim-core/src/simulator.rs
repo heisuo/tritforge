@@ -267,6 +267,14 @@ impl Simulator {
 
     #[allow(clippy::result_large_err)]
     pub fn tick(&mut self) -> Result<SimulationSnapshot, Diagnostic> {
+        let (_, completed) = self.tick_with_phase_snapshots()?;
+        Ok(completed)
+    }
+
+    #[allow(clippy::result_large_err)]
+    pub(crate) fn tick_with_phase_snapshots(
+        &mut self,
+    ) -> Result<(SimulationSnapshot, SimulationSnapshot), Diagnostic> {
         let next_tick_count = self.checked_next_tick_count()?;
         let starting_phase = self.clock_phase;
         let mut tick_report = PhaseReport::default();
@@ -274,13 +282,15 @@ impl Simulator {
 
         let first = self.advance_phase_transaction()?;
         tick_report.merge(first);
+        self.apply_phase_report(&tick_report);
+        let first_snapshot = self.snapshot();
         let second = self.advance_phase_transaction()?;
         tick_report.merge(second);
 
         debug_assert_eq!(self.clock_phase, starting_phase);
         debug_assert_eq!(self.tick_count, next_tick_count);
         self.apply_phase_report(&tick_report);
-        Ok(self.snapshot())
+        Ok((first_snapshot, self.snapshot()))
     }
 
     #[allow(clippy::result_large_err)]

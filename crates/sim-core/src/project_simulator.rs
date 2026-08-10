@@ -13,6 +13,9 @@ use crate::project::{
 use crate::project_validation::{ValidatedProject, resolve_project_ports, validate_project};
 use crate::signal::{KnownWord, SignalError, SignalShape, WordValue};
 use crate::simulator::{ClockPhase, SimulationSnapshot, Simulator};
+use crate::trace::{
+    TraceFrame, TraceFrameReason, TraceRecorder, TraceSignalRef, TraceValue, TraceWatch,
+};
 use crate::trit::{Trit, resolve_drivers};
 
 const MODULE_INPUT: &str = "project.module_input";
@@ -52,6 +55,8 @@ pub struct ProjectSimulator {
     simulator: Option<Simulator>,
     snapshot: Option<ProjectSnapshot>,
     compile_count: u64,
+    trace: TraceRecorder,
+    trace_diagnostics: Vec<ProjectDiagnostic>,
 }
 
 impl ProjectSimulator {
@@ -69,6 +74,8 @@ impl ProjectSimulator {
             simulator: None,
             snapshot: None,
             compile_count: 0,
+            trace: TraceRecorder::default(),
+            trace_diagnostics: vec![],
         };
         project_simulator.rebuild()?;
         Ok(project_simulator)
@@ -103,6 +110,8 @@ impl ProjectSimulator {
             simulator: Some(simulator),
             snapshot: None,
             compile_count: 1,
+            trace: TraceRecorder::default(),
+            trace_diagnostics: vec![],
         };
         project_simulator.snapshot = Some(project_simulator.project_snapshot(&flat));
         Ok(project_simulator)
@@ -115,6 +124,7 @@ impl ProjectSimulator {
         let validated = match validate_project(project.clone()) {
             Ok(validated) => validated,
             Err(diagnostics) => {
+                self.record_trace_frame(TraceFrameReason::Fault, diagnostics.clone());
                 self.project = project;
                 self.invalidate();
                 return Err(diagnostics);
@@ -152,23 +162,34 @@ impl ProjectSimulator {
                     .as_ref()
                     .expect("settleable runtime has compiled provenance"),
             );
+            let source_changed = !updates.is_empty();
             let flat = if updates.is_empty() {
                 self.simulator
                     .as_ref()
                     .expect("settleable runtime has a simulator")
                     .snapshot()
             } else {
-                self.simulator
+                match self
+                    .simulator
                     .as_mut()
                     .expect("settleable runtime has a simulator")
                     .set_sources(updates)
-                    .map_err(|diagnostic| {
-                        vec![project_error(&diagnostic.code, &diagnostic.message, None)]
-                    })?
+                {
+                    Ok(flat) => flat,
+                    Err(diagnostic) => {
+                        let diagnostics =
+                            vec![project_error(&diagnostic.code, &diagnostic.message, None)];
+                        self.record_trace_frame(TraceFrameReason::Fault, diagnostics.clone());
+                        return Err(diagnostics);
+                    }
+                }
             };
             self.project = project;
             self.validated = Some(validated);
             self.snapshot = Some(self.project_snapshot(&flat));
+            if source_changed {
+                self.record_trace_frame(TraceFrameReason::InputChange, vec![]);
+            }
             return Ok(self
                 .snapshot
                 .clone()
@@ -176,7 +197,11 @@ impl ProjectSimulator {
         }
         self.project = project;
         self.invalidate();
-        self.install_validated(validated)?;
+        if let Err(diagnostics) = self.install_validated(validated) {
+            self.record_trace_frame(TraceFrameReason::Fault, diagnostics.clone());
+            return Err(diagnostics);
+        }
+        self.refresh_trace_after_lifecycle(TraceFrameReason::Load);
         Ok(self
             .snapshot
             .clone()
@@ -188,13 +213,21 @@ impl ProjectSimulator {
         project: ProjectDocumentV3,
     ) -> Result<ProjectSnapshot, Vec<ProjectDiagnostic>> {
         if self.project_v3.is_none() {
-            return Err(vec![project_error(
+            let diagnostics = vec![project_error(
                 "PROJECT_VERSION_MISMATCH",
                 "a v3 project cannot update a v2 project simulator",
                 None,
-            )]);
+            )];
+            self.record_trace_frame(TraceFrameReason::Fault, diagnostics.clone());
+            return Err(diagnostics);
         }
-        let compiled_v3 = compile_project_v3(project.clone(), &self.active_circuit_id)?;
+        let compiled_v3 = match compile_project_v3(project.clone(), &self.active_circuit_id) {
+            Ok(compiled) => compiled,
+            Err(diagnostics) => {
+                self.record_trace_frame(TraceFrameReason::Fault, diagnostics.clone());
+                return Err(diagnostics);
+            }
+        };
         let compiled = compiled_v3.compiled.clone();
         let can_reuse = self.simulator.is_some()
             && self.compiled.as_ref().is_some_and(|current| {
@@ -202,6 +235,7 @@ impl ProjectSimulator {
             });
         if can_reuse {
             let updates = source_updates(&self.project, &compiled_v3.lowered.project, &compiled);
+            let source_changed = !updates.is_empty();
             let flat = if updates.is_empty() {
                 self.simulator
                     .as_ref()
@@ -229,23 +263,31 @@ impl ProjectSimulator {
             self.compiled = Some(compiled);
             self.compiled_v3 = Some(compiled_v3);
             self.snapshot = Some(self.project_snapshot(&flat));
+            if source_changed {
+                self.record_trace_frame(TraceFrameReason::InputChange, vec![]);
+            }
             return Ok(self
                 .snapshot
                 .clone()
                 .expect("reused v3 runtime has a snapshot"));
         }
         let network_index = FlatNetworkIndex::new(&compiled);
-        let simulator = Simulator::load(compiled.circuit.clone()).map_err(|diagnostics| {
-            diagnostics
-                .iter()
-                .map(|diagnostic| {
-                    remap_v3_diagnostic(
-                        project_flat_diagnostic(diagnostic, &compiled, &network_index),
-                        &compiled_v3,
-                    )
-                })
-                .collect::<Vec<_>>()
-        })?;
+        let simulator = match Simulator::load(compiled.circuit.clone()) {
+            Ok(simulator) => simulator,
+            Err(diagnostics) => {
+                let diagnostics = diagnostics
+                    .iter()
+                    .map(|diagnostic| {
+                        remap_v3_diagnostic(
+                            project_flat_diagnostic(diagnostic, &compiled, &network_index),
+                            &compiled_v3,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                self.record_trace_frame(TraceFrameReason::Fault, diagnostics.clone());
+                return Err(diagnostics);
+            }
+        };
         let flat = simulator.snapshot();
 
         self.project = compiled_v3.lowered.project.clone();
@@ -256,6 +298,7 @@ impl ProjectSimulator {
         self.simulator = Some(simulator);
         self.compile_count += 1;
         self.snapshot = Some(self.project_snapshot(&flat));
+        self.refresh_trace_after_lifecycle(TraceFrameReason::Load);
         Ok(self
             .snapshot
             .clone()
@@ -271,16 +314,35 @@ impl ProjectSimulator {
         }
         let validated = match &self.validated {
             Some(validated) => validated.clone(),
-            None => validate_project(self.project.clone())?,
+            None => match validate_project(self.project.clone()) {
+                Ok(validated) => validated,
+                Err(diagnostics) => {
+                    self.record_trace_frame(TraceFrameReason::Fault, diagnostics.clone());
+                    return Err(diagnostics);
+                }
+            },
         };
-        let compiled = compile_project(&validated, active_circuit_id)?;
+        let compiled = match compile_project(&validated, active_circuit_id) {
+            Ok(compiled) => compiled,
+            Err(diagnostics) => {
+                self.record_trace_frame(TraceFrameReason::Fault, diagnostics.clone());
+                return Err(diagnostics);
+            }
+        };
         let network_index = FlatNetworkIndex::new(&compiled);
-        let simulator = Simulator::load(compiled.circuit.clone()).map_err(|diagnostics| {
-            diagnostics
-                .iter()
-                .map(|diagnostic| project_flat_diagnostic(diagnostic, &compiled, &network_index))
-                .collect::<Vec<_>>()
-        })?;
+        let simulator = match Simulator::load(compiled.circuit.clone()) {
+            Ok(simulator) => simulator,
+            Err(diagnostics) => {
+                let diagnostics = diagnostics
+                    .iter()
+                    .map(|diagnostic| {
+                        project_flat_diagnostic(diagnostic, &compiled, &network_index)
+                    })
+                    .collect::<Vec<_>>();
+                self.record_trace_frame(TraceFrameReason::Fault, diagnostics.clone());
+                return Err(diagnostics);
+            }
+        };
         let flat = simulator.snapshot();
         self.active_circuit_id = active_circuit_id.to_owned();
         self.compile_count += 1;
@@ -288,6 +350,7 @@ impl ProjectSimulator {
         self.compiled = Some(compiled);
         self.simulator = Some(simulator);
         self.snapshot = Some(self.project_snapshot(&flat));
+        self.refresh_trace_after_lifecycle(TraceFrameReason::Load);
         Ok(self
             .snapshot
             .clone()
@@ -299,20 +362,31 @@ impl ProjectSimulator {
         project: ProjectDocumentV3,
         active_circuit_id: &str,
     ) -> Result<ProjectSnapshot, Vec<ProjectDiagnostic>> {
-        let compiled_v3 = compile_project_v3(project, active_circuit_id)?;
+        let compiled_v3 = match compile_project_v3(project, active_circuit_id) {
+            Ok(compiled) => compiled,
+            Err(diagnostics) => {
+                self.record_trace_frame(TraceFrameReason::Fault, diagnostics.clone());
+                return Err(diagnostics);
+            }
+        };
         let compiled = compiled_v3.compiled.clone();
         let network_index = FlatNetworkIndex::new(&compiled);
-        let simulator = Simulator::load(compiled.circuit.clone()).map_err(|diagnostics| {
-            diagnostics
-                .iter()
-                .map(|diagnostic| {
-                    remap_v3_diagnostic(
-                        project_flat_diagnostic(diagnostic, &compiled, &network_index),
-                        &compiled_v3,
-                    )
-                })
-                .collect::<Vec<_>>()
-        })?;
+        let simulator = match Simulator::load(compiled.circuit.clone()) {
+            Ok(simulator) => simulator,
+            Err(diagnostics) => {
+                let diagnostics = diagnostics
+                    .iter()
+                    .map(|diagnostic| {
+                        remap_v3_diagnostic(
+                            project_flat_diagnostic(diagnostic, &compiled, &network_index),
+                            &compiled_v3,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                self.record_trace_frame(TraceFrameReason::Fault, diagnostics.clone());
+                return Err(diagnostics);
+            }
+        };
         let flat = simulator.snapshot();
         self.project = compiled_v3.lowered.project.clone();
         self.active_circuit_id = active_circuit_id.to_owned();
@@ -322,6 +396,7 @@ impl ProjectSimulator {
         self.compiled_v3 = Some(compiled_v3);
         self.simulator = Some(simulator);
         self.snapshot = Some(self.project_snapshot(&flat));
+        self.refresh_trace_after_lifecycle(TraceFrameReason::Load);
         Ok(self
             .snapshot
             .clone()
@@ -330,6 +405,25 @@ impl ProjectSimulator {
 
     #[allow(clippy::result_large_err)]
     pub fn set_source(
+        &mut self,
+        circuit_id: &str,
+        component_id: &str,
+        value: Trit,
+    ) -> Result<ProjectSnapshot, ProjectDiagnostic> {
+        match self.set_source_inner(circuit_id, component_id, value) {
+            Ok(snapshot) => {
+                self.record_trace_frame(TraceFrameReason::InputChange, vec![]);
+                Ok(snapshot)
+            }
+            Err(diagnostic) => {
+                self.record_trace_frame(TraceFrameReason::Fault, vec![diagnostic.clone()]);
+                Err(diagnostic)
+            }
+        }
+    }
+
+    #[allow(clippy::result_large_err)]
+    fn set_source_inner(
         &mut self,
         circuit_id: &str,
         component_id: &str,
@@ -411,6 +505,25 @@ impl ProjectSimulator {
 
     #[allow(clippy::result_large_err)]
     pub fn set_source_word(
+        &mut self,
+        circuit_id: &str,
+        component_id: &str,
+        value: &str,
+    ) -> Result<ProjectSnapshot, ProjectDiagnostic> {
+        match self.set_source_word_inner(circuit_id, component_id, value) {
+            Ok(snapshot) => {
+                self.record_trace_frame(TraceFrameReason::InputChange, vec![]);
+                Ok(snapshot)
+            }
+            Err(diagnostic) => {
+                self.record_trace_frame(TraceFrameReason::Fault, vec![diagnostic.clone()]);
+                Err(diagnostic)
+            }
+        }
+    }
+
+    #[allow(clippy::result_large_err)]
+    fn set_source_word_inner(
         &mut self,
         circuit_id: &str,
         component_id: &str,
@@ -554,9 +667,109 @@ impl ProjectSimulator {
             .expect("ready v3 project has a snapshot"))
     }
 
+    pub fn set_trace_watches(
+        &mut self,
+        watches: Vec<TraceWatch>,
+    ) -> Result<TraceFrame, Vec<ProjectDiagnostic>> {
+        let Some(flat) = self.simulator.as_ref().map(Simulator::snapshot) else {
+            let diagnostics = vec![project_error(
+                "PROJECT_NOT_READY",
+                "project simulation is unavailable until validation succeeds",
+                None,
+            )];
+            self.trace_diagnostics.clone_from(&diagnostics);
+            return Err(diagnostics);
+        };
+        let mut ids = BTreeSet::new();
+        let mut diagnostics = Vec::new();
+        for watch in &watches {
+            if !ids.insert(watch.id.clone()) {
+                diagnostics.push(trace_watch_error(
+                    "DUPLICATE_TRACE_WATCH",
+                    format!("trace watch id '{}' is duplicated", watch.id),
+                    watch.signal.port(),
+                ));
+            } else if self.trace_word(&watch.signal, &flat).is_none() {
+                diagnostics.push(trace_unavailable(watch));
+            }
+        }
+        if !diagnostics.is_empty() {
+            self.trace_diagnostics.clone_from(&diagnostics);
+            return Err(diagnostics);
+        }
+
+        self.trace_diagnostics.clear();
+        self.trace.replace_watches(watches);
+        self.record_trace_frame(TraceFrameReason::Load, vec![]);
+        Ok(self
+            .trace
+            .last_frame()
+            .cloned()
+            .unwrap_or_else(|| empty_trace_frame(&flat, TraceFrameReason::Load)))
+    }
+
+    pub fn trace_watches(&self) -> &[TraceWatch] {
+        self.trace.watches()
+    }
+
+    pub fn trace_frames(&self) -> &std::collections::VecDeque<TraceFrame> {
+        self.trace.frames()
+    }
+
+    pub fn trace_diagnostics(&self) -> &[ProjectDiagnostic] {
+        &self.trace_diagnostics
+    }
+
+    pub fn clear_trace(&mut self) {
+        self.trace.clear();
+    }
+
+    #[allow(clippy::result_large_err)]
+    pub fn reset(&mut self) -> Result<ProjectSnapshot, ProjectDiagnostic> {
+        if self.simulator.is_none() || self.compiled.is_none() {
+            let diagnostic = project_error(
+                "PROJECT_NOT_READY",
+                "project simulation is unavailable until validation succeeds",
+                None,
+            );
+            self.record_trace_frame(TraceFrameReason::Fault, vec![diagnostic.clone()]);
+            return Err(diagnostic);
+        }
+        let flat = self
+            .simulator
+            .as_mut()
+            .expect("ready project has a simulator")
+            .reset();
+        self.snapshot = Some(self.project_snapshot(&flat));
+        self.trace.clear();
+        self.trace_diagnostics.clear();
+        self.record_trace_frame(TraceFrameReason::Reset, vec![]);
+        Ok(self.snapshot.clone().expect("reset project has a snapshot"))
+    }
+
     #[allow(clippy::result_large_err)]
     pub fn tick(&mut self) -> Result<ProjectSnapshot, ProjectDiagnostic> {
-        self.advance_runtime(Simulator::tick)
+        if let Err(diagnostic) = self.ensure_runtime_ready() {
+            self.record_trace_frame(TraceFrameReason::Fault, vec![diagnostic.clone()]);
+            return Err(diagnostic);
+        }
+        let phases = self
+            .simulator
+            .as_mut()
+            .expect("ready project has a flat simulator")
+            .tick_with_phase_snapshots();
+        let (first, second) = match phases {
+            Ok(phases) => phases,
+            Err(diagnostic) => {
+                let diagnostic = self.project_runtime_diagnostic(&diagnostic);
+                self.record_trace_frame(TraceFrameReason::Fault, vec![diagnostic.clone()]);
+                return Err(diagnostic);
+            }
+        };
+        self.record_phase_snapshot(&first);
+        self.snapshot = Some(self.project_snapshot(&second));
+        self.record_phase_snapshot(&second);
+        Ok(self.snapshot.clone().expect("ready project has a snapshot"))
     }
 
     #[allow(clippy::result_large_err)]
@@ -569,15 +782,9 @@ impl ProjectSimulator {
         &mut self,
         advance: fn(&mut Simulator) -> Result<SimulationSnapshot, Diagnostic>,
     ) -> Result<ProjectSnapshot, ProjectDiagnostic> {
-        if (self.project_v3.is_none() && self.validated.is_none())
-            || self.simulator.is_none()
-            || self.compiled.is_none()
-        {
-            return Err(project_error(
-                "PROJECT_NOT_READY",
-                "project simulation is unavailable until validation succeeds",
-                None,
-            ));
+        if let Err(diagnostic) = self.ensure_runtime_ready() {
+            self.record_trace_frame(TraceFrameReason::Fault, vec![diagnostic.clone()]);
+            return Err(diagnostic);
         }
 
         let flat = match advance(
@@ -587,20 +794,13 @@ impl ProjectSimulator {
         ) {
             Ok(flat) => flat,
             Err(diagnostic) => {
-                let compiled = self
-                    .compiled
-                    .as_ref()
-                    .expect("ready project has compiled provenance");
-                let network_index = FlatNetworkIndex::new(compiled);
-                let diagnostic = project_flat_diagnostic(&diagnostic, compiled, &network_index);
-                return Err(if let Some(compiled_v3) = &self.compiled_v3 {
-                    remap_v3_diagnostic(diagnostic, compiled_v3)
-                } else {
-                    diagnostic
-                });
+                let diagnostic = self.project_runtime_diagnostic(&diagnostic);
+                self.record_trace_frame(TraceFrameReason::Fault, vec![diagnostic.clone()]);
+                return Err(diagnostic);
             }
         };
         self.snapshot = Some(self.project_snapshot(&flat));
+        self.record_phase_snapshot(&flat);
         Ok(self.snapshot.clone().expect("ready project has a snapshot"))
     }
 
@@ -628,6 +828,211 @@ impl ProjectSimulator {
             expanded_connections: compiled.circuit.connections.len(),
             projection_endpoints,
         })
+    }
+
+    #[allow(clippy::result_large_err)]
+    fn ensure_runtime_ready(&self) -> Result<(), ProjectDiagnostic> {
+        if (self.project_v3.is_none() && self.validated.is_none())
+            || self.simulator.is_none()
+            || self.compiled.is_none()
+        {
+            Err(project_error(
+                "PROJECT_NOT_READY",
+                "project simulation is unavailable until validation succeeds",
+                None,
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn project_runtime_diagnostic(&self, diagnostic: &Diagnostic) -> ProjectDiagnostic {
+        let compiled = self
+            .compiled
+            .as_ref()
+            .expect("ready project has compiled provenance");
+        let network_index = FlatNetworkIndex::new(compiled);
+        let diagnostic = project_flat_diagnostic(diagnostic, compiled, &network_index);
+        if let Some(compiled_v3) = &self.compiled_v3 {
+            remap_v3_diagnostic(diagnostic, compiled_v3)
+        } else {
+            diagnostic
+        }
+    }
+
+    fn record_phase_snapshot(&mut self, flat: &SimulationSnapshot) {
+        let reason = match flat.clock_phase {
+            ClockPhase::LowStable => TraceFrameReason::ClockFall,
+            ClockPhase::HighStable => TraceFrameReason::ClockRise,
+        };
+        self.record_trace_frame_from_flat(flat, reason, vec![]);
+    }
+
+    fn record_trace_frame(
+        &mut self,
+        reason: TraceFrameReason,
+        diagnostics: Vec<ProjectDiagnostic>,
+    ) {
+        if !self.trace.is_active() {
+            return;
+        }
+        if let Some(flat) = self.simulator.as_ref().map(Simulator::snapshot) {
+            self.record_trace_frame_from_flat(&flat, reason, diagnostics);
+            return;
+        }
+        let Some(previous) = self.trace.last_frame().cloned() else {
+            return;
+        };
+        self.trace.push(TraceFrame {
+            cycle: previous.cycle,
+            clock_phase: previous.clock_phase,
+            reason: TraceFrameReason::Fault,
+            values: previous.values,
+            diagnostics,
+        });
+    }
+
+    fn record_trace_frame_from_flat(
+        &mut self,
+        flat: &SimulationSnapshot,
+        requested_reason: TraceFrameReason,
+        extra_diagnostics: Vec<ProjectDiagnostic>,
+    ) {
+        if !self.trace.is_active() {
+            return;
+        }
+        let projected = self.project_snapshot(flat);
+        let mut diagnostics = ProjectDiagnosticSet::new();
+        for diagnostic in projected
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == Severity::Error)
+            .cloned()
+            .chain(extra_diagnostics)
+        {
+            diagnostics.insert(diagnostic);
+        }
+        let diagnostics = diagnostics.into_vec();
+        let values = self
+            .trace
+            .watches()
+            .iter()
+            .filter_map(|watch| {
+                self.trace_word(&watch.signal, flat)
+                    .map(|value| TraceValue {
+                        watch_id: watch.id.clone(),
+                        value,
+                    })
+            })
+            .collect::<Vec<_>>();
+        let watched_error = values.iter().any(|value| {
+            (0..value.value.shape().width()).any(|index| value.value.trit(index) == Trit::Error)
+        });
+        let reason = if requested_reason == TraceFrameReason::Fault
+            || !flat.stable
+            || !diagnostics.is_empty()
+            || watched_error
+        {
+            TraceFrameReason::Fault
+        } else {
+            requested_reason
+        };
+        self.trace.push(TraceFrame {
+            cycle: flat.tick_count,
+            clock_phase: flat.clock_phase,
+            reason,
+            values,
+            diagnostics,
+        });
+    }
+
+    fn trace_word(&self, signal: &TraceSignalRef, flat: &SimulationSnapshot) -> Option<WordValue> {
+        let reference = signal.port();
+        if let Some(compiled_v3) = &self.compiled_v3 {
+            let bits = compiled_v3.reassembly.ports.get(reference)?;
+            let shape = SignalShape::new(u8::try_from(bits.len()).ok()?).ok()?;
+            let trits = bits
+                .iter()
+                .map(|bit| {
+                    let values = compiled_v3
+                        .reassembly
+                        .observable_endpoints(bit)
+                        .iter()
+                        .map(|endpoint| {
+                            flat.input_value(&endpoint.component_id, &endpoint.port_id)
+                                .or_else(|| {
+                                    flat.output_value(&endpoint.component_id, &endpoint.port_id)
+                                })
+                                .unwrap_or(Trit::HighZ)
+                        })
+                        .collect::<Vec<_>>();
+                    resolve_drivers(&values)
+                })
+                .collect();
+            return WordValue::new(shape, trits).ok();
+        }
+
+        let compiled = self.compiled.as_ref()?;
+        if let Some(entry) = compiled
+            .projection
+            .ports
+            .get(reference)
+            .or_else(|| compiled.projection.boundaries.get(reference))
+        {
+            return Some(scalar_word(projected_driver_value(flat, &entry.drivers)));
+        }
+        let component = QualifiedComponentRef::new(
+            &reference.circuit_id,
+            reference.instance_path.iter().cloned(),
+            &reference.component_id,
+        );
+        let values = compiled
+            .provenance
+            .components
+            .iter()
+            .filter(|(_, qualified)| **qualified == component)
+            .filter_map(|(flat_component_id, _)| {
+                flat.output_value(flat_component_id, &reference.port_id)
+                    .or_else(|| flat.input_value(flat_component_id, &reference.port_id))
+            })
+            .collect::<Vec<_>>();
+        (!values.is_empty()).then(|| scalar_word(resolve_drivers(&values)))
+    }
+
+    fn refresh_trace_after_lifecycle(&mut self, reason: TraceFrameReason) {
+        let Some(flat) = self.simulator.as_ref().map(Simulator::snapshot) else {
+            self.trace.clear();
+            return;
+        };
+        let mut available = Vec::new();
+        let mut unavailable = Vec::new();
+        for watch in self.trace.watches().iter().cloned() {
+            if self.trace_word(&watch.signal, &flat).is_some() {
+                available.push(watch);
+            } else {
+                unavailable.push(trace_unavailable(&watch));
+            }
+        }
+        self.trace.replace_watches(available);
+        self.trace_diagnostics = unavailable;
+        self.append_trace_diagnostics_to_snapshot();
+        self.record_trace_frame_from_flat(&flat, reason, vec![]);
+    }
+
+    fn append_trace_diagnostics_to_snapshot(&mut self) {
+        let Some(snapshot) = &mut self.snapshot else {
+            return;
+        };
+        let mut diagnostics = ProjectDiagnosticSet::new();
+        for diagnostic in snapshot
+            .diagnostics
+            .iter()
+            .cloned()
+            .chain(self.trace_diagnostics.iter().cloned())
+        {
+            diagnostics.insert(diagnostic);
+        }
+        snapshot.diagnostics = diagnostics.into_vec();
     }
 
     fn rebuild(&mut self) -> Result<(), Vec<ProjectDiagnostic>> {
@@ -1580,5 +1985,55 @@ fn project_error(
         component_refs: location.into_iter().collect(),
         connection_refs: Vec::new(),
         port_refs: Vec::new(),
+    }
+}
+
+fn trace_unavailable(watch: &TraceWatch) -> ProjectDiagnostic {
+    let reference = watch.signal.port().clone();
+    ProjectDiagnostic {
+        code: "TRACE_SIGNAL_UNAVAILABLE".into(),
+        severity: Severity::Warning,
+        message: format!(
+            "trace watch '{}' no longer resolves to an active compiled signal",
+            watch.id
+        ),
+        primary_location: Some(ProjectLocation::Port(reference.clone())),
+        component_refs: vec![QualifiedComponentRef::new(
+            &reference.circuit_id,
+            reference.instance_path.iter().cloned(),
+            &reference.component_id,
+        )],
+        connection_refs: vec![],
+        port_refs: vec![reference],
+    }
+}
+
+fn trace_watch_error(
+    code: &str,
+    message: String,
+    reference: &QualifiedPortRef,
+) -> ProjectDiagnostic {
+    ProjectDiagnostic {
+        code: code.into(),
+        severity: Severity::Error,
+        message,
+        primary_location: Some(ProjectLocation::Port(reference.clone())),
+        component_refs: vec![QualifiedComponentRef::new(
+            &reference.circuit_id,
+            reference.instance_path.iter().cloned(),
+            &reference.component_id,
+        )],
+        connection_refs: vec![],
+        port_refs: vec![reference.clone()],
+    }
+}
+
+fn empty_trace_frame(flat: &SimulationSnapshot, reason: TraceFrameReason) -> TraceFrame {
+    TraceFrame {
+        cycle: flat.tick_count,
+        clock_phase: flat.clock_phase,
+        reason,
+        values: vec![],
+        diagnostics: vec![],
     }
 }
