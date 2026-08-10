@@ -5,6 +5,21 @@ import {
   type AutoClockRate,
 } from "../src/app/auto-clock";
 
+function deferred() {
+  let resolve!: () => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+async function flushPromises(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -148,6 +163,93 @@ describe("automatic clock scheduler", () => {
     expect(onError).toHaveBeenCalledOnce();
     expect(onError).toHaveBeenCalledWith(failure);
     expect(scheduler.state.status).toBe("paused");
+    scheduler.dispose();
+  });
+
+  it("ignores an old rejection after pause and restart", async () => {
+    vi.useFakeTimers();
+    const oldPhase = deferred();
+    const onError = vi.fn();
+    const advancePhase = vi
+      .fn<() => void | Promise<void>>()
+      .mockImplementationOnce(() => oldPhase.promise);
+    const scheduler = new AutoClockScheduler({
+      advancePhase,
+      onError,
+      rate: 20,
+    });
+
+    scheduler.start();
+    vi.advanceTimersByTime(25);
+    await flushPromises();
+    expect(advancePhase).toHaveBeenCalledTimes(1);
+
+    scheduler.pause();
+    scheduler.start();
+    oldPhase.reject(new Error("superseded phase failed"));
+    await flushPromises();
+
+    expect(onError).not.toHaveBeenCalled();
+    expect(scheduler.state).toEqual({ status: "running", rate: 20 });
+    await vi.advanceTimersByTimeAsync(24);
+    expect(advancePhase).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(advancePhase).toHaveBeenCalledTimes(2);
+    scheduler.dispose();
+  });
+
+  it("ignores an old rejection after a rate change", async () => {
+    vi.useFakeTimers();
+    const oldPhase = deferred();
+    const onError = vi.fn();
+    const advancePhase = vi
+      .fn<() => void | Promise<void>>()
+      .mockImplementationOnce(() => oldPhase.promise);
+    const scheduler = new AutoClockScheduler({
+      advancePhase,
+      onError,
+      rate: 20,
+    });
+
+    scheduler.start();
+    vi.advanceTimersByTime(25);
+    await flushPromises();
+    scheduler.setRate(5);
+    oldPhase.reject(new Error("old rate phase failed"));
+    await flushPromises();
+
+    expect(onError).not.toHaveBeenCalled();
+    expect(scheduler.state).toEqual({ status: "running", rate: 5 });
+    await vi.advanceTimersByTimeAsync(99);
+    expect(advancePhase).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(advancePhase).toHaveBeenCalledTimes(2);
+    scheduler.dispose();
+  });
+
+  it("keeps the new deadline and serialization after an old phase succeeds", async () => {
+    vi.useFakeTimers();
+    const oldPhase = deferred();
+    const advancePhase = vi
+      .fn<() => void | Promise<void>>()
+      .mockImplementationOnce(() => oldPhase.promise);
+    const scheduler = new AutoClockScheduler({ advancePhase, rate: 20 });
+
+    scheduler.start();
+    vi.advanceTimersByTime(25);
+    await flushPromises();
+    scheduler.setRate(5);
+    vi.advanceTimersByTime(50);
+    await flushPromises();
+    expect(advancePhase).toHaveBeenCalledTimes(1);
+
+    oldPhase.resolve();
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(49);
+    expect(advancePhase).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(advancePhase).toHaveBeenCalledTimes(2);
+    expect(scheduler.state).toEqual({ status: "running", rate: 5 });
     scheduler.dispose();
   });
 

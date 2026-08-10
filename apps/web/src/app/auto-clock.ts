@@ -190,7 +190,7 @@ export class AutoClockScheduler {
         this.nextDeadline = this.now() + this.phaseIntervalMs();
       }
     } catch (error) {
-      if (!this.disposed) {
+      if (!this.disposed && generation === this.generation) {
         this.requestedRunning = false;
         this.invalidateSchedule();
         try {
