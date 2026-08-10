@@ -565,7 +565,7 @@ git status --short
 
 Expected: all commands exit 0; only documented wasm-pack/Node notices remain.
 
-- [ ] **Step 4: Commit and verify clean status**
+- [x] **Step 4: Commit and verify clean status**
 
 ```bash
 git add README.md docs .github
