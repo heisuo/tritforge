@@ -57,6 +57,9 @@ vi.mock("../src/wasm/pkg/sim_wasm", () => ({
   resolveProjectModulePorts: (_project: unknown, moduleId: string) => [
     { id: `${moduleId}-in`, direction: "input", width: 3 },
   ],
+  resolveProjectModuleInterfaces: (_project: unknown) => ({
+    word: [{ id: "data", label: "Data", direction: "input", width: 3 }],
+  }),
   WasmSimulator: wasmMock.WasmSimulator,
   WasmProjectSimulator: wasmMock.WasmProjectSimulator,
 }));
@@ -102,6 +105,9 @@ describe("WASM runtime initialization", () => {
     expect(runtime.resolveProjectModulePorts({ version: 3 }, "word")).toEqual([
       { id: "word-in", direction: "input", width: 3 },
     ]);
+    expect(runtime.resolveProjectModuleInterfaces({ version: 3 })).toEqual({
+      word: [{ id: "data", label: "Data", direction: "input", width: 3 }],
+    });
     expectTypeOf(flat).toEqualTypeOf<SimulationSnapshot>();
     expectTypeOf(project).toEqualTypeOf<ProjectSimulationSnapshot>();
     expectTypeOf(runtime.simulator).toMatchTypeOf<WasmSimulatorBinding>();

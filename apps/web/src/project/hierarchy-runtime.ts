@@ -49,8 +49,6 @@ export class HierarchyRuntimeError extends Error {
 export class HierarchyRuntime {
   private project: ProjectDocumentV3 | null = null;
   private activeCircuitId: string | null = null;
-  private wasmProjectSynchronized = false;
-  private projectValid = false;
   private currentSnapshot: ProjectSimulationSnapshot | null = null;
 
   constructor(private readonly wasm: WasmProjectSimulatorBinding) {}
@@ -67,8 +65,6 @@ export class HierarchyRuntime {
       );
       this.project = cloneProject(projectV3);
       this.activeCircuitId = activeCircuitId;
-      this.wasmProjectSynchronized = true;
-      this.projectValid = true;
       this.currentSnapshot = snapshot;
       return snapshot;
     } catch (error) {
@@ -82,14 +78,9 @@ export class HierarchyRuntime {
     try {
       const snapshot = this.wasm.updateProject(toRuntimeProject(projectV3));
       this.project = cloneProject(projectV3);
-      this.wasmProjectSynchronized = true;
-      this.projectValid = true;
       this.currentSnapshot = snapshot;
       return snapshot;
     } catch (error) {
-      this.wasmProjectSynchronized = false;
-      this.projectValid = false;
-      this.currentSnapshot = null;
       throw new HierarchyRuntimeError(wasmProjectError(error));
     }
   }
@@ -100,11 +91,6 @@ export class HierarchyRuntime {
     value: string,
   ): ProjectSimulationSnapshot | null {
     const project = this.requireLoaded();
-    if (!this.projectValid) {
-      throw runtimeSourceError(
-        "project simulation is unavailable until validation succeeds",
-      );
-    }
     if (!/^[T01]+$/.test(value)) {
       throw runtimeSourceError(`'${String(value)}' is not a known ternary source word`);
     }
@@ -112,7 +98,6 @@ export class HierarchyRuntime {
     try {
       const snapshot = this.wasm.setSource(circuitId, componentId, value);
       this.project = nextProject;
-      this.wasmProjectSynchronized = true;
       this.currentSnapshot = snapshot;
       return snapshot;
     } catch (error) {
@@ -122,14 +107,6 @@ export class HierarchyRuntime {
 
   tick(): ProjectSimulationSnapshot {
     this.requireLoaded();
-    if (!this.projectValid) {
-      throw new HierarchyRuntimeError({
-        name: "SimulationError",
-        code: "PROJECT_NOT_READY",
-        message: "project simulation is unavailable until validation succeeds",
-        diagnostics: [],
-      });
-    }
     try {
       return this.accept(this.wasm.tick());
     } catch (error) {
@@ -138,18 +115,7 @@ export class HierarchyRuntime {
   }
 
   switchActive(activeCircuitId: string): ProjectSimulationSnapshot {
-    const project = this.requireLoaded();
-    if (!this.wasmProjectSynchronized) {
-      try {
-        this.currentSnapshot = this.wasm.updateProject(toRuntimeProject(project));
-        this.wasmProjectSynchronized = true;
-        this.projectValid = true;
-      } catch (error) {
-        this.projectValid = false;
-        this.currentSnapshot = null;
-        throw new HierarchyRuntimeError(wasmProjectError(error));
-      }
-    }
+    this.requireLoaded();
     try {
       const snapshot = this.wasm.switchActive(activeCircuitId);
       this.activeCircuitId = activeCircuitId;

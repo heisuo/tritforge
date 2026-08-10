@@ -150,15 +150,24 @@ pub struct CompiledProjectV3 {
 #[derive(Debug, Clone)]
 struct InterfacePort {
     id: String,
+    label: String,
     direction: PortDirection,
     width: u8,
     boundary_component_id: String,
     scalar_ids: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedModulePort {
+    pub id: String,
+    pub label: String,
+    pub direction: PortDirection,
+    pub shape: crate::signal::SignalShape,
+}
+
 struct ResolvedProjectV3Lowering {
     lowered: LoweredProjectV3,
-    module_interfaces: BTreeMap<String, Vec<ResolvedProjectPort>>,
+    module_interfaces: BTreeMap<String, Vec<ResolvedModulePort>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -350,7 +359,7 @@ pub fn lower_project_v3(
 pub fn resolve_project_module_ports_v3(
     project: ProjectDocumentV3,
     module_id: &str,
-) -> Result<Vec<ResolvedProjectPort>, Vec<ProjectDiagnostic>> {
+) -> Result<Vec<ResolvedModulePort>, Vec<ProjectDiagnostic>> {
     let target = project
         .circuits
         .iter()
@@ -381,6 +390,13 @@ pub fn resolve_project_module_ports_v3(
             .expect("validated module has a resolved interface")
             .to_vec()),
     }
+}
+
+pub fn resolve_project_module_interfaces_v3(
+    project: ProjectDocumentV3,
+) -> Result<BTreeMap<String, Vec<ResolvedModulePort>>, Vec<ProjectDiagnostic>> {
+    let active_circuit_id = project.root_circuit_id.clone();
+    Ok(lower_project_v3_with_interfaces(project, &active_circuit_id)?.module_interfaces)
 }
 
 fn lower_project_v3_for_active(
@@ -489,8 +505,9 @@ fn lower_project_v3_with_interfaces(
                 module_id.clone(),
                 ports
                     .iter()
-                    .map(|port| ResolvedProjectPort {
+                    .map(|port| ResolvedModulePort {
                         id: port.id.clone(),
+                        label: port.label.clone(),
                         direction: port.direction,
                         shape: crate::signal::SignalShape::new(port.width)
                             .expect("validated interface widths are signal shapes"),
@@ -757,6 +774,11 @@ fn build_interfaces(
                 .push(component.id.clone());
             ports.push(InterfacePort {
                 id: port_id.to_owned(),
+                label: component
+                    .properties
+                    .label()
+                    .expect("resolved module boundary has a validated label")
+                    .to_owned(),
                 direction,
                 width: resolved_port.shape.width(),
                 boundary_component_id: component.id.clone(),

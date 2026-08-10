@@ -35,8 +35,44 @@ const runtimeMock = vi.hoisted(() => {
       projectionEndpoints: 0,
     })),
   } satisfies WasmProjectSimulatorBinding;
+  const dependencyCycleError = () => ({
+    code: "MODULE_DEPENDENCY_CYCLE",
+    message: "project operation failed",
+    diagnostics: [
+      {
+        code: "MODULE_DEPENDENCY_CYCLE",
+        severity: "error",
+        message: "module dependency cycle: loop -> loop",
+        primaryLocation: null,
+        componentRefs: [],
+        connectionRefs: [],
+        portRefs: [],
+      },
+    ],
+  });
+  const resolveProjectModulePorts = vi.fn((_project: unknown, moduleId: string) => {
+    if (moduleId === "loop") {
+      throw dependencyCycleError();
+    }
+    return [];
+  });
+  const resolveProjectModuleInterfaces = vi.fn((project: unknown) => {
+    const circuits = (project as {
+      circuits: Array<{ id: string; kind: "main" | "module" }>;
+    }).circuits;
+    if (circuits.some((circuit) => circuit.id === "loop")) {
+      throw dependencyCycleError();
+    }
+    return Object.fromEntries(
+      circuits
+        .filter((circuit) => circuit.kind === "module")
+        .map((circuit) => [circuit.id, []]),
+    );
+  });
   return {
     makeSnapshot: snapshot,
+    resolveProjectModuleInterfaces,
+    resolveProjectModulePorts,
     ...projectSimulator,
   };
 });
@@ -51,7 +87,8 @@ vi.mock("../src/wasm-client", () => ({
         width: typeof properties.width === "number" ? properties.width : 1,
       },
     ],
-    resolveProjectModulePorts: () => [],
+    resolveProjectModulePorts: runtimeMock.resolveProjectModulePorts,
+    resolveProjectModuleInterfaces: runtimeMock.resolveProjectModuleInterfaces,
     catalog: [
       {
         type_id: "source.trit_input",
@@ -86,12 +123,26 @@ vi.mock("../src/wasm-client", () => ({
   })),
   wasmErrorMessage: (error: unknown) =>
     error instanceof Error ? error.message : String(error),
-  wasmProjectError: (error: unknown) => ({
-    name: "SimulationError",
-    code: "TEST_ERROR",
-    message: error instanceof Error ? error.message : String(error),
-    diagnostics: [],
-  }),
+  wasmProjectError: (error: unknown) => {
+    if (typeof error === "object" && error !== null && "code" in error) {
+      return {
+        name: "SimulationError",
+        code: String(error.code),
+        message:
+          "message" in error ? String(error.message) : "Project simulation failed",
+        diagnostics:
+          "diagnostics" in error && Array.isArray(error.diagnostics)
+            ? error.diagnostics
+            : [],
+      };
+    }
+    return {
+      name: "SimulationError",
+      code: "TEST_ERROR",
+      message: error instanceof Error ? error.message : String(error),
+      diagnostics: [],
+    };
+  },
 }));
 
 import { App } from "../src/App";
@@ -173,6 +224,44 @@ function nestedReferencedProject() {
     connections: [],
   });
   return project;
+}
+
+function recursiveProject() {
+  return {
+    format: "logsim-ternary",
+    version: 2,
+    rootCircuitId: "main",
+    circuits: [
+      {
+        id: "main",
+        name: "Main",
+        kind: "main",
+        components: [
+          {
+            id: "loop-1",
+            typeId: "project.module_instance",
+            position: { x: 100, y: 100 },
+            properties: { moduleId: "loop", label: "Loop" },
+          },
+        ],
+        connections: [],
+      },
+      {
+        id: "loop",
+        name: "Loop",
+        kind: "module",
+        components: [
+          {
+            id: "self-1",
+            typeId: "project.module_instance",
+            position: { x: 100, y: 100 },
+            properties: { moduleId: "loop", label: "Self" },
+          },
+        ],
+        connections: [],
+      },
+    ],
+  };
 }
 
 async function importProject(project: object) {
@@ -351,6 +440,45 @@ describe("App", () => {
     expect(await screen.findByText(/navigation blocked/)).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "层级导航" }))
       .not.toHaveTextContent("Blocked");
+  });
+
+  it("keeps the Workbench and last valid catalog when project-aware port resolution fails", async () => {
+    render(<App />);
+    await importProject(referencedProject());
+    expect(screen.getByText("4 COMPONENTS")).toBeInTheDocument();
+    expect(screen.getByText("1 COMPILES")).toBeInTheDocument();
+    runtimeMock.resolveProjectModuleInterfaces.mockClear();
+    runtimeMock.resolveProjectModulePorts.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑 Identity" }));
+    await waitFor(() => {
+      expect(screen.getByRole("navigation", { name: "层级导航" }))
+        .toHaveTextContent("Identity");
+    });
+    fireEvent.click(screen.getByRole("button", { name: "返回上级" }));
+    expect(runtimeMock.resolveProjectModuleInterfaces).not.toHaveBeenCalled();
+
+    const input = screen.getByLabelText("选择三进制工程文件");
+    const file = new File([JSON.stringify(recursiveProject())], "recursive.json", {
+      type: "application/json",
+    });
+    fireEvent.change(input, { target: { files: [file] } });
+
+    expect(
+      await screen.findByText(/工程加载失败: project operation failed/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: /MODULE_DEPENDENCY_CYCLE\s*module dependency cycle: loop -> loop/i,
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("main", { name: "Logsim Ternary 编辑器" }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("application")).toBeInTheDocument();
+    expect(screen.getByText("4 COMPONENTS")).toBeInTheDocument();
+    expect(screen.getByText("1 COMPILES")).toBeInTheDocument();
+    expect(runtimeMock.resolveProjectModuleInterfaces).toHaveBeenCalledTimes(1);
+    expect(runtimeMock.resolveProjectModulePorts).not.toHaveBeenCalled();
   });
 
   it("does not commit an input when the runtime rejects its update", async () => {

@@ -194,6 +194,44 @@ impl ProjectSimulator {
         }
         let compiled_v3 = compile_project_v3(project.clone(), &self.active_circuit_id)?;
         let compiled = compiled_v3.compiled.clone();
+        let can_reuse = self.simulator.is_some()
+            && self.compiled.as_ref().is_some_and(|current| {
+                flat_circuit_shape(&current.circuit) == flat_circuit_shape(&compiled.circuit)
+            });
+        if can_reuse {
+            let updates = source_updates(&self.project, &compiled_v3.lowered.project, &compiled);
+            let flat = if updates.is_empty() {
+                self.simulator
+                    .as_ref()
+                    .expect("reusable v3 runtime has a simulator")
+                    .snapshot()
+            } else {
+                self.simulator
+                    .as_mut()
+                    .expect("reusable v3 runtime has a simulator")
+                    .set_sources(updates)
+                    .map_err(|diagnostic| {
+                        vec![remap_v3_diagnostic(
+                            project_flat_diagnostic(
+                                &diagnostic,
+                                &compiled,
+                                &FlatNetworkIndex::new(&compiled),
+                            ),
+                            &compiled_v3,
+                        )]
+                    })?
+            };
+            self.project = compiled_v3.lowered.project.clone();
+            self.project_v3 = Some(project);
+            self.validated = None;
+            self.compiled = Some(compiled);
+            self.compiled_v3 = Some(compiled_v3);
+            self.snapshot = Some(self.project_snapshot(&flat));
+            return Ok(self
+                .snapshot
+                .clone()
+                .expect("reused v3 runtime has a snapshot"));
+        }
         let network_index = FlatNetworkIndex::new(&compiled);
         let simulator = Simulator::load(compiled.circuit.clone()).map_err(|diagnostics| {
             diagnostics
@@ -295,6 +333,13 @@ impl ProjectSimulator {
         component_id: &str,
         value: Trit,
     ) -> Result<ProjectSnapshot, ProjectDiagnostic> {
+        if self.project_v3.is_some() {
+            return Err(project_error(
+                "PROJECT_VERSION_MISMATCH",
+                "scalar source updates are not supported by a v3 project simulator",
+                None,
+            ));
+        }
         if self.simulator.is_none() || self.compiled.is_none() {
             return Err(project_error(
                 "PROJECT_NOT_READY",
@@ -1156,6 +1201,32 @@ fn active_shape_unchanged(
 
 type ComponentShape = (String, String, Option<String>, Option<String>, u8);
 type ConnectionShape = (String, String, String, String, String);
+
+fn flat_circuit_shape(
+    circuit: &crate::circuit::CircuitDefinition,
+) -> (Vec<(String, String)>, Vec<ConnectionShape>) {
+    let mut components = circuit
+        .components
+        .iter()
+        .map(|component| (component.id.clone(), component.type_id.clone()))
+        .collect::<Vec<_>>();
+    components.sort();
+    let mut connections = circuit
+        .connections
+        .iter()
+        .map(|connection| {
+            (
+                connection.id.clone(),
+                connection.source_component_id.clone(),
+                connection.source_port_id.clone(),
+                connection.target_component_id.clone(),
+                connection.target_port_id.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    connections.sort();
+    (components, connections)
+}
 
 fn circuit_shape(circuit: &ProjectCircuit) -> (Vec<ComponentShape>, Vec<ConnectionShape>) {
     let mut components: Vec<_> = circuit

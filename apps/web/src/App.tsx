@@ -94,12 +94,18 @@ import {
   buildProjectCatalog,
   type ProjectCatalogComponent,
 } from "./project/project-catalog";
-import { HierarchyRuntime, HierarchyRuntimeError } from "./project/hierarchy-runtime";
+import {
+  HierarchyRuntime,
+  HierarchyRuntimeError,
+  toRuntimeProject,
+} from "./project/hierarchy-runtime";
 import { createProjectStore } from "./project/project-store";
 import {
   createWasmRuntime,
   wasmErrorMessage,
-  type ProjectModulePortResolver,
+  wasmProjectError,
+  type ProjectModuleInterfaceResolver,
+  type ProjectModuleInterfaces,
   type WasmRuntime,
 } from "./wasm-client";
 import { assignWireLanes } from "./wire-routing";
@@ -262,7 +268,7 @@ function Workbench() {
   const [nodes, setNodes] = useState<EditorNode[]>(initialEditor.nodes);
   const [edges, setEdges] = useState<EditorEdge[]>(initialEditor.edges);
   const [baseCatalog, setBaseCatalog] = useState<CatalogComponent[]>([]);
-  const [portResolver, setPortResolver] = useState<ProjectModulePortResolver | null>(null);
+  const [dynamicCatalog, setDynamicCatalog] = useState<ProjectCatalogComponent[]>([]);
   const [snapshot, setSnapshot] = useState<ProjectSimulationSnapshot | null>(null);
   const [diagnostics, setDiagnostics] = useState<ProjectSimulationDiagnostic[]>([]);
   const [wasmState, setWasmState] = useState<"loading" | "ready" | "error">("loading");
@@ -279,18 +285,14 @@ function Workbench() {
   const [reloadRevision, setReloadRevision] = useState(0);
   const runtimeRef = useRef<HierarchyRuntime | null>(null);
   const wasmRef = useRef<WasmRuntime | null>(null);
+  const baseCatalogRef = useRef<CatalogComponent[]>([]);
+  const moduleInterfaceResolverRef = useRef<ProjectModuleInterfaceResolver | null>(null);
+  const moduleInterfacesRef = useRef<ProjectModuleInterfaces | null>(null);
   const flowRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const instanceRef = useRef<ReactFlowInstance<EditorNode, EditorEdge> | null>(null);
   const inputClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const dynamicCatalog = useMemo<ProjectCatalogComponent[]>(
-    () =>
-      portResolver
-        ? buildProjectCatalog(baseCatalog, project, activeCircuitId, portResolver)
-        : [],
-    [activeCircuitId, baseCatalog, portResolver, project],
-  );
   const moduleDescriptors = useMemo(
     () => dynamicCatalog.filter((item) => item.category === "project-module"),
     [dynamicCatalog],
@@ -320,23 +322,66 @@ function Workbench() {
   }, []);
 
   const runtimeFailure = useCallback((prefix: string, error: unknown, clearSnapshot = true) => {
+    const decoded =
+      error instanceof HierarchyRuntimeError
+        ? error
+        : new HierarchyRuntimeError(wasmProjectError(error));
     if (clearSnapshot) setSnapshot(null);
-    setDiagnostics(
-      error instanceof HierarchyRuntimeError ? error.diagnostics : [],
-    );
-    setStatusMessage(`${prefix}: ${wasmErrorMessage(error)}`);
+    setDiagnostics(decoded.diagnostics);
+    setStatusMessage(`${prefix}: ${decoded.message}`);
   }, []);
+
+  const prepareProjectCatalog = useCallback(
+    (
+      nextProject: ProjectDocumentV2,
+      nextActiveCircuitId: string,
+      resolveInterfaces = true,
+    ) => {
+      const interfaces = resolveInterfaces
+        ? moduleInterfaceResolverRef.current?.(toRuntimeProject(nextProject))
+        : moduleInterfacesRef.current;
+      if (!interfaces) return null;
+      return {
+        catalog: buildProjectCatalog(
+          baseCatalogRef.current,
+          nextProject,
+          nextActiveCircuitId,
+          interfaces,
+        ),
+        interfaces,
+      };
+    },
+    [],
+  );
+
+  const acceptProjectCatalog = useCallback(
+    (prepared: ReturnType<typeof prepareProjectCatalog>) => {
+      if (!prepared) return;
+      moduleInterfacesRef.current = prepared.interfaces;
+      setDynamicCatalog(prepared.catalog);
+    },
+    [],
+  );
 
   const syncStructure = useCallback(() => {
     const runtime = runtimeRef.current;
     if (!runtime) return;
     try {
-      setSuccessfulSnapshot(runtime.updateProject(store.getState().project));
+      const state = store.getState();
+      const nextActiveCircuitId =
+        state.activePath.at(-1)?.circuitId ?? state.project.rootCircuitId;
+      const nextCatalog = prepareProjectCatalog(
+        state.project,
+        nextActiveCircuitId,
+      );
+      const nextSnapshot = runtime.updateProject(state.project);
+      acceptProjectCatalog(nextCatalog);
+      setSuccessfulSnapshot(nextSnapshot);
       setStatusMessage("工程结构已由 Rust/WASM 重新求值");
     } catch (error) {
-      runtimeFailure("工程校验失败", error);
+      runtimeFailure("工程校验失败", error, false);
     }
-  }, [runtimeFailure, setSuccessfulSnapshot, store]);
+  }, [acceptProjectCatalog, prepareProjectCatalog, runtimeFailure, setSuccessfulSnapshot, store]);
 
   const tickSimulation = useCallback(() => {
     const runtime = runtimeRef.current;
@@ -388,7 +433,14 @@ function Workbench() {
   ): boolean => {
     try {
       const runtime = runtimeRef.current;
-      if (runtime) setSuccessfulSnapshot(runtime.switchActive(targetCircuitId));
+      const nextCatalog = prepareProjectCatalog(
+        store.getState().project,
+        targetCircuitId,
+        false,
+      );
+      const nextSnapshot = runtime?.switchActive(targetCircuitId);
+      acceptProjectCatalog(nextCatalog);
+      if (nextSnapshot) setSuccessfulSnapshot(nextSnapshot);
       updatePath();
       restoreActiveCircuit();
       return true;
@@ -396,7 +448,7 @@ function Workbench() {
       runtimeFailure(failurePrefix, error, false);
       return false;
     }
-  }, [restoreActiveCircuit, runtimeFailure, setSuccessfulSnapshot]);
+  }, [acceptProjectCatalog, prepareProjectCatalog, restoreActiveCircuit, runtimeFailure, setSuccessfulSnapshot, store]);
 
   useEffect(() => {
     let mounted = true;
@@ -406,25 +458,32 @@ function Workbench() {
         wasmRef.current = wasm;
         const runtime = new HierarchyRuntime(wasm.projectSimulator);
         runtimeRef.current = runtime;
+        baseCatalogRef.current = wasm.catalog;
+        moduleInterfaceResolverRef.current = wasm.resolveProjectModuleInterfaces;
         setBaseCatalog(wasm.catalog);
-        setPortResolver(() => wasm.resolveProjectModulePorts);
         setWasmVersion(wasm.apiVersion);
         try {
           const state = store.getState();
           const currentCircuitId =
             state.activePath.at(-1)?.circuitId ?? state.project.rootCircuitId;
-          setSuccessfulSnapshot(runtime.load(state.project, currentCircuitId));
+          const nextCatalog = prepareProjectCatalog(
+            state.project,
+            currentCircuitId,
+          );
+          const nextSnapshot = runtime.load(state.project, currentCircuitId);
+          acceptProjectCatalog(nextCatalog);
+          setSuccessfulSnapshot(nextSnapshot);
           setWasmState("ready");
           setStatusMessage("Rust/WASM 层级模拟器已就绪");
         } catch (error) {
           setWasmState("error");
-          runtimeFailure("WASM 加载失败", error);
+          runtimeFailure("WASM 加载失败", error, false);
         }
       })
       .catch((error: unknown) => {
         if (!mounted) return;
         setWasmState("error");
-        runtimeFailure("WASM 加载失败", error);
+        runtimeFailure("WASM 加载失败", error, false);
       });
     return () => {
       mounted = false;
@@ -853,6 +912,7 @@ function Workbench() {
         const nextActiveId =
           state.activePath.at(-1)?.circuitId ?? state.project.rootCircuitId;
         const runtime = runtimeRef.current;
+        const nextCatalog = prepareProjectCatalog(state.project, nextActiveId);
         if (runtime) {
           const nextSnapshot =
             moduleId === activeCircuitId
@@ -860,13 +920,14 @@ function Workbench() {
               : runtime.updateProject(state.project);
           setSuccessfulSnapshot(nextSnapshot);
         }
+        acceptProjectCatalog(nextCatalog);
         restoreActiveCircuit();
         setStatusMessage("模块已删除");
       } catch (error) {
         setStatusMessage(`删除受保护: ${wasmErrorMessage(error)}`);
       }
     },
-    [activeCircuitId, restoreActiveCircuit, setSuccessfulSnapshot, store],
+    [acceptProjectCatalog, activeCircuitId, prepareProjectCatalog, restoreActiveCircuit, setSuccessfulSnapshot, store],
   );
 
   const renameModule = useCallback(
@@ -900,11 +961,19 @@ function Workbench() {
       const after = store.getState();
       const runtime = runtimeRef.current;
       try {
+        const afterActive = after.activePath.at(-1)?.circuitId;
+        const structureChanged = after.structureRevision !== beforeStructure;
+        const nextCatalog = afterActive
+          ? structureChanged
+            ? prepareProjectCatalog(after.project, afterActive)
+            : afterActive !== beforeActive
+              ? prepareProjectCatalog(after.project, afterActive, false)
+              : null
+          : null;
         if (runtime) {
-          const afterActive = after.activePath.at(-1)?.circuitId;
           if (afterActive && afterActive !== beforeActive) {
             setSuccessfulSnapshot(runtime.load(after.project, afterActive));
-          } else if (after.structureRevision !== beforeStructure) {
+          } else if (structureChanged) {
             setSuccessfulSnapshot(runtime.updateProject(after.project));
           } else {
             for (const update of sourceChanges(beforeProject, after.project)) {
@@ -917,13 +986,14 @@ function Workbench() {
             }
           }
         }
+        acceptProjectCatalog(nextCatalog);
         restoreActiveCircuit();
         setStatusMessage(direction === "undo" ? "已撤销上一步编辑" : "已重做编辑");
       } catch (error) {
-        runtimeFailure("历史恢复失败", error);
+        runtimeFailure("历史恢复失败", error, false);
       }
     },
-    [persistViewport, restoreActiveCircuit, runtimeFailure, setSuccessfulSnapshot, store],
+    [acceptProjectCatalog, persistViewport, prepareProjectCatalog, restoreActiveCircuit, runtimeFailure, setSuccessfulSnapshot, store],
   );
 
   const loadProject = useCallback(
@@ -931,15 +1001,24 @@ function Workbench() {
       store.getState().replaceProject(nextProject);
       try {
         const runtime = runtimeRef.current;
-        if (runtime) setSuccessfulSnapshot(runtime.load(nextProject, nextProject.rootCircuitId));
+        const nextCatalog = prepareProjectCatalog(
+          nextProject,
+          nextProject.rootCircuitId,
+        );
+        const nextSnapshot = runtime?.load(
+          nextProject,
+          nextProject.rootCircuitId,
+        );
+        acceptProjectCatalog(nextCatalog);
+        if (nextSnapshot) setSuccessfulSnapshot(nextSnapshot);
         restoreActiveCircuit();
         setStatusMessage(message);
       } catch (error) {
-        runtimeFailure("工程加载失败", error);
+        runtimeFailure("工程加载失败", error, false);
         restoreActiveCircuit();
       }
     },
-    [restoreActiveCircuit, runtimeFailure, setSuccessfulSnapshot, store],
+    [acceptProjectCatalog, prepareProjectCatalog, restoreActiveCircuit, runtimeFailure, setSuccessfulSnapshot, store],
   );
 
   const loadExample = useCallback(

@@ -65,6 +65,7 @@ export interface ResolvedProjectPort {
 
 export interface ResolvedProjectModulePort {
   id: string;
+  label: string;
   direction: "input" | "output";
   width: number;
 }
@@ -80,11 +81,22 @@ export type ProjectModulePortResolver = (
   moduleId: string,
 ) => ResolvedProjectModulePort[];
 
+export type ProjectModuleInterfaces = Record<
+  string,
+  ResolvedProjectModulePort[]
+>;
+
+/** Resolves every Rust-validated module interface with one project validation. */
+export type ProjectModuleInterfaceResolver = (
+  project: unknown,
+) => ProjectModuleInterfaces;
+
 export interface WasmRuntime {
   apiVersion: number;
   catalog: CatalogComponent[];
   resolveProjectPorts: ProjectPortResolver;
   resolveProjectModulePorts: ProjectModulePortResolver;
+  resolveProjectModuleInterfaces: ProjectModuleInterfaceResolver;
   simulator: WasmSimulatorBinding;
   projectSimulator: WasmProjectSimulatorBinding;
 }
@@ -112,6 +124,8 @@ export async function createWasmRuntime(): Promise<WasmRuntime> {
     resolveProjectPorts: wasm.resolveProjectPorts as ProjectPortResolver,
     resolveProjectModulePorts:
       wasm.resolveProjectModulePorts as ProjectModulePortResolver,
+    resolveProjectModuleInterfaces:
+      wasm.resolveProjectModuleInterfaces as ProjectModuleInterfaceResolver,
     simulator: new wasm.WasmSimulator() as WasmSimulatorBinding,
     projectSimulator:
       new wasm.WasmProjectSimulator() as WasmProjectSimulatorBinding,

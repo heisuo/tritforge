@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use sim_core::project::{
-    ProjectCircuit, ProjectCircuitKind, ProjectComponent, ProjectConnection, ProjectDocument,
-    ProjectLocation,
+    ProjectCircuit, ProjectCircuitKind, ProjectCircuitV3, ProjectComponent, ProjectConnection,
+    ProjectDocument, ProjectDocumentV3, ProjectLocation,
 };
 use sim_core::project_simulator::ProjectSimulator;
 use sim_core::trit::Trit;
@@ -122,6 +122,35 @@ fn scalar_project_load_rejects_a_widened_source_before_it_becomes_scalar_zero() 
                 && port.component_id == "word-source"
                 && port.port_id == "out"
     ));
+}
+
+#[test]
+fn scalar_source_update_rejects_a_v3_simulator_without_mutating_it() {
+    let project = ProjectDocumentV3 {
+        format: "logsim-ternary".into(),
+        version: 3,
+        root_circuit_id: "main".into(),
+        circuits: vec![ProjectCircuitV3 {
+            id: "main".into(),
+            name: "Main".into(),
+            kind: ProjectCircuitKind::Main,
+            components: vec![component(
+                "source",
+                "source.constant",
+                serde_json::json!({"value": "0"}),
+            )],
+            wires: vec![],
+        }],
+    };
+    let mut simulator = ProjectSimulator::load_v3(project, "main").unwrap();
+    let before = simulator.snapshot().unwrap();
+
+    let error = simulator
+        .set_source("main", "source", Trit::Pos)
+        .expect_err("scalar source API must reject a v3 runtime");
+
+    assert_eq!(error.code, "PROJECT_VERSION_MISMATCH");
+    assert_eq!(simulator.snapshot().unwrap(), before);
 }
 
 #[test]

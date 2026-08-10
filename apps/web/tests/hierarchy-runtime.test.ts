@@ -290,10 +290,10 @@ describe("hierarchy runtime", () => {
     }
   });
 
-  it("blocks every source update while project validation is failing", () => {
+  it("preserves the last valid runtime after a rejected project update", () => {
     const wasm = binding();
     const runtime = new HierarchyRuntime(wasm);
-    runtime.load(project(), "main");
+    const previous = runtime.load(project(), "main");
     wasm.updateProject.mockImplementationOnce(() => {
       throw {
         code: "UNKNOWN_MODULE",
@@ -303,11 +303,11 @@ describe("hierarchy runtime", () => {
     });
 
     expect(() => runtime.updateProject(project())).toThrow(/broken project/i);
-    expect(() => runtime.setSource("spare", "constant-1", "1")).toThrow(
-      /unavailable/i,
-    );
-    expect(wasm.setSource).not.toHaveBeenCalled();
-    expect(runtime.snapshot()).toBeNull();
+    expect(runtime.snapshot()).toBe(previous);
+    expect(runtime.setSource("spare", "constant-1", "1")).toEqual(snapshot(1));
+    expect(runtime.tick()).toEqual(snapshot(1));
+    expect(wasm.setSource).toHaveBeenCalledWith("spare", "constant-1", "1");
+    expect(wasm.tick).toHaveBeenCalledTimes(1);
   });
 
   it("preserves the previous snapshot when an active switch fails", () => {

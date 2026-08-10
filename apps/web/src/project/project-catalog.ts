@@ -2,8 +2,7 @@ import type {
   CatalogComponent,
   CatalogPort,
 } from "../editor-model";
-import type { ProjectModulePortResolver } from "../wasm-client";
-import { toRuntimeProject } from "./hierarchy-runtime";
+import type { ProjectModuleInterfaces } from "../wasm-client";
 import type { ProjectDocumentV2 } from "./project-document";
 import type { ProjectDocumentV3 } from "./project-v3";
 
@@ -23,10 +22,9 @@ export function buildProjectCatalog(
   builtins: CatalogComponent[],
   project: CatalogProjectDocument,
   activeCircuitId: string,
-  resolveModulePorts: ProjectModulePortResolver,
+  moduleInterfaces: ProjectModuleInterfaces,
 ): ProjectCatalogComponent[] {
   const forbidden = cycleCausingCandidates(project, activeCircuitId);
-  const runtimeProject = toRuntimeProject(project);
   const dynamic = project.circuits
     .filter(
       (circuit) =>
@@ -39,12 +37,21 @@ export function buildProjectCatalog(
       category: "project-module",
       kind: "module_instance",
       moduleId: circuit.id,
-      ports: resolveModulePorts(runtimeProject, circuit.id).map((port) => ({
-        ...port,
-      })),
+      ports: resolvedModulePorts(moduleInterfaces, circuit.id),
       truth_table: [],
     }));
   return [...builtins.map(cloneDescriptor), ...dynamic];
+}
+
+function resolvedModulePorts(
+  moduleInterfaces: ProjectModuleInterfaces,
+  moduleId: string,
+): ProjectCatalogPort[] {
+  const ports = moduleInterfaces[moduleId];
+  if (!ports) {
+    throw new Error(`Rust module interface is missing for '${moduleId}'`);
+  }
+  return ports.map((port) => ({ ...port }));
 }
 
 function cloneDescriptor(descriptor: CatalogComponent): ProjectCatalogComponent {
