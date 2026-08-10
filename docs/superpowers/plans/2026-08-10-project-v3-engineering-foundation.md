@@ -138,7 +138,7 @@ Commit `feat: migrate projects to undirected v3 wires`.
 - Modify: `crates/sim-core/src/project.rs`
 - Test: `crates/sim-core/tests/project_v3_contract.rs`
 
-- [ ] **Step 1: Write failing resolved-port tests**
+- [x] **Step 1: Write failing resolved-port tests**
 
 Require `PortDirection::InOut`, width-aware Input/Constant/Probe/module boundaries, dynamic Splitter ports,
 and exact validation of `width`, `branchCount`, and `mapping`.
@@ -151,20 +151,20 @@ assert_eq!(ports.iter().map(|p| (p.id.as_str(), p.shape.width())).collect::<Vec<
            vec![("trunk", 3), ("branch0", 1), ("branch1", 1), ("branch2", 1)]);
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run `cargo test -p sim-core --test project_v3_contract resolved_ports`.
 
-- [ ] **Step 3: Implement one resolver and diagnostic codes**
+- [x] **Step 3: Implement one resolver and diagnostic codes**
 
 Add `INVALID_SIGNAL_WIDTH` and `INVALID_SPLITTER_MAP`. Return dynamic port IDs in deterministic order.
 Keep Clock, DFF, and scalar gates at width 1.
 
-- [ ] **Step 4: Run validation and catalog suites**
+- [x] **Step 4: Run validation and catalog suites**
 
 Run `cargo test -p sim-core --test project_validation`, `catalog_contract`, and `project_v3_contract`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit `feat: resolve dynamic project port shapes`.
 
