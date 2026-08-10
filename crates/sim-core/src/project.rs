@@ -34,6 +34,65 @@ pub struct ProjectCircuit {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectDocumentV3 {
+    pub format: String,
+    pub version: u32,
+    pub root_circuit_id: String,
+    pub circuits: Vec<ProjectCircuitV3>,
+}
+
+impl ProjectDocumentV3 {
+    pub fn parse_json(json: &str) -> Result<Self, ProjectDocumentV3ParseError> {
+        #[derive(Deserialize)]
+        struct VersionHeader {
+            version: u32,
+        }
+
+        let header: VersionHeader = serde_json::from_str(json)?;
+        if header.version != 3 {
+            return Err(ProjectDocumentV3ParseError::UnsupportedVersion(
+                header.version,
+            ));
+        }
+        Ok(serde_json::from_str(json)?)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectCircuitV3 {
+    pub id: String,
+    pub name: String,
+    pub kind: ProjectCircuitKind,
+    pub components: Vec<ProjectComponent>,
+    pub wires: Vec<ProjectWire>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectWire {
+    pub id: String,
+    pub endpoint_a: WireEndpoint,
+    pub endpoint_b: WireEndpoint,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WireEndpoint {
+    pub component_id: String,
+    pub port_id: String,
+}
+
+#[derive(Debug, Error)]
+pub enum ProjectDocumentV3ParseError {
+    #[error("unsupported project document version {0}; expected version 3")]
+    UnsupportedVersion(u32),
+    #[error("invalid project v3 JSON: {0}")]
+    Json(#[from] serde_json::Error),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectComponent {
     pub id: String,

@@ -1,3 +1,7 @@
+use sim_core::project::{
+    ProjectCircuitKind, ProjectCircuitV3, ProjectComponent, ProjectDocumentV3, ProjectWire,
+    WireEndpoint,
+};
 use sim_core::signal::{KnownWord, SignalShape, WordValue};
 use sim_core::trit::Trit;
 
@@ -107,4 +111,106 @@ fn runtime_words_serialize_as_stable_most_significant_first_strings() {
     assert_eq!(serde_json::from_str::<WordValue>(&encoded).unwrap(), word);
     assert!(serde_json::from_str::<WordValue>(r#""""#).is_err());
     assert!(serde_json::from_str::<WordValue>(r#""222""#).is_err());
+}
+
+#[test]
+fn project_v3_wire_migration_contract_has_stable_camel_case_serde() {
+    let project = ProjectDocumentV3 {
+        format: "logsim-ternary".into(),
+        version: 3,
+        root_circuit_id: "main".into(),
+        circuits: vec![ProjectCircuitV3 {
+            id: "main".into(),
+            name: "Main".into(),
+            kind: ProjectCircuitKind::Main,
+            components: vec![
+                ProjectComponent::new(
+                    "input-1",
+                    "source.trit_input",
+                    serde_json::json!({"value": "0", "extension": {"keep": true}}),
+                )
+                .unwrap(),
+                ProjectComponent::new("probe-1", "sink.probe", serde_json::json!({})).unwrap(),
+            ],
+            wires: vec![ProjectWire {
+                id: "wire-1".into(),
+                endpoint_a: WireEndpoint {
+                    component_id: "input-1".into(),
+                    port_id: "out".into(),
+                },
+                endpoint_b: WireEndpoint {
+                    component_id: "probe-1".into(),
+                    port_id: "in".into(),
+                },
+            }],
+        }],
+    };
+
+    let encoded = serde_json::to_value(&project).unwrap();
+
+    assert_eq!(
+        encoded,
+        serde_json::json!({
+            "format": "logsim-ternary",
+            "version": 3,
+            "rootCircuitId": "main",
+            "circuits": [{
+                "id": "main",
+                "name": "Main",
+                "kind": "main",
+                "components": [
+                    {
+                        "id": "input-1",
+                        "typeId": "source.trit_input",
+                        "properties": {"value": "0", "extension": {"keep": true}}
+                    },
+                    {
+                        "id": "probe-1",
+                        "typeId": "sink.probe",
+                        "properties": {}
+                    }
+                ],
+                "wires": [{
+                    "id": "wire-1",
+                    "endpointA": {"componentId": "input-1", "portId": "out"},
+                    "endpointB": {"componentId": "probe-1", "portId": "in"}
+                }]
+            }]
+        })
+    );
+    assert_eq!(
+        serde_json::from_value::<ProjectDocumentV3>(encoded).unwrap(),
+        project
+    );
+}
+
+#[test]
+fn project_v3_checked_parser_rejects_wrong_versions_and_connections() {
+    let wrong_version = serde_json::json!({
+        "format": "logsim-ternary",
+        "version": 2,
+        "rootCircuitId": "main",
+        "circuits": []
+    });
+    let mixed_schema = serde_json::json!({
+        "format": "logsim-ternary",
+        "version": 3,
+        "rootCircuitId": "main",
+        "circuits": [{
+            "id": "main",
+            "name": "Main",
+            "kind": "main",
+            "components": [],
+            "wires": [],
+            "connections": []
+        }]
+    });
+
+    assert!(
+        ProjectDocumentV3::parse_json(&wrong_version.to_string())
+            .unwrap_err()
+            .to_string()
+            .contains("version 2")
+    );
+    assert!(ProjectDocumentV3::parse_json(&mixed_schema.to_string()).is_err());
 }
