@@ -367,6 +367,7 @@ function Workbench() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const instanceRef = useRef<ReactFlowInstance<EditorNode, EditorEdge> | null>(null);
   const inputClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flowResizeFrameRef = useRef<number | null>(null);
 
   const moduleDescriptors = useMemo(
     () => dynamicCatalog.filter((item) => item.category === "project-module"),
@@ -1432,7 +1433,7 @@ function Workbench() {
       .slice(1)
       .flatMap((entry) => (entry.instanceId ? [entry.instanceId] : []));
     try {
-      return activeCircuit.components.flatMap((component) => {
+      const signals = activeCircuit.components.flatMap((component) => {
         const label =
           typeof component.properties.label === "string" &&
           component.properties.label.trim()
@@ -1453,6 +1454,7 @@ function Workbench() {
             return {
               id: `port/${path}`,
               label: `${label}.${port.id}`,
+              qualifiedLabel: `${activeCircuitId}/${[...navigationPath, component.id].join("/")}`,
               width: port.width,
               signal: {
                 kind: "componentPort" as const,
@@ -1467,6 +1469,17 @@ function Workbench() {
             };
           });
       });
+      const labelCounts = new Map<string, number>();
+      for (const signal of signals) {
+        labelCounts.set(signal.label, (labelCounts.get(signal.label) ?? 0) + 1);
+      }
+      return signals.map(({ qualifiedLabel, ...signal }) => ({
+        ...signal,
+        label:
+          (labelCounts.get(signal.label) ?? 0) > 1
+            ? `${signal.label} · ${qualifiedLabel}`
+            : signal.label,
+      }));
     } catch {
       return [];
     }
@@ -1582,6 +1595,17 @@ function Workbench() {
     },
     [],
   );
+  const handleChronogramLayoutChange = useCallback(() => {
+    if (flowResizeFrameRef.current !== null) cancelAnimationFrame(flowResizeFrameRef.current);
+    flowResizeFrameRef.current = requestAnimationFrame(() => {
+      flowResizeFrameRef.current = null;
+      flowRef.current?.getBoundingClientRect();
+      window.dispatchEvent(new Event("resize"));
+    });
+  }, []);
+  useEffect(() => () => {
+    if (flowResizeFrameRef.current !== null) cancelAnimationFrame(flowResizeFrameRef.current);
+  }, []);
   const handleNodesChange = useCallback(
     (changes: NodeChange<EditorNode>[]) => {
       setNodes((items) => applyNodeChanges(changes, items));
@@ -1759,6 +1783,7 @@ function Workbench() {
         onClear={clearTraceHistory}
         onRateChange={changeAutoClockRate}
         onWatchesChange={replaceTraceWatches}
+        onLayoutChange={handleChronogramLayoutChange}
       />
 
       {exampleLibraryOpen && <ExampleLibrary examples={EXAMPLES} onClose={() => setExampleLibraryOpen(false)} onLoad={loadExample} />}

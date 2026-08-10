@@ -389,18 +389,10 @@ button {
 
 .chronogram-body {
   display: grid;
-  grid-template-columns: 236px minmax(0, 1fr);
+  grid-template-rows: 35px minmax(0, 1fr) 18px 27px;
   min-width: 0;
   min-height: 0;
-}
-
-.chronogram-watch-panel {
-  display: grid;
-  grid-template-rows: 35px minmax(0, 1fr);
-  min-width: 0;
-  min-height: 0;
-  border-right: 1px solid #ced8db;
-  background: #f5f8f8;
+  background: #ffffff;
 }
 
 .chronogram-add-watch {
@@ -408,8 +400,12 @@ button {
   grid-template-columns: minmax(0, 1fr) 26px;
   gap: 4px;
   align-items: center;
+  width: 236px;
+  min-width: 0;
   padding: 4px 6px;
+  border-right: 1px solid #ced8db;
   border-bottom: 1px solid #dbe2e4;
+  background: #f5f8f8;
 }
 
 .chronogram-add-watch label,
@@ -425,10 +421,8 @@ button {
 }
 
 .chronogram-watch-list {
-  min-height: 0;
   margin: 0;
   padding: 0;
-  overflow-y: auto;
   list-style: none;
 }
 
@@ -471,166 +465,44 @@ button {
   height: 11px;
 }
 
-.chronogram-main {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) 18px 27px;
-  min-width: 0;
-  min-height: 0;
-  background: #ffffff;
-}
-
 .chronogram-viewport {
+  position: relative;
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  background-color: #fbfcfc;
-  background-image: linear-gradient(to right, #edf1f2 1px, transparent 1px);
-  background-size: 42px 100%;
+  overscroll-behavior: contain;
+  background: #fbfcfc;
 }
 
-.chronogram-track {
+.chronogram-scroll-content {
   position: relative;
   min-width: 100%;
   min-height: 100%;
 }
 
-.chronogram-ruler {
-  display: flex;
-  height: 20px;
-  border-bottom: 1px solid #d9e0e2;
-  background: #f0f4f4;
-}
-
-.chronogram-ruler span {
-  flex: none;
-  overflow: hidden;
-  padding: 4px 2px 0;
-  border-right: 1px solid #dbe2e4;
-  color: #718087;
-  font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 7px;
-  text-align: center;
-  white-space: nowrap;
-}
-
-.chronogram-ruler .reason-fault {
-  color: #a8202e;
-  background: #fff0f1;
-}
-
-.chronogram-wave-row {
-  position: relative;
-  height: 36px;
-  border-bottom: 1px solid #e2e7e9;
-}
-
-.scalar-waveform,
-.bus-waveform {
-  position: relative;
-  height: 100%;
-}
-
-.scalar-guide {
-  position: absolute;
-  right: 0;
+.chronogram-label-column {
+  position: sticky;
   left: 0;
-  height: 1px;
-  background: #edf1f2;
+  z-index: 2;
+  width: 236px;
+  border-right: 1px solid #ced8db;
+  background: #f5f8f8;
 }
 
-.guide-high {
-  top: 7px;
+.chronogram-label-heading {
+  height: 20px;
+  padding: 5px 8px 0;
+  border-bottom: 1px solid #d9e0e2;
+  color: #718087;
+  background: #f0f4f4;
+  font-size: 8px;
+  font-weight: 800;
 }
 
-.guide-middle {
-  top: 17px;
-}
-
-.guide-low {
-  top: 27px;
-}
-
-.scalar-segment {
+.chronogram-canvas {
   position: absolute;
   z-index: 1;
-  border-left: 1px solid #6e7f86;
-  color: #ffffff;
-  font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 8px;
-  text-align: center;
-}
-
-.scalar-segment.level-high,
-.scalar-segment.level-middle,
-.scalar-segment.level-low {
-  height: 2px;
-  background: #276b63;
-}
-
-.scalar-segment.level-high {
-  top: 6px;
-}
-
-.scalar-segment.level-middle {
-  top: 16px;
-}
-
-.scalar-segment.level-low {
-  top: 26px;
-}
-
-.scalar-meta {
-  top: 7px;
-  height: 22px;
-  padding-top: 5px;
-  border: 1px solid currentcolor;
-}
-
-.state-X {
-  color: #5d6870;
-  background: repeating-linear-gradient(135deg, #e8edef 0 4px, #cbd4d7 4px 8px);
-}
-
-.state-Z {
-  color: #695610;
-  background: repeating-linear-gradient(90deg, #fff8d9 0 5px, #ead891 5px 7px);
-}
-
-.state-E {
-  color: #ffffff;
-  background: #bb2938;
-}
-
-.bus-segment {
-  position: absolute;
-  top: 6px;
-  height: 24px;
-  overflow: hidden;
-  padding: 5px 3px 0;
-  border: 1px solid #66847f;
-  color: #264b47;
-  background: #e9f4f1;
-  font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 8px;
-  text-align: center;
-  text-overflow: clip;
-  white-space: nowrap;
-}
-
-.bus-segment.state-X,
-.bus-segment.state-Z,
-.bus-segment.state-E {
-  color: inherit;
-}
-
-.chronogram-cursor-line {
-  position: absolute;
-  z-index: 2;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: #c82937;
-  box-shadow: 0 0 0 1px rgb(200 41 55 / 12%);
+  display: block;
   pointer-events: none;
 }
 
@@ -2136,10 +2008,6 @@ button {
 
   .statusbar strong {
     max-width: calc(100vw - 32px);
-  }
-
-  .chronogram-body {
-    grid-template-columns: 196px minmax(0, 1fr);
   }
 
   .chronogram-toolbar {

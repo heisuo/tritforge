@@ -1,5 +1,5 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { Chronogram, type ChronogramSignalOption } from "../src/components/Chronogram";
 import type { TraceFrame, TraceWatch } from "../src/wasm-client";
@@ -83,6 +83,24 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+beforeEach(() => {
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    setTransform: vi.fn(),
+    clearRect: vi.fn(),
+    fillRect: vi.fn(),
+    strokeRect: vi.fn(),
+    beginPath: vi.fn(),
+    moveTo: vi.fn(),
+    lineTo: vi.fn(),
+    stroke: vi.fn(),
+    fillText: vi.fn(),
+    save: vi.fn(),
+    restore: vi.fn(),
+    translate: vi.fn(),
+    setLineDash: vi.fn(),
+  } as unknown as CanvasRenderingContext2D);
+});
+
 describe("Chronogram", () => {
   it("adds, removes, and reorders watches through controlled updates", () => {
     function Harness() {
@@ -154,7 +172,7 @@ describe("Chronogram", () => {
     fireEvent.click(screen.getByRole("button", { name: "运行自动时钟" }));
     fireEvent.click(screen.getByRole("button", { name: "推进一个相位" }));
     fireEvent.click(screen.getByRole("button", { name: "推进一个完整 Tick" }));
-    fireEvent.click(screen.getByRole("button", { name: "清空时序记录" }));
+    fireEvent.click(screen.getByRole("button", { name: "清除波形历史" }));
     fireEvent.change(screen.getByLabelText("自动时钟速度"), {
       target: { value: "10" },
     });
@@ -203,39 +221,114 @@ describe("Chronogram", () => {
     );
   });
 
-  it("formats buses as balanced ternary, decimal, or separated trits", () => {
+  it("formats cursor buses as balanced ternary, decimal, or separated trits", () => {
     render(<Chronogram {...baseProps} />);
-    const row = screen.getByTestId(`wave-${busWatch.id}`);
-    expect(row).toHaveTextContent("1T0");
+    const values = screen.getByTestId("chronogram-cursor-values");
+    fireEvent.change(screen.getByLabelText("时序图游标"), { target: { value: "0" } });
+    expect(values).toHaveTextContent("1T0");
 
     fireEvent.change(screen.getByLabelText("总线显示模式"), {
       target: { value: "decimal" },
     });
-    expect(row).toHaveTextContent("6");
+    expect(values).toHaveTextContent("6");
 
     fireEvent.change(screen.getByLabelText("总线显示模式"), {
       target: { value: "trits" },
     });
-    expect(row).toHaveTextContent("1 T 0");
+    expect(values).toHaveTextContent("1 T 0");
   });
 
-  it("uses three scalar levels and distinct unknown, high-impedance, and error marks", () => {
-    const metaFrames = [
-      frame(0, "T", "1T0"),
-      frame(1, "0", "1T0"),
-      frame(2, "1", "1T0"),
-      frame(3, "X", "1T0"),
-      frame(4, "Z", "1T0"),
-      frame(5, "E", "1T0"),
-    ];
-    render(<Chronogram {...baseProps} frames={metaFrames} />);
-    const row = screen.getByTestId(`wave-${scalarWatch.id}`);
-    expect(within(row).getByTestId("scalar-waveform")).toBeInTheDocument();
-    expect(within(row).getByTestId("scalar-T")).toHaveAttribute("data-level", "low");
-    expect(within(row).getByTestId("scalar-0")).toHaveAttribute("data-level", "middle");
-    expect(within(row).getByTestId("scalar-1")).toHaveAttribute("data-level", "high");
-    expect(within(row).getByTestId("scalar-X")).toHaveClass("state-X");
-    expect(within(row).getByTestId("scalar-Z")).toHaveClass("state-Z");
-    expect(within(row).getByTestId("scalar-E")).toHaveClass("state-E");
+  it("uses one canvas and bounded DOM for 64 watches by 512 frames", () => {
+    const signals = Array.from({ length: 64 }, (_, index): ChronogramSignalOption => ({
+      ...availableSignals[0],
+      id: `watch-${index}`,
+      label: `Signal ${index}`,
+      signal: {
+        kind: "componentPort",
+        ref: {
+          circuitId: "main",
+          instancePath: [],
+          componentId: `input-${index}`,
+          portId: "out",
+        },
+      },
+    }));
+    const watches = signals.map((signal): TraceWatch => ({ id: signal.id, signal: signal.signal }));
+    const frames = Array.from({ length: 512 }, (_, index): TraceFrame => ({
+      cycle: index,
+      clockPhase: index % 2 ? "highStable" : "lowStable",
+      reason: "clockRise",
+      diagnostics: [],
+      values: watches.map((watch, watchIndex) => ({
+        watchId: watch.id,
+        value: (index + watchIndex) % 2 ? "1" : "T",
+      })),
+    }));
+    const { container } = render(
+      <Chronogram {...baseProps} availableSignals={signals} watches={watches} frames={frames} />,
+    );
+
+    expect(container.querySelectorAll("canvas")).toHaveLength(1);
+    expect(container.querySelectorAll("*").length).toBeLessThan(1400);
+    expect(container.querySelector("canvas")).toHaveAttribute("data-cell-count", "32768");
+    expect(container.querySelectorAll(".scalar-segment, .bus-segment")).toHaveLength(0);
+  });
+
+  it("keeps labels and waves in one shared vertical scroller", () => {
+    render(<Chronogram {...baseProps} />);
+    const viewport = screen.getByTestId("chronogram-viewport");
+    expect(viewport).toContainElement(screen.getAllByTestId("chronogram-watch")[0]);
+    expect(viewport).toContainElement(screen.getByRole("img", { name: "三进制时序波形" }));
+    viewport.scrollTop = 36;
+    fireEvent.scroll(viewport);
+    expect(screen.getByRole("img", { name: "三进制时序波形" })).toHaveAttribute(
+      "data-scroll-top",
+      "36",
+    );
+  });
+
+  it("follows the live tail until the cursor is moved back", async () => {
+    const { rerender } = render(<Chronogram {...baseProps} />);
+    const viewport = screen.getByTestId("chronogram-viewport");
+    Object.defineProperty(viewport, "clientWidth", { configurable: true, value: 300 });
+    Object.defineProperty(viewport, "scrollWidth", { configurable: true, value: 900 });
+
+    const threeFrames = [...baseProps.frames, frame(2, "1", "1T1")];
+    rerender(<Chronogram {...baseProps} frames={threeFrames} />);
+    await waitFor(() => expect(screen.getByLabelText("时序图游标")).toHaveValue("2"));
+    expect(viewport.scrollLeft).toBe(600);
+
+    fireEvent.change(screen.getByLabelText("时序图游标"), { target: { value: "0" } });
+    viewport.scrollLeft = 120;
+    rerender(<Chronogram {...baseProps} frames={[...threeFrames, frame(3, "T", "XZE")]} />);
+    expect(screen.getByLabelText("时序图游标")).toHaveValue("0");
+    expect(viewport.scrollLeft).toBe(120);
+
+    fireEvent.change(screen.getByLabelText("时序图游标"), { target: { value: "3" } });
+    rerender(<Chronogram {...baseProps} frames={[...threeFrames, frame(3, "T", "XZE"), frame(4, "0", "111")]} />);
+    await waitFor(() => expect(screen.getByLabelText("时序图游标")).toHaveValue("4"));
+    expect(viewport.scrollLeft).toBe(600);
+  });
+
+  it("notifies layout changes and ends resize on pointer cancellation or window blur", () => {
+    const onLayoutChange = vi.fn();
+    render(<Chronogram {...baseProps} onLayoutChange={onLayoutChange} />);
+    const dock = screen.getByRole("region", { name: "时序图" });
+    const separator = screen.getByRole("separator", { name: "调整时序图高度" });
+
+    fireEvent.pointerDown(separator, { clientY: 300 });
+    fireEvent.pointerMove(window, { clientY: 260 });
+    const draggedHeight = dock.style.height;
+    fireEvent.pointerCancel(window);
+    fireEvent.pointerMove(window, { clientY: 180 });
+    expect(dock.style.height).toBe(draggedHeight);
+
+    fireEvent.pointerDown(separator, { clientY: 300 });
+    fireEvent(window, new Event("blur"));
+    fireEvent.pointerMove(window, { clientY: 200 });
+    expect(dock.style.height).toBe(draggedHeight);
+
+    fireEvent.click(screen.getByRole("button", { name: "折叠时序图" }));
+    expect(onLayoutChange).toHaveBeenCalled();
   });
 });
