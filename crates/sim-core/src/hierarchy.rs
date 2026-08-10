@@ -6,8 +6,8 @@ use crate::catalog::{ComponentKind, ComponentProperties, PortDirection};
 use crate::circuit::{CircuitDefinition, ComponentInstance, Connection};
 use crate::diagnostic::Severity;
 use crate::project::{
-    ProjectCircuit, ProjectComponent, ProjectDiagnostic, ProjectLocation, QualifiedComponentRef,
-    QualifiedConnectionRef, QualifiedPortRef,
+    ProjectCircuit, ProjectComponent, ProjectDiagnostic, ProjectDiagnosticSet, ProjectLocation,
+    QualifiedComponentRef, QualifiedConnectionRef, QualifiedPortRef,
 };
 use crate::project_validation::{ModulePort, ValidatedProject};
 
@@ -80,6 +80,11 @@ pub fn compile_project(
             None,
         )]);
     };
+
+    let width_diagnostics = scalar_width_diagnostics(project, active_circuit_id);
+    if !width_diagnostics.is_empty() {
+        return Err(width_diagnostics);
+    }
 
     let fallback_location = growth_location(active);
 
@@ -185,6 +190,68 @@ pub fn compile_project(
     analyzer.expand_circuit(active_circuit_id, &[], true)?;
     let wiring = analyzer.analyze_wiring()?;
     Ok(materialize_project(project, active_circuit_id, wiring))
+}
+
+fn scalar_width_diagnostics(
+    project: &ValidatedProject,
+    active_circuit_id: &str,
+) -> Vec<ProjectDiagnostic> {
+    let Some(circuit_ids) = dependency_postorder(active_circuit_id, &project.dependencies) else {
+        return Vec::new();
+    };
+    let circuits: BTreeMap<_, _> = project
+        .project
+        .circuits
+        .iter()
+        .map(|circuit| (circuit.id.as_str(), circuit))
+        .collect();
+    let mut diagnostics = ProjectDiagnosticSet::new();
+
+    for circuit_id in circuit_ids {
+        let Some(circuit) = circuits.get(circuit_id.as_str()) else {
+            continue;
+        };
+        for component in &circuit.components {
+            let Some(port_id) = scalar_width_aware_port(&component.type_id) else {
+                continue;
+            };
+            let width = component
+                .properties
+                .get("width")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(1);
+            if width == 1 {
+                continue;
+            }
+
+            let component_ref =
+                QualifiedComponentRef::new(&circuit.id, [] as [&str; 0], &component.id);
+            let port_ref =
+                QualifiedPortRef::new(&circuit.id, [] as [&str; 0], &component.id, port_id);
+            diagnostics.insert(ProjectDiagnostic {
+                code: "BUS_LOWERING_REQUIRED".into(),
+                severity: Severity::Error,
+                message: format!(
+                    "scalar project compilation cannot lower width-{width} port '{}.{port_id}'",
+                    component.id
+                ),
+                primary_location: Some(ProjectLocation::Port(port_ref.clone())),
+                component_refs: vec![component_ref],
+                connection_refs: vec![],
+                port_refs: vec![port_ref],
+            });
+        }
+    }
+
+    diagnostics.into_vec()
+}
+
+fn scalar_width_aware_port(type_id: &str) -> Option<&'static str> {
+    match type_id {
+        "source.trit_input" | "source.constant" | MODULE_INPUT => Some("out"),
+        "sink.probe" | MODULE_OUTPUT => Some("in"),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

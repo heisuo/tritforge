@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 
 use sim_core::project::{
     ProjectCircuit, ProjectCircuitKind, ProjectComponent, ProjectConnection, ProjectDocument,
+    ProjectLocation,
 };
 use sim_core::project_simulator::ProjectSimulator;
 use sim_core::trit::Trit;
@@ -88,6 +89,131 @@ fn inverter_module() -> ProjectCircuit {
             connection("neg-output", "neg", "y", "output", "in"),
         ],
     )
+}
+
+#[test]
+fn scalar_project_load_rejects_a_widened_source_before_it_becomes_scalar_zero() {
+    let main = circuit(
+        "main",
+        ProjectCircuitKind::Main,
+        vec![component(
+            "word-source",
+            "source.constant",
+            serde_json::json!({"width": 3, "value": "111"}),
+        )],
+        vec![],
+    );
+
+    let diagnostics = match ProjectSimulator::load(project(vec![main]), "main") {
+        Ok(_) => panic!("scalar project load must reject a widened source"),
+        Err(diagnostics) => diagnostics,
+    };
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "BUS_LOWERING_REQUIRED")
+        .expect("widened source diagnostic");
+
+    assert_eq!(diagnostic.component_refs[0].component_id, "word-source");
+    assert_eq!(diagnostic.port_refs[0].port_id, "out");
+    assert!(matches!(
+        diagnostic.primary_location,
+        Some(ProjectLocation::Port(ref port))
+            if port.circuit_id == "main"
+                && port.component_id == "word-source"
+                && port.port_id == "out"
+    ));
+}
+
+#[test]
+fn scalar_project_update_recompiles_and_rejects_a_widened_source() {
+    let scalar_main = circuit(
+        "main",
+        ProjectCircuitKind::Main,
+        vec![component(
+            "source",
+            "source.constant",
+            serde_json::json!({"value": "1"}),
+        )],
+        vec![],
+    );
+    let mut simulator = ProjectSimulator::load(project(vec![scalar_main]), "main").unwrap();
+    let widened_main = circuit(
+        "main",
+        ProjectCircuitKind::Main,
+        vec![component(
+            "source",
+            "source.constant",
+            serde_json::json!({"width": 3, "value": "111"}),
+        )],
+        vec![],
+    );
+
+    let diagnostics = simulator
+        .update_project(project(vec![widened_main]))
+        .unwrap_err();
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "BUS_LOWERING_REQUIRED")
+    );
+}
+
+#[test]
+fn scalar_project_load_rejects_widened_module_boundaries_at_their_ports() {
+    let main = circuit(
+        "main",
+        ProjectCircuitKind::Main,
+        vec![module_instance("word-instance", "word-module")],
+        vec![],
+    );
+    let word_module = circuit(
+        "word-module",
+        ProjectCircuitKind::Module,
+        vec![
+            component(
+                "word-input",
+                "project.module_input",
+                serde_json::json!({
+                    "portId": "data",
+                    "label": "Data",
+                    "previewValue": "1T0",
+                    "width": 3
+                }),
+            ),
+            component(
+                "word-output",
+                "project.module_output",
+                serde_json::json!({"portId": "result", "label": "Result", "width": 3}),
+            ),
+        ],
+        vec![],
+    );
+
+    let diagnostics = match ProjectSimulator::load(project(vec![main, word_module]), "main") {
+        Ok(_) => panic!("scalar project load must reject widened module boundaries"),
+        Err(diagnostics) => diagnostics,
+    };
+    let ports = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "BUS_LOWERING_REQUIRED")
+        .flat_map(|diagnostic| diagnostic.port_refs.iter())
+        .map(|port| {
+            (
+                port.circuit_id.as_str(),
+                port.component_id.as_str(),
+                port.port_id.as_str(),
+            )
+        })
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(
+        ports,
+        BTreeSet::from([
+            ("word-module", "word-input", "out"),
+            ("word-module", "word-output", "in"),
+        ])
+    );
 }
 
 fn bit_cell_module() -> ProjectCircuit {

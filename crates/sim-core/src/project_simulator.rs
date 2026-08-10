@@ -762,7 +762,7 @@ fn active_shape_unchanged(
     })
 }
 
-type ComponentShape = (String, String, Option<String>, Option<String>);
+type ComponentShape = (String, String, Option<String>, Option<String>, u8);
 type ConnectionShape = (String, String, String, String, String);
 
 fn circuit_shape(circuit: &ProjectCircuit) -> (Vec<ComponentShape>, Vec<ConnectionShape>) {
@@ -775,6 +775,12 @@ fn circuit_shape(circuit: &ProjectCircuit) -> (Vec<ComponentShape>, Vec<Connecti
                 component.type_id.clone(),
                 component.properties.module_id().map(str::to_owned),
                 component.properties.port_id().map(str::to_owned),
+                component
+                    .properties
+                    .get("width")
+                    .and_then(serde_json::Value::as_u64)
+                    .and_then(|width| u8::try_from(width).ok())
+                    .unwrap_or(1),
             )
         })
         .collect();

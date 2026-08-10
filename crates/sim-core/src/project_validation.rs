@@ -162,7 +162,8 @@ fn resolve_splitter_ports(
     properties: &ProjectProperties,
 ) -> Result<Vec<ResolvedProjectPort>, ProjectPortResolveError> {
     let trunk_shape = project_signal_shape(properties)?;
-    require_only_properties(properties, &["branchCount", "mapping", "width"])?;
+    require_only_properties(properties, &["branchCount", "label", "mapping", "width"])?;
+    validate_optional_label(properties)?;
 
     let branch_count = properties
         .get("branchCount")

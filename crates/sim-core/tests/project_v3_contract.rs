@@ -167,7 +167,7 @@ fn resolved_ports_validate_width_aware_words_and_property_allowlists() {
         (
             "wiring.splitter",
             serde_json::json!({
-                "label": "not-allowed",
+                "extension": true,
                 "width": 1,
                 "branchCount": 1,
                 "mapping": [0]
@@ -215,7 +215,12 @@ fn resolved_ports_build_ordered_uniform_and_nonuniform_splitters() {
     assert_eq!(
         resolved_shapes(
             "wiring.splitter",
-            serde_json::json!({"width": 3, "branchCount": 3, "mapping": [0, 1, 2]})
+            serde_json::json!({
+                "label": "three-way",
+                "width": 3,
+                "branchCount": 3,
+                "mapping": [0, 1, 2]
+            })
         ),
         vec![
             ("trunk".into(), PortDirection::InOut, 3),
@@ -240,6 +245,24 @@ fn resolved_ports_build_ordered_uniform_and_nonuniform_splitters() {
             ("branch2".into(), PortDirection::InOut, 1),
         ]
     );
+}
+
+#[test]
+fn resolved_ports_reject_invalid_optional_splitter_labels() {
+    for label in [serde_json::json!(""), serde_json::json!(4)] {
+        let error = resolve_project_ports(
+            "wiring.splitter",
+            &properties(serde_json::json!({
+                "label": label,
+                "width": 1,
+                "branchCount": 1,
+                "mapping": [0]
+            })),
+        )
+        .unwrap_err();
+
+        assert_eq!(error.code(), "INVALID_PROPERTY");
+    }
 }
 
 #[test]
