@@ -39,6 +39,7 @@ pub enum ComponentKind {
     FullAdder,
     Clock,
     Dff,
+    Register,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,6 +84,7 @@ impl ComponentKind {
             Self::FullAdder => "module.full_adder",
             Self::Clock => "source.clock",
             Self::Dff => "sequential.dff",
+            Self::Register => "sequential.register",
         }
     }
 
@@ -106,6 +108,7 @@ impl ComponentKind {
             "module.full_adder" => Some(Self::FullAdder),
             "source.clock" => Some(Self::Clock),
             "sequential.dff" => Some(Self::Dff),
+            "sequential.register" => Some(Self::Register),
             _ => None,
         }
     }
@@ -151,7 +154,7 @@ impl ComponentKind {
                 port("sum", PortDirection::Output),
                 port("carry", PortDirection::Output),
             ],
-            Self::Dff => vec![
+            Self::Dff | Self::Register => vec![
                 port("d", PortDirection::Input),
                 port("clk", PortDirection::Input),
                 port("en", PortDirection::Input),
@@ -182,6 +185,7 @@ pub fn component_catalog() -> Vec<ComponentDescriptor> {
         (ComponentKind::FullAdder, "Full Adder", "module"),
         (ComponentKind::Clock, "Clock", "source"),
         (ComponentKind::Dff, "D Flip-Flop", "sequential"),
+        (ComponentKind::Register, "Register", "sequential"),
     ]
     .into_iter()
     .map(|(kind, display_name, category)| descriptor(kind, display_name, category))

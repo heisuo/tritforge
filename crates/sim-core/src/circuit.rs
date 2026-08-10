@@ -278,7 +278,8 @@ fn property_is_valid(kind: ComponentKind, properties: &ComponentProperties) -> b
         | ComponentKind::HalfAdder
         | ComponentKind::FullAdder
         | ComponentKind::Clock
-        | ComponentKind::Dff => properties.value.is_none(),
+        | ComponentKind::Dff
+        | ComponentKind::Register => properties.value.is_none(),
     }
 }
 

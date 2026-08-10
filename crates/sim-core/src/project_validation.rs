@@ -15,6 +15,7 @@ const MODULE_INSTANCE: &str = "project.module_instance";
 const JUNCTION: &str = "wiring.junction";
 const TUNNEL: &str = "wiring.tunnel";
 const SPLITTER: &str = "wiring.splitter";
+const REGISTER: &str = "sequential.register";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedProjectPort {
@@ -136,6 +137,19 @@ pub fn resolve_project_ports(
             Ok(vec![resolved_port("net", PortDirection::InOut, shape)])
         }
         SPLITTER => resolve_splitter_ports(properties),
+        REGISTER => {
+            let word_shape = project_signal_shape(properties)?;
+            require_only_properties(properties, &["label", "width"])?;
+            validate_optional_label(properties)?;
+            let scalar_shape = default_signal_shape();
+            Ok(vec![
+                resolved_port("d", PortDirection::Input, word_shape),
+                resolved_port("clk", PortDirection::Input, scalar_shape),
+                resolved_port("en", PortDirection::Input, scalar_shape),
+                resolved_port("rst", PortDirection::Input, scalar_shape),
+                resolved_port("q", PortDirection::Output, word_shape),
+            ])
+        }
         MODULE_INSTANCE => Err(invalid_property(
             "module instance ports require a validated referenced interface",
         )),
@@ -599,6 +613,9 @@ fn validate_builtin_properties(
     component: &ProjectComponent,
     kind: ComponentKind,
 ) -> Result<(), ProjectPortResolveError> {
+    if kind == ComponentKind::Register {
+        return resolve_project_ports(&component.type_id, &component.properties).map(|_| ());
+    }
     let width_aware = matches!(
         kind,
         ComponentKind::TritInput | ComponentKind::Constant | ComponentKind::Probe

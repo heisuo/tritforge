@@ -10,6 +10,7 @@ pub mod project_validation;
 pub mod sequential;
 pub mod signal;
 pub mod simulator;
+pub mod structural;
 pub mod trace;
 pub mod trit;
 

@@ -67,9 +67,22 @@ const register3: ProjectCircuit = {
       label: "RST",
       previewValue: "0",
     }),
-    component("dff-2", "sequential.dff", 410, 80, { label: "DFF2" }),
-    component("dff-1", "sequential.dff", 410, 300, { label: "DFF1" }),
-    component("dff-0", "sequential.dff", 410, 520, { label: "DFF0" }),
+    component("data-splitter", "wiring.splitter", 285, 250, {
+      label: "D2:D0",
+      width: 3,
+      branchCount: 3,
+      mapping: [0, 1, 2],
+    }),
+    component("register-word", "sequential.register", 470, 300, {
+      label: "Register[3]",
+      width: 3,
+    }),
+    component("output-splitter", "wiring.splitter", 650, 250, {
+      label: "Q2:Q0",
+      width: 3,
+      branchCount: 3,
+      mapping: [0, 1, 2],
+    }),
     component("output-q2", "project.module_output", 780, 80, {
       portId: "q2",
       label: "Q2",
@@ -84,21 +97,17 @@ const register3: ProjectCircuit = {
     }),
   ],
   connections: [
-    connection("d2", "input-d2", "out", "dff-2", "d"),
-    connection("d1", "input-d1", "out", "dff-1", "d"),
-    connection("d0", "input-d0", "out", "dff-0", "d"),
-    connection("clk-2", "input-clk", "out", "dff-2", "clk"),
-    connection("clk-1", "input-clk", "out", "dff-1", "clk"),
-    connection("clk-0", "input-clk", "out", "dff-0", "clk"),
-    connection("en-2", "input-en", "out", "dff-2", "en"),
-    connection("en-1", "input-en", "out", "dff-1", "en"),
-    connection("en-0", "input-en", "out", "dff-0", "en"),
-    connection("rst-2", "input-rst", "out", "dff-2", "rst"),
-    connection("rst-1", "input-rst", "out", "dff-1", "rst"),
-    connection("rst-0", "input-rst", "out", "dff-0", "rst"),
-    connection("q2", "dff-2", "q", "output-q2", "in"),
-    connection("q1", "dff-1", "q", "output-q1", "in"),
-    connection("q0", "dff-0", "q", "output-q0", "in"),
+    connection("d2", "input-d2", "out", "data-splitter", "branch2"),
+    connection("d1", "input-d1", "out", "data-splitter", "branch1"),
+    connection("d0", "input-d0", "out", "data-splitter", "branch0"),
+    connection("data-word", "data-splitter", "trunk", "register-word", "d"),
+    connection("clk", "input-clk", "out", "register-word", "clk"),
+    connection("en", "input-en", "out", "register-word", "en"),
+    connection("rst", "input-rst", "out", "register-word", "rst"),
+    connection("q-word", "register-word", "q", "output-splitter", "trunk"),
+    connection("q2", "output-splitter", "branch2", "output-q2", "in"),
+    connection("q1", "output-splitter", "branch1", "output-q1", "in"),
+    connection("q0", "output-splitter", "branch0", "output-q0", "in"),
   ],
   viewport: { x: 65, y: 25, zoom: 0.78 },
 };
@@ -161,4 +170,3 @@ const REGISTER3_PROJECT: ProjectDocumentV2 = {
 export function cloneRegister3Project(): ProjectDocumentV2 {
   return structuredClone(REGISTER3_PROJECT);
 }
-

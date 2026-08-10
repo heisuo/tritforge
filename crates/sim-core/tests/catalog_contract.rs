@@ -56,6 +56,7 @@ fn phase_one_catalog_has_exact_stable_ids_and_type_lookup() {
             "module.full_adder",
             "source.clock",
             "sequential.dff",
+            "sequential.register",
         ]
     );
 
@@ -184,6 +185,17 @@ fn catalog_has_exact_categories_ports_and_truth_table_sizes() {
             27_usize,
         ),
         ("source", vec![("out", PortDirection::Output)], 0_usize),
+        (
+            "sequential",
+            vec![
+                ("d", PortDirection::Input),
+                ("clk", PortDirection::Input),
+                ("en", PortDirection::Input),
+                ("rst", PortDirection::Input),
+                ("q", PortDirection::Output),
+            ],
+            0_usize,
+        ),
         (
             "sequential",
             vec![
