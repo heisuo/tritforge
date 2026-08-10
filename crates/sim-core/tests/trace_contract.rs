@@ -6,7 +6,9 @@ use sim_core::project::{
 };
 use sim_core::project_simulator::{ProjectSimulator, ProjectSnapshot};
 use sim_core::simulator::ClockPhase;
-use sim_core::trace::{TRACE_CAPACITY, TraceFrame, TraceFrameReason, TraceSignalRef, TraceWatch};
+use sim_core::trace::{
+    MAX_TRACE_WATCHES, TRACE_CAPACITY, TraceFrame, TraceFrameReason, TraceSignalRef, TraceWatch,
+};
 use sim_core::trit::Trit;
 
 fn component(id: &str, type_id: &str, properties: serde_json::Value) -> ProjectComponent {
@@ -692,4 +694,251 @@ fn unavailable_watch_setup_is_transactional_and_keeps_the_previous_selection() {
     assert_eq!(simulator.trace_watches(), &[current]);
     assert_eq!(simulator.trace_frames(), &before);
     assert_eq!(simulator.trace_diagnostics(), diagnostics);
+}
+
+#[test]
+fn reachable_v3_helper_topology_changes_refresh_and_remove_missing_watches() {
+    let initial = project_v3(vec![circuit_v3(
+        "main",
+        ProjectCircuitKind::Main,
+        vec![
+            component("clock", "source.clock", serde_json::json!({})),
+            component(
+                "isolated",
+                "wiring.tunnel",
+                serde_json::json!({"width": 3, "label": "DATA"}),
+            ),
+        ],
+        vec![],
+    )]);
+    let mut simulator = ProjectSimulator::load_v3(initial.clone(), "main").unwrap();
+    simulator
+        .set_trace_watches(vec![watch("tunnel", port("main", &[], "isolated", "net"))])
+        .unwrap();
+    simulator.tick().unwrap();
+    assert_eq!(simulator.trace_frames().len(), 3);
+
+    let mut relabeled = initial.clone();
+    relabeled.circuits[0].components[1] = component(
+        "isolated",
+        "wiring.tunnel",
+        serde_json::json!({"width": 3, "label": "RENAMED"}),
+    );
+    simulator.update_project_v3(relabeled).unwrap();
+    assert_eq!(simulator.trace_frames().len(), 1);
+    assert_eq!(simulator.trace_frames()[0].reason, TraceFrameReason::Load);
+    assert_eq!(simulator.trace_watches().len(), 1);
+
+    simulator.tick().unwrap();
+    let mut deleted = initial;
+    deleted.circuits[0]
+        .components
+        .retain(|component| component.id != "isolated");
+    let snapshot = simulator.update_project_v3(deleted).unwrap();
+
+    assert!(simulator.trace_watches().is_empty());
+    assert!(simulator.trace_frames().is_empty());
+    assert_eq!(
+        simulator.trace_diagnostics()[0].code,
+        "TRACE_SIGNAL_UNAVAILABLE"
+    );
+    assert!(
+        snapshot
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "TRACE_SIGNAL_UNAVAILABLE")
+    );
+}
+
+#[test]
+fn direct_word_setter_synchronizes_lowered_source_before_label_only_update() {
+    let mut project = project_v3(vec![circuit_v3(
+        "main",
+        ProjectCircuitKind::Main,
+        vec![component(
+            "word",
+            "source.trit_input",
+            serde_json::json!({"width": 3, "value": "1T0", "label": "Before"}),
+        )],
+        vec![],
+    )]);
+    let mut simulator = ProjectSimulator::load_v3(project.clone(), "main").unwrap();
+    simulator
+        .set_trace_watches(vec![watch("word", port("main", &[], "word", "out"))])
+        .unwrap();
+    simulator.set_source_word("main", "word", "T01").unwrap();
+    assert_eq!(simulator.trace_frames().len(), 2);
+
+    project.circuits[0].components[0] = component(
+        "word",
+        "source.trit_input",
+        serde_json::json!({"width": 3, "value": "T01", "label": "After"}),
+    );
+    simulator.update_project_v3(project).unwrap();
+
+    assert_eq!(simulator.trace_frames().len(), 2);
+    assert_eq!(
+        trace_values(simulator.trace_frames().back().unwrap())[0].1,
+        "T01"
+    );
+}
+
+#[test]
+fn source_setters_record_only_active_runtime_signal_changes() {
+    let mut scalar_project = scalar_clock_project();
+    scalar_project.circuits[1].components.push(component(
+        "inactive",
+        "source.trit_input",
+        serde_json::json!({"value": "0"}),
+    ));
+    let mut scalar = ProjectSimulator::load(scalar_project, "main").unwrap();
+    scalar
+        .set_trace_watches(vec![watch("input", port("main", &[], "input", "out"))])
+        .unwrap();
+    scalar.set_source("main", "input", Trit::Zero).unwrap();
+    scalar.set_source("spare", "inactive", Trit::Pos).unwrap();
+    assert_eq!(scalar.trace_frames().len(), 1);
+    scalar.set_source("main", "input", Trit::Pos).unwrap();
+    assert_eq!(scalar.trace_frames().len(), 2);
+
+    let word_project = project_v3(vec![circuit_v3(
+        "main",
+        ProjectCircuitKind::Main,
+        vec![component(
+            "word",
+            "source.trit_input",
+            serde_json::json!({"width": 3, "value": "1T0"}),
+        )],
+        vec![],
+    )]);
+    let mut word = ProjectSimulator::load_v3(word_project, "main").unwrap();
+    word.set_trace_watches(vec![watch("word", port("main", &[], "word", "out"))])
+        .unwrap();
+    word.set_source_word("main", "word", "1T0").unwrap();
+    assert_eq!(word.trace_frames().len(), 1);
+    word.set_source_word("main", "word", "T01").unwrap();
+    assert_eq!(word.trace_frames().len(), 2);
+}
+
+#[test]
+fn watch_limit_and_duplicate_signals_are_rejected_atomically() {
+    assert_eq!(MAX_TRACE_WATCHES, 64);
+    let components = (0..=MAX_TRACE_WATCHES)
+        .map(|index| {
+            component(
+                &format!("source-{index}"),
+                "source.constant",
+                serde_json::json!({"value": "0"}),
+            )
+        })
+        .collect();
+    let project = project(vec![circuit(
+        "main",
+        ProjectCircuitKind::Main,
+        components,
+        vec![],
+    )]);
+    let mut simulator = ProjectSimulator::load(project, "main").unwrap();
+    let original = watch("original", port("main", &[], "source-0", "out"));
+    simulator.set_trace_watches(vec![original.clone()]).unwrap();
+    simulator.tick().unwrap();
+    let frames_before = simulator.trace_frames().clone();
+
+    let over_limit = (0..=MAX_TRACE_WATCHES)
+        .map(|index| {
+            watch(
+                &format!("watch-{index}"),
+                port("main", &[], &format!("source-{index}"), "out"),
+            )
+        })
+        .collect();
+    let diagnostics = simulator.set_trace_watches(over_limit).unwrap_err();
+    assert_eq!(diagnostics[0].code, "TRACE_WATCH_LIMIT_EXCEEDED");
+    assert_eq!(simulator.trace_watches(), std::slice::from_ref(&original));
+    assert_eq!(simulator.trace_frames(), &frames_before);
+
+    let duplicate_signal = vec![
+        watch("first", port("main", &[], "source-1", "out")),
+        watch("second", port("main", &[], "source-1", "out")),
+    ];
+    let diagnostics = simulator.set_trace_watches(duplicate_signal).unwrap_err();
+    assert_eq!(diagnostics[0].code, "DUPLICATE_TRACE_SIGNAL");
+    assert_eq!(simulator.trace_watches(), &[original]);
+    assert_eq!(simulator.trace_frames(), &frames_before);
+}
+
+#[test]
+fn tick_uses_no_watch_fast_path_and_projects_the_public_snapshot_only_once() {
+    let mut simulator = ProjectSimulator::load(scalar_clock_project(), "main").unwrap();
+    let before = simulator.trace_performance_counters();
+    simulator.tick().unwrap();
+    let without_watches = simulator.trace_performance_counters();
+    assert_eq!(
+        without_watches.phase_snapshot_captures - before.phase_snapshot_captures,
+        0
+    );
+    assert_eq!(
+        without_watches.project_snapshot_projections - before.project_snapshot_projections,
+        1
+    );
+
+    simulator
+        .set_trace_watches(vec![watch("clock", port("main", &[], "clock", "out"))])
+        .unwrap();
+    let before = simulator.trace_performance_counters();
+    simulator.tick().unwrap();
+    let with_watches = simulator.trace_performance_counters();
+    assert_eq!(
+        with_watches.phase_snapshot_captures - before.phase_snapshot_captures,
+        2
+    );
+    assert_eq!(
+        with_watches.project_snapshot_projections - before.project_snapshot_projections,
+        1
+    );
+}
+
+#[test]
+fn large_v2_watch_bindings_are_indexed_once_and_frames_read_only_bound_endpoints() {
+    let component_count = 2_000;
+    let components = (0..component_count)
+        .map(|index| {
+            component(
+                &format!("source-{index}"),
+                "source.constant",
+                serde_json::json!({"value": "0"}),
+            )
+        })
+        .collect();
+    let project = project(vec![circuit(
+        "main",
+        ProjectCircuitKind::Main,
+        components,
+        vec![],
+    )]);
+    let mut simulator = ProjectSimulator::load(project, "main").unwrap();
+    let watches = (0..MAX_TRACE_WATCHES)
+        .map(|index| {
+            watch(
+                &format!("watch-{index}"),
+                port("main", &[], &format!("source-{index}"), "out"),
+            )
+        })
+        .collect();
+    simulator.set_trace_watches(watches).unwrap();
+    let bound = simulator.trace_performance_counters();
+    assert_eq!(bound.binding_index_builds, 1);
+    assert_eq!(bound.binding_component_entries, component_count as u64);
+    assert_eq!(bound.binding_resolutions, MAX_TRACE_WATCHES as u64);
+
+    for _ in 0..4 {
+        simulator.advance_phase().unwrap();
+    }
+    let traced = simulator.trace_performance_counters();
+    assert_eq!(traced.binding_index_builds, bound.binding_index_builds);
+    assert_eq!(traced.binding_resolutions, bound.binding_resolutions);
+    assert_eq!(
+        traced.endpoint_reads - bound.endpoint_reads,
+        (4 * MAX_TRACE_WATCHES) as u64
+    );
 }

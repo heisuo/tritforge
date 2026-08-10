@@ -2,11 +2,31 @@ use std::collections::VecDeque;
 
 use serde::{Deserialize, Serialize};
 
+use crate::hierarchy::FlatPortRef;
 use crate::project::{ProjectDiagnostic, QualifiedPortRef};
-use crate::signal::WordValue;
+use crate::signal::{SignalShape, WordValue};
 use crate::simulator::ClockPhase;
 
 pub const TRACE_CAPACITY: usize = 512;
+/// Maximum number of independently selected signals retained by one recorder.
+pub const MAX_TRACE_WATCHES: usize = 64;
+
+/// Lightweight counters used to verify trace work stays proportional to selected signals.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TracePerformanceCounters {
+    /// Full public project snapshots materialized by the simulator.
+    pub project_snapshot_projections: u64,
+    /// Intermediate flat phase snapshots captured exclusively for tracing.
+    pub phase_snapshot_captures: u64,
+    /// Watch endpoint indexes built during trace lifecycle changes.
+    pub binding_index_builds: u64,
+    /// Flat component provenance entries indexed while resolving watches.
+    pub binding_component_entries: u64,
+    /// Watches resolved into cached bindings.
+    pub binding_resolutions: u64,
+    /// Cached flat endpoints read while recording frames.
+    pub endpoint_reads: u64,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -57,9 +77,17 @@ pub struct TraceFrame {
     pub diagnostics: Vec<ProjectDiagnostic>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct TraceBinding {
+    pub watch_id: String,
+    pub shape: SignalShape,
+    pub bits: Vec<Vec<FlatPortRef>>,
+}
+
 #[derive(Debug, Default)]
 pub struct TraceRecorder {
     watches: Vec<TraceWatch>,
+    bindings: Vec<TraceBinding>,
     frames: VecDeque<TraceFrame>,
 }
 
@@ -76,9 +104,19 @@ impl TraceRecorder {
         self.frames.clear();
     }
 
-    pub(crate) fn replace_watches(&mut self, watches: Vec<TraceWatch>) {
+    pub(crate) fn replace_watches(
+        &mut self,
+        watches: Vec<TraceWatch>,
+        bindings: Vec<TraceBinding>,
+    ) {
+        debug_assert_eq!(watches.len(), bindings.len());
         self.watches = watches;
+        self.bindings = bindings;
         self.frames.clear();
+    }
+
+    pub(crate) fn bindings(&self) -> &[TraceBinding] {
+        &self.bindings
     }
 
     pub(crate) fn push(&mut self, frame: TraceFrame) {

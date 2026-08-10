@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
@@ -14,7 +15,8 @@ use crate::project_validation::{ValidatedProject, resolve_project_ports, validat
 use crate::signal::{KnownWord, SignalError, SignalShape, WordValue};
 use crate::simulator::{ClockPhase, SimulationSnapshot, Simulator};
 use crate::trace::{
-    TraceFrame, TraceFrameReason, TraceRecorder, TraceSignalRef, TraceValue, TraceWatch,
+    MAX_TRACE_WATCHES, TraceBinding, TraceFrame, TraceFrameReason, TracePerformanceCounters,
+    TraceRecorder, TraceValue, TraceWatch,
 };
 use crate::trit::{Trit, resolve_drivers};
 
@@ -45,6 +47,11 @@ pub struct ProjectCompileMetrics {
     pub projection_endpoints: usize,
 }
 
+struct SourceUpdateOutcome {
+    snapshot: ProjectSnapshot,
+    runtime_changed: bool,
+}
+
 pub struct ProjectSimulator {
     project: ProjectDocument,
     project_v3: Option<ProjectDocumentV3>,
@@ -52,11 +59,13 @@ pub struct ProjectSimulator {
     validated: Option<ValidatedProject>,
     compiled: Option<CompiledProject>,
     compiled_v3: Option<CompiledProjectV3>,
+    network_index: Option<FlatNetworkIndex>,
     simulator: Option<Simulator>,
     snapshot: Option<ProjectSnapshot>,
     compile_count: u64,
     trace: TraceRecorder,
     trace_diagnostics: Vec<ProjectDiagnostic>,
+    trace_performance: Cell<TracePerformanceCounters>,
 }
 
 impl ProjectSimulator {
@@ -71,11 +80,13 @@ impl ProjectSimulator {
             validated: None,
             compiled: None,
             compiled_v3: None,
+            network_index: None,
             simulator: None,
             snapshot: None,
             compile_count: 0,
             trace: TraceRecorder::default(),
             trace_diagnostics: vec![],
+            trace_performance: Cell::new(TracePerformanceCounters::default()),
         };
         project_simulator.rebuild()?;
         Ok(project_simulator)
@@ -107,11 +118,13 @@ impl ProjectSimulator {
             validated: None,
             compiled: Some(compiled),
             compiled_v3: Some(compiled_v3),
+            network_index: Some(network_index),
             simulator: Some(simulator),
             snapshot: None,
             compile_count: 1,
             trace: TraceRecorder::default(),
             trace_diagnostics: vec![],
+            trace_performance: Cell::new(TracePerformanceCounters::default()),
         };
         project_simulator.snapshot = Some(project_simulator.project_snapshot(&flat));
         Ok(project_simulator)
@@ -162,7 +175,11 @@ impl ProjectSimulator {
                     .as_ref()
                     .expect("settleable runtime has compiled provenance"),
             );
-            let source_changed = !updates.is_empty();
+            let before = self
+                .simulator
+                .as_ref()
+                .expect("settleable runtime has a simulator")
+                .snapshot();
             let flat = if updates.is_empty() {
                 self.simulator
                     .as_ref()
@@ -187,7 +204,7 @@ impl ProjectSimulator {
             self.project = project;
             self.validated = Some(validated);
             self.snapshot = Some(self.project_snapshot(&flat));
-            if source_changed {
+            if runtime_signals_changed(&before, &flat) {
                 self.record_trace_frame(TraceFrameReason::InputChange, vec![]);
             }
             return Ok(self
@@ -221,6 +238,13 @@ impl ProjectSimulator {
             self.record_trace_frame(TraceFrameReason::Fault, diagnostics.clone());
             return Err(diagnostics);
         }
+        let logical_topology_changed =
+            v3_logical_topology_fingerprint(
+                self.project_v3
+                    .as_ref()
+                    .expect("v3 update has an existing v3 project"),
+                &self.active_circuit_id,
+            ) != v3_logical_topology_fingerprint(&project, &self.active_circuit_id);
         let compiled_v3 = match compile_project_v3(project.clone(), &self.active_circuit_id) {
             Ok(compiled) => compiled,
             Err(diagnostics) => {
@@ -235,7 +259,11 @@ impl ProjectSimulator {
             });
         if can_reuse {
             let updates = source_updates(&self.project, &compiled_v3.lowered.project, &compiled);
-            let source_changed = !updates.is_empty();
+            let before = self
+                .simulator
+                .as_ref()
+                .expect("reusable v3 runtime has a simulator")
+                .snapshot();
             let flat = if updates.is_empty() {
                 self.simulator
                     .as_ref()
@@ -262,8 +290,15 @@ impl ProjectSimulator {
             self.validated = None;
             self.compiled = Some(compiled);
             self.compiled_v3 = Some(compiled_v3);
+            self.network_index = Some(FlatNetworkIndex::new(
+                self.compiled
+                    .as_ref()
+                    .expect("reused v3 project is compiled"),
+            ));
             self.snapshot = Some(self.project_snapshot(&flat));
-            if source_changed {
+            if logical_topology_changed {
+                self.refresh_trace_after_lifecycle(TraceFrameReason::Load);
+            } else if runtime_signals_changed(&before, &flat) {
                 self.record_trace_frame(TraceFrameReason::InputChange, vec![]);
             }
             return Ok(self
@@ -295,6 +330,7 @@ impl ProjectSimulator {
         self.validated = None;
         self.compiled = Some(compiled);
         self.compiled_v3 = Some(compiled_v3);
+        self.network_index = Some(network_index);
         self.simulator = Some(simulator);
         self.compile_count += 1;
         self.snapshot = Some(self.project_snapshot(&flat));
@@ -348,6 +384,7 @@ impl ProjectSimulator {
         self.compile_count += 1;
         self.validated = Some(validated);
         self.compiled = Some(compiled);
+        self.network_index = Some(network_index);
         self.simulator = Some(simulator);
         self.snapshot = Some(self.project_snapshot(&flat));
         self.refresh_trace_after_lifecycle(TraceFrameReason::Load);
@@ -394,6 +431,7 @@ impl ProjectSimulator {
         self.validated = None;
         self.compiled = Some(compiled);
         self.compiled_v3 = Some(compiled_v3);
+        self.network_index = Some(network_index);
         self.simulator = Some(simulator);
         self.snapshot = Some(self.project_snapshot(&flat));
         self.refresh_trace_after_lifecycle(TraceFrameReason::Load);
@@ -411,9 +449,11 @@ impl ProjectSimulator {
         value: Trit,
     ) -> Result<ProjectSnapshot, ProjectDiagnostic> {
         match self.set_source_inner(circuit_id, component_id, value) {
-            Ok(snapshot) => {
-                self.record_trace_frame(TraceFrameReason::InputChange, vec![]);
-                Ok(snapshot)
+            Ok(outcome) => {
+                if outcome.runtime_changed {
+                    self.record_trace_frame(TraceFrameReason::InputChange, vec![]);
+                }
+                Ok(outcome.snapshot)
             }
             Err(diagnostic) => {
                 self.record_trace_frame(TraceFrameReason::Fault, vec![diagnostic.clone()]);
@@ -428,7 +468,7 @@ impl ProjectSimulator {
         circuit_id: &str,
         component_id: &str,
         value: Trit,
-    ) -> Result<ProjectSnapshot, ProjectDiagnostic> {
+    ) -> Result<SourceUpdateOutcome, ProjectDiagnostic> {
         if self.project_v3.is_some() {
             return Err(project_error(
                 "PROJECT_VERSION_MISMATCH",
@@ -488,7 +528,12 @@ impl ProjectSimulator {
             })
             .flat_map(|(_, copies)| copies.iter().cloned())
             .collect();
-        if !copies.is_empty() {
+        let runtime_changed = if !copies.is_empty() {
+            let before = self
+                .simulator
+                .as_ref()
+                .expect("ready project has a flat simulator")
+                .snapshot();
             let flat = self
                 .simulator
                 .as_mut()
@@ -497,10 +542,15 @@ impl ProjectSimulator {
                 .map_err(|diagnostic| project_error(&diagnostic.code, &diagnostic.message, None))?;
             self.set_project_source_value(circuit_id, component_id, property, value);
             self.snapshot = Some(self.project_snapshot(&flat));
+            runtime_signals_changed(&before, &flat)
         } else {
             self.set_project_source_value(circuit_id, component_id, property, value);
-        }
-        Ok(self.snapshot.clone().expect("ready project has a snapshot"))
+            false
+        };
+        Ok(SourceUpdateOutcome {
+            snapshot: self.snapshot.clone().expect("ready project has a snapshot"),
+            runtime_changed,
+        })
     }
 
     #[allow(clippy::result_large_err)]
@@ -511,9 +561,11 @@ impl ProjectSimulator {
         value: &str,
     ) -> Result<ProjectSnapshot, ProjectDiagnostic> {
         match self.set_source_word_inner(circuit_id, component_id, value) {
-            Ok(snapshot) => {
-                self.record_trace_frame(TraceFrameReason::InputChange, vec![]);
-                Ok(snapshot)
+            Ok(outcome) => {
+                if outcome.runtime_changed {
+                    self.record_trace_frame(TraceFrameReason::InputChange, vec![]);
+                }
+                Ok(outcome.snapshot)
             }
             Err(diagnostic) => {
                 self.record_trace_frame(TraceFrameReason::Fault, vec![diagnostic.clone()]);
@@ -528,7 +580,7 @@ impl ProjectSimulator {
         circuit_id: &str,
         component_id: &str,
         value: &str,
-    ) -> Result<ProjectSnapshot, ProjectDiagnostic> {
+    ) -> Result<SourceUpdateOutcome, ProjectDiagnostic> {
         let Some(project) = self.project_v3.as_ref() else {
             return Err(project_error(
                 "PROJECT_VERSION_MISMATCH",
@@ -627,6 +679,11 @@ impl ProjectSimulator {
             }
         }
 
+        let before = self
+            .simulator
+            .as_ref()
+            .expect("ready v3 project has a simulator")
+            .snapshot();
         let flat = if updates.is_empty() {
             self.simulator
                 .as_ref()
@@ -660,11 +717,15 @@ impl ProjectSimulator {
             property,
             value,
         );
+        self.synchronize_lowered_source_word(circuit_id, component_id, property, &word);
         self.snapshot = Some(self.project_snapshot(&flat));
-        Ok(self
-            .snapshot
-            .clone()
-            .expect("ready v3 project has a snapshot"))
+        Ok(SourceUpdateOutcome {
+            snapshot: self
+                .snapshot
+                .clone()
+                .expect("ready v3 project has a snapshot"),
+            runtime_changed: runtime_signals_changed(&before, &flat),
+        })
     }
 
     pub fn set_trace_watches(
@@ -680,7 +741,20 @@ impl ProjectSimulator {
             self.trace_diagnostics.clone_from(&diagnostics);
             return Err(diagnostics);
         };
+        if watches.len() > MAX_TRACE_WATCHES {
+            let diagnostics = vec![project_error(
+                "TRACE_WATCH_LIMIT_EXCEEDED",
+                &format!(
+                    "trace watch count {} exceeds the limit {MAX_TRACE_WATCHES}",
+                    watches.len()
+                ),
+                None,
+            )];
+            self.trace_diagnostics.clone_from(&diagnostics);
+            return Err(diagnostics);
+        }
         let mut ids = BTreeSet::new();
+        let mut signals = BTreeSet::new();
         let mut diagnostics = Vec::new();
         for watch in &watches {
             if !ids.insert(watch.id.clone()) {
@@ -689,8 +763,13 @@ impl ProjectSimulator {
                     format!("trace watch id '{}' is duplicated", watch.id),
                     watch.signal.port(),
                 ));
-            } else if self.trace_word(&watch.signal, &flat).is_none() {
-                diagnostics.push(trace_unavailable(watch));
+            }
+            if !signals.insert(watch.signal.clone()) {
+                diagnostics.push(trace_watch_error(
+                    "DUPLICATE_TRACE_SIGNAL",
+                    "a qualified signal can be watched only once".into(),
+                    watch.signal.port(),
+                ));
             }
         }
         if !diagnostics.is_empty() {
@@ -698,8 +777,15 @@ impl ProjectSimulator {
             return Err(diagnostics);
         }
 
+        let (bindings, unavailable) = self.resolve_trace_bindings(&watches, &flat);
+        if !unavailable.is_empty() {
+            self.trace_diagnostics.clone_from(&unavailable);
+            return Err(unavailable);
+        }
+
         self.trace_diagnostics.clear();
-        self.trace.replace_watches(watches);
+        self.trace
+            .replace_watches(watches, bindings.into_iter().flatten().collect());
         self.record_trace_frame(TraceFrameReason::Load, vec![]);
         Ok(self
             .trace
@@ -722,6 +808,10 @@ impl ProjectSimulator {
 
     pub fn clear_trace(&mut self) {
         self.trace.clear();
+    }
+
+    pub fn trace_performance_counters(&self) -> TracePerformanceCounters {
+        self.trace_performance.get()
     }
 
     #[allow(clippy::result_large_err)]
@@ -753,6 +843,23 @@ impl ProjectSimulator {
             self.record_trace_frame(TraceFrameReason::Fault, vec![diagnostic.clone()]);
             return Err(diagnostic);
         }
+        if !self.trace.is_active() {
+            let flat = match self
+                .simulator
+                .as_mut()
+                .expect("ready project has a flat simulator")
+                .tick()
+            {
+                Ok(flat) => flat,
+                Err(diagnostic) => return Err(self.project_runtime_diagnostic(&diagnostic)),
+            };
+            self.snapshot = Some(self.project_snapshot(&flat));
+            return Ok(self.snapshot.clone().expect("ready project has a snapshot"));
+        }
+
+        self.update_trace_performance(|counters| {
+            counters.phase_snapshot_captures = counters.phase_snapshot_captures.saturating_add(2);
+        });
         let phases = self
             .simulator
             .as_mut()
@@ -766,9 +873,11 @@ impl ProjectSimulator {
                 return Err(diagnostic);
             }
         };
-        self.record_phase_snapshot(&first);
+        let first_diagnostics = self.trace_diagnostics_for_flat(&first);
+        self.record_phase_snapshot(&first, first_diagnostics);
         self.snapshot = Some(self.project_snapshot(&second));
-        self.record_phase_snapshot(&second);
+        let second_diagnostics = self.current_error_diagnostics();
+        self.record_phase_snapshot(&second, second_diagnostics);
         Ok(self.snapshot.clone().expect("ready project has a snapshot"))
     }
 
@@ -800,7 +909,8 @@ impl ProjectSimulator {
             }
         };
         self.snapshot = Some(self.project_snapshot(&flat));
-        self.record_phase_snapshot(&flat);
+        let diagnostics = self.current_error_diagnostics();
+        self.record_phase_snapshot(&flat, diagnostics);
         Ok(self.snapshot.clone().expect("ready project has a snapshot"))
     }
 
@@ -851,8 +961,11 @@ impl ProjectSimulator {
             .compiled
             .as_ref()
             .expect("ready project has compiled provenance");
-        let network_index = FlatNetworkIndex::new(compiled);
-        let diagnostic = project_flat_diagnostic(diagnostic, compiled, &network_index);
+        let network_index = self
+            .network_index
+            .as_ref()
+            .expect("ready project has a cached network index");
+        let diagnostic = project_flat_diagnostic(diagnostic, compiled, network_index);
         if let Some(compiled_v3) = &self.compiled_v3 {
             remap_v3_diagnostic(diagnostic, compiled_v3)
         } else {
@@ -860,12 +973,16 @@ impl ProjectSimulator {
         }
     }
 
-    fn record_phase_snapshot(&mut self, flat: &SimulationSnapshot) {
+    fn record_phase_snapshot(
+        &mut self,
+        flat: &SimulationSnapshot,
+        diagnostics: Vec<ProjectDiagnostic>,
+    ) {
         let reason = match flat.clock_phase {
             ClockPhase::LowStable => TraceFrameReason::ClockFall,
             ClockPhase::HighStable => TraceFrameReason::ClockRise,
         };
-        self.record_trace_frame_from_flat(flat, reason, vec![]);
+        self.record_trace_frame_from_flat(flat, reason, diagnostics);
     }
 
     fn record_trace_frame(
@@ -876,6 +993,7 @@ impl ProjectSimulator {
         if !self.trace.is_active() {
             return;
         }
+        let diagnostics = merge_trace_diagnostics(self.current_error_diagnostics(), diagnostics);
         if let Some(flat) = self.simulator.as_ref().map(Simulator::snapshot) {
             self.record_trace_frame_from_flat(&flat, reason, diagnostics);
             return;
@@ -901,30 +1019,8 @@ impl ProjectSimulator {
         if !self.trace.is_active() {
             return;
         }
-        let projected = self.project_snapshot(flat);
-        let mut diagnostics = ProjectDiagnosticSet::new();
-        for diagnostic in projected
-            .diagnostics
-            .iter()
-            .filter(|diagnostic| diagnostic.severity == Severity::Error)
-            .cloned()
-            .chain(extra_diagnostics)
-        {
-            diagnostics.insert(diagnostic);
-        }
-        let diagnostics = diagnostics.into_vec();
-        let values = self
-            .trace
-            .watches()
-            .iter()
-            .filter_map(|watch| {
-                self.trace_word(&watch.signal, flat)
-                    .map(|value| TraceValue {
-                        watch_id: watch.id.clone(),
-                        value,
-                    })
-            })
-            .collect::<Vec<_>>();
+        let diagnostics = merge_trace_diagnostics(vec![], extra_diagnostics);
+        let values = self.trace_values_from_bindings(flat);
         let watched_error = values.iter().any(|value| {
             (0..value.value.shape().width()).any(|index| value.value.trit(index) == Trit::Error)
         });
@@ -946,57 +1042,175 @@ impl ProjectSimulator {
         });
     }
 
-    fn trace_word(&self, signal: &TraceSignalRef, flat: &SimulationSnapshot) -> Option<WordValue> {
-        let reference = signal.port();
-        if let Some(compiled_v3) = &self.compiled_v3 {
-            let bits = compiled_v3.reassembly.ports.get(reference)?;
-            let shape = SignalShape::new(u8::try_from(bits.len()).ok()?).ok()?;
-            let trits = bits
-                .iter()
-                .map(|bit| {
-                    let values = compiled_v3
-                        .reassembly
-                        .observable_endpoints(bit)
-                        .iter()
-                        .map(|endpoint| {
-                            flat.input_value(&endpoint.component_id, &endpoint.port_id)
-                                .or_else(|| {
-                                    flat.output_value(&endpoint.component_id, &endpoint.port_id)
+    fn trace_values_from_bindings(&self, flat: &SimulationSnapshot) -> Vec<TraceValue> {
+        let mut endpoint_reads = 0_u64;
+        let values = self
+            .trace
+            .bindings()
+            .iter()
+            .map(|binding| {
+                let trits = binding
+                    .bits
+                    .iter()
+                    .map(|endpoints| {
+                        endpoint_reads = endpoint_reads.saturating_add(endpoints.len() as u64);
+                        let values = endpoints
+                            .iter()
+                            .map(|endpoint| {
+                                flat.input_value(&endpoint.component_id, &endpoint.port_id)
+                                    .or_else(|| {
+                                        flat.output_value(&endpoint.component_id, &endpoint.port_id)
+                                    })
+                                    .unwrap_or(Trit::HighZ)
+                            })
+                            .collect::<Vec<_>>();
+                        resolve_drivers(&values)
+                    })
+                    .collect::<Vec<_>>();
+                TraceValue {
+                    watch_id: binding.watch_id.clone(),
+                    value: WordValue::new(binding.shape, trits)
+                        .expect("trace binding has one endpoint set per signal trit"),
+                }
+            })
+            .collect();
+        self.update_trace_performance(|counters| {
+            counters.endpoint_reads = counters.endpoint_reads.saturating_add(endpoint_reads);
+        });
+        values
+    }
+
+    fn current_error_diagnostics(&self) -> Vec<ProjectDiagnostic> {
+        self.snapshot
+            .as_ref()
+            .map(|snapshot| {
+                snapshot
+                    .diagnostics
+                    .iter()
+                    .filter(|diagnostic| diagnostic.severity == Severity::Error)
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn trace_diagnostics_for_flat(&self, flat: &SimulationSnapshot) -> Vec<ProjectDiagnostic> {
+        let compiled = self
+            .compiled
+            .as_ref()
+            .expect("trace diagnostics require compiled provenance");
+        let network_index = self
+            .network_index
+            .as_ref()
+            .expect("trace diagnostics require a cached network index");
+        flat.diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == Severity::Error)
+            .map(|diagnostic| {
+                let diagnostic = project_flat_diagnostic(diagnostic, compiled, network_index);
+                self.compiled_v3
+                    .as_ref()
+                    .map_or(diagnostic.clone(), |compiled_v3| {
+                        remap_v3_diagnostic(diagnostic, compiled_v3)
+                    })
+            })
+            .collect()
+    }
+
+    fn resolve_trace_bindings(
+        &self,
+        watches: &[TraceWatch],
+        flat: &SimulationSnapshot,
+    ) -> (Vec<Option<TraceBinding>>, Vec<ProjectDiagnostic>) {
+        if watches.is_empty() {
+            return (vec![], vec![]);
+        }
+        let compiled = self
+            .compiled
+            .as_ref()
+            .expect("ready trace binding has compiled provenance");
+        let mut components_by_ref = BTreeMap::<QualifiedComponentRef, Vec<String>>::new();
+        for (flat_component, reference) in &compiled.provenance.components {
+            components_by_ref
+                .entry(reference.clone())
+                .or_default()
+                .push(flat_component.clone());
+        }
+        self.update_trace_performance(|counters| {
+            counters.binding_index_builds = counters.binding_index_builds.saturating_add(1);
+            counters.binding_component_entries = counters
+                .binding_component_entries
+                .saturating_add(compiled.provenance.components.len() as u64);
+            counters.binding_resolutions = counters
+                .binding_resolutions
+                .saturating_add(watches.len() as u64);
+        });
+
+        let mut bindings = Vec::with_capacity(watches.len());
+        let mut unavailable = Vec::new();
+        for watch in watches {
+            let reference = watch.signal.port();
+            let binding = if let Some(compiled_v3) = &self.compiled_v3 {
+                compiled_v3
+                    .reassembly
+                    .ports
+                    .get(reference)
+                    .and_then(|bits| {
+                        let shape = SignalShape::new(u8::try_from(bits.len()).ok()?).ok()?;
+                        Some(TraceBinding {
+                            watch_id: watch.id.clone(),
+                            shape,
+                            bits: bits
+                                .iter()
+                                .map(|bit| {
+                                    compiled_v3.reassembly.observable_endpoints(bit).to_vec()
                                 })
-                                .unwrap_or(Trit::HighZ)
+                                .collect(),
+                        })
+                    })
+            } else if let Some(entry) = compiled
+                .projection
+                .ports
+                .get(reference)
+                .or_else(|| compiled.projection.boundaries.get(reference))
+            {
+                Some(TraceBinding {
+                    watch_id: watch.id.clone(),
+                    shape: SignalShape::new(1).expect("v2 projection is scalar"),
+                    bits: vec![entry.drivers.clone()],
+                })
+            } else {
+                let component = QualifiedComponentRef::new(
+                    &reference.circuit_id,
+                    reference.instance_path.iter().cloned(),
+                    &reference.component_id,
+                );
+                components_by_ref.get(&component).and_then(|component_ids| {
+                    let endpoints = component_ids
+                        .iter()
+                        .filter(|component_id| {
+                            flat.output_value(component_id, &reference.port_id)
+                                .is_some()
+                                || flat.input_value(component_id, &reference.port_id).is_some()
+                        })
+                        .map(|component_id| FlatPortRef {
+                            component_id: component_id.clone(),
+                            port_id: reference.port_id.clone(),
                         })
                         .collect::<Vec<_>>();
-                    resolve_drivers(&values)
+                    (!endpoints.is_empty()).then(|| TraceBinding {
+                        watch_id: watch.id.clone(),
+                        shape: SignalShape::new(1).expect("v2 fallback is scalar"),
+                        bits: vec![endpoints],
+                    })
                 })
-                .collect();
-            return WordValue::new(shape, trits).ok();
+            };
+            if binding.is_none() {
+                unavailable.push(trace_unavailable(watch));
+            }
+            bindings.push(binding);
         }
-
-        let compiled = self.compiled.as_ref()?;
-        if let Some(entry) = compiled
-            .projection
-            .ports
-            .get(reference)
-            .or_else(|| compiled.projection.boundaries.get(reference))
-        {
-            return Some(scalar_word(projected_driver_value(flat, &entry.drivers)));
-        }
-        let component = QualifiedComponentRef::new(
-            &reference.circuit_id,
-            reference.instance_path.iter().cloned(),
-            &reference.component_id,
-        );
-        let values = compiled
-            .provenance
-            .components
-            .iter()
-            .filter(|(_, qualified)| **qualified == component)
-            .filter_map(|(flat_component_id, _)| {
-                flat.output_value(flat_component_id, &reference.port_id)
-                    .or_else(|| flat.input_value(flat_component_id, &reference.port_id))
-            })
-            .collect::<Vec<_>>();
-        (!values.is_empty()).then(|| scalar_word(resolve_drivers(&values)))
+        (bindings, unavailable)
     }
 
     fn refresh_trace_after_lifecycle(&mut self, reason: TraceFrameReason) {
@@ -1004,19 +1218,18 @@ impl ProjectSimulator {
             self.trace.clear();
             return;
         };
-        let mut available = Vec::new();
-        let mut unavailable = Vec::new();
-        for watch in self.trace.watches().iter().cloned() {
-            if self.trace_word(&watch.signal, &flat).is_some() {
-                available.push(watch);
-            } else {
-                unavailable.push(trace_unavailable(&watch));
-            }
-        }
-        self.trace.replace_watches(available);
+        let watches = self.trace.watches().to_vec();
+        let (bindings, unavailable) = self.resolve_trace_bindings(&watches, &flat);
+        let (available, bindings): (Vec<_>, Vec<_>) = watches
+            .into_iter()
+            .zip(bindings)
+            .filter_map(|(watch, binding)| binding.map(|binding| (watch, binding)))
+            .unzip();
+        self.trace.replace_watches(available, bindings);
         self.trace_diagnostics = unavailable;
         self.append_trace_diagnostics_to_snapshot();
-        self.record_trace_frame_from_flat(&flat, reason, vec![]);
+        let diagnostics = self.current_error_diagnostics();
+        self.record_trace_frame_from_flat(&flat, reason, diagnostics);
     }
 
     fn append_trace_diagnostics_to_snapshot(&mut self) {
@@ -1033,6 +1246,12 @@ impl ProjectSimulator {
             diagnostics.insert(diagnostic);
         }
         snapshot.diagnostics = diagnostics.into_vec();
+    }
+
+    fn update_trace_performance(&self, update: impl FnOnce(&mut TracePerformanceCounters)) {
+        let mut counters = self.trace_performance.get();
+        update(&mut counters);
+        self.trace_performance.set(counters);
     }
 
     fn rebuild(&mut self) -> Result<(), Vec<ProjectDiagnostic>> {
@@ -1075,6 +1294,11 @@ impl ProjectSimulator {
         let flat = simulator.snapshot();
         self.validated = Some(validated);
         self.compiled = Some(compiled);
+        self.network_index = Some(FlatNetworkIndex::new(
+            self.compiled
+                .as_ref()
+                .expect("installed project is compiled"),
+        ));
         self.project_v3 = None;
         self.compiled_v3 = None;
         self.simulator = Some(simulator);
@@ -1113,15 +1337,71 @@ impl ProjectSimulator {
         }
     }
 
+    fn synchronize_lowered_source_word(
+        &mut self,
+        circuit_id: &str,
+        component_id: &str,
+        property: &str,
+        word: &KnownWord,
+    ) {
+        let scalar_values = self
+            .compiled_v3
+            .as_ref()
+            .expect("ready word source has v3 reassembly")
+            .reassembly
+            .ports
+            .iter()
+            .filter(|(reference, _)| {
+                reference.circuit_id == circuit_id
+                    && reference.instance_path.is_empty()
+                    && reference.component_id == component_id
+            })
+            .flat_map(|(_, bits)| {
+                bits.iter().enumerate().filter_map(|(bit_index, bit)| {
+                    bit.scalar_port.as_ref().map(|scalar| {
+                        (
+                            (scalar.circuit_id.clone(), scalar.component_id.clone()),
+                            word.trit(bit_index as u8),
+                        )
+                    })
+                })
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        for ((scalar_circuit, scalar_component), value) in &scalar_values {
+            set_document_source_value(
+                &mut self.project,
+                scalar_circuit,
+                scalar_component,
+                property,
+                *value,
+            );
+        }
+        let lowered = &mut self
+            .compiled_v3
+            .as_mut()
+            .expect("ready word source has lowered project")
+            .lowered
+            .project;
+        for ((scalar_circuit, scalar_component), value) in scalar_values {
+            set_document_source_value(lowered, &scalar_circuit, &scalar_component, property, value);
+        }
+    }
+
     fn invalidate(&mut self) {
         self.validated = None;
         self.compiled = None;
         self.compiled_v3 = None;
+        self.network_index = None;
         self.simulator = None;
         self.snapshot = None;
     }
 
     fn project_snapshot(&self, flat: &SimulationSnapshot) -> ProjectSnapshot {
+        self.update_trace_performance(|counters| {
+            counters.project_snapshot_projections =
+                counters.project_snapshot_projections.saturating_add(1);
+        });
         if self.compiled_v3.is_some() {
             return self.project_snapshot_v3(flat);
         }
@@ -1162,7 +1442,10 @@ impl ProjectSimulator {
         }
 
         let mut diagnostics = ProjectDiagnosticSet::new();
-        let network_index = FlatNetworkIndex::new(compiled);
+        let network_index = self
+            .network_index
+            .as_ref()
+            .expect("project snapshot has a cached network index");
         if let Some(validated) = &self.validated {
             for warning in &validated.warnings {
                 diagnostics.insert(warning.clone());
@@ -1173,12 +1456,8 @@ impl ProjectSimulator {
             diagnostics.insert(conflict.diagnostic.clone());
         }
         for diagnostic in &flat.diagnostics {
-            if !target_conflict_is_covered(diagnostic, &network_index, &boundary_conflicts) {
-                diagnostics.insert(project_flat_diagnostic(
-                    diagnostic,
-                    compiled,
-                    &network_index,
-                ));
+            if !target_conflict_is_covered(diagnostic, network_index, &boundary_conflicts) {
+                diagnostics.insert(project_flat_diagnostic(diagnostic, compiled, network_index));
             }
         }
         ProjectSnapshot {
@@ -1263,7 +1542,10 @@ impl ProjectSimulator {
         }
 
         let compiled = &compiled_v3.compiled;
-        let network_index = FlatNetworkIndex::new(compiled);
+        let network_index = self
+            .network_index
+            .as_ref()
+            .expect("project snapshot has a cached network index");
         let mut diagnostics = ProjectDiagnosticSet::new();
         let boundary_conflicts = self.boundary_conflicts(flat, compiled);
         for conflict in &boundary_conflicts {
@@ -1273,9 +1555,9 @@ impl ProjectSimulator {
             ));
         }
         for diagnostic in &flat.diagnostics {
-            if !target_conflict_is_covered(diagnostic, &network_index, &boundary_conflicts) {
+            if !target_conflict_is_covered(diagnostic, network_index, &boundary_conflicts) {
                 diagnostics.insert(remap_v3_diagnostic(
-                    project_flat_diagnostic(diagnostic, compiled, &network_index),
+                    project_flat_diagnostic(diagnostic, compiled, network_index),
                     compiled_v3,
                 ));
             }
@@ -1649,6 +1931,98 @@ fn flat_circuit_shape(
     (components, connections)
 }
 
+type V3LogicalComponent = (String, String, Vec<(String, String)>);
+type V3LogicalWire = ((String, String), (String, String));
+type V3LogicalCircuit = (String, Vec<V3LogicalComponent>, Vec<V3LogicalWire>);
+
+fn v3_logical_topology_fingerprint(
+    project: &ProjectDocumentV3,
+    active_circuit_id: &str,
+) -> Option<Vec<V3LogicalCircuit>> {
+    let circuits = project
+        .circuits
+        .iter()
+        .map(|circuit| (circuit.id.as_str(), circuit))
+        .collect::<BTreeMap<_, _>>();
+    circuits.get(active_circuit_id)?;
+    let mut reachable = BTreeSet::from([active_circuit_id.to_owned()]);
+    let mut stack = vec![active_circuit_id.to_owned()];
+    while let Some(circuit_id) = stack.pop() {
+        let circuit = circuits.get(circuit_id.as_str())?;
+        for module_id in circuit
+            .components
+            .iter()
+            .filter(|component| component.type_id == "project.module_instance")
+            .filter_map(|component| component.properties.module_id())
+        {
+            circuits.get(module_id)?;
+            if reachable.insert(module_id.to_owned()) {
+                stack.push(module_id.to_owned());
+            }
+        }
+    }
+
+    let mut fingerprint = Vec::with_capacity(reachable.len());
+    for circuit_id in reachable {
+        let circuit = circuits.get(circuit_id.as_str())?;
+        let mut components = circuit
+            .components
+            .iter()
+            .map(|component| {
+                let mut properties = component
+                    .properties
+                    .keys()
+                    .filter(|key| {
+                        !matches!(
+                            *key,
+                            "value" | "previewValue" | "x" | "y" | "position" | "layout" | "label"
+                        )
+                    })
+                    .filter_map(|key| {
+                        component.properties.get(key).map(|value| {
+                            (
+                                key.to_owned(),
+                                serde_json::to_string(value)
+                                    .expect("validated property value serializes"),
+                            )
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                if component.type_id == "wiring.tunnel"
+                    && let Some(label) = component.properties.label()
+                {
+                    properties.push(("label".into(), label.into()));
+                }
+                properties.sort();
+                (component.id.clone(), component.type_id.clone(), properties)
+            })
+            .collect::<Vec<_>>();
+        components.sort();
+        let mut wires = circuit
+            .wires
+            .iter()
+            .map(|wire| {
+                let mut endpoints = [
+                    (
+                        wire.endpoint_a.component_id.clone(),
+                        wire.endpoint_a.port_id.clone(),
+                    ),
+                    (
+                        wire.endpoint_b.component_id.clone(),
+                        wire.endpoint_b.port_id.clone(),
+                    ),
+                ];
+                endpoints.sort();
+                (endpoints[0].clone(), endpoints[1].clone())
+            })
+            .collect::<Vec<_>>();
+        wires.sort();
+        fingerprint.push((circuit.id.clone(), components, wires));
+    }
+    fingerprint.sort_by(|left, right| left.0.cmp(&right.0));
+    Some(fingerprint)
+}
+
 fn circuit_shape(circuit: &ProjectCircuit) -> (Vec<ComponentShape>, Vec<ConnectionShape>) {
     let mut components: Vec<_> = circuit
         .components
@@ -1728,6 +2102,10 @@ fn source_updates(
         }
     }
     updates.into_iter().collect()
+}
+
+fn runtime_signals_changed(before: &SimulationSnapshot, after: &SimulationSnapshot) -> bool {
+    before.component_outputs != after.component_outputs || before.input_nets != after.input_nets
 }
 
 fn source_value(component: &crate::project::ProjectComponent) -> Option<Trit> {
@@ -1986,6 +2364,17 @@ fn project_error(
         connection_refs: Vec::new(),
         port_refs: Vec::new(),
     }
+}
+
+fn merge_trace_diagnostics(
+    current: Vec<ProjectDiagnostic>,
+    extra: Vec<ProjectDiagnostic>,
+) -> Vec<ProjectDiagnostic> {
+    let mut diagnostics = ProjectDiagnosticSet::new();
+    for diagnostic in current.into_iter().chain(extra) {
+        diagnostics.insert(diagnostic);
+    }
+    diagnostics.into_vec()
 }
 
 fn trace_unavailable(watch: &TraceWatch) -> ProjectDiagnostic {
