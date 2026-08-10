@@ -66,7 +66,7 @@
 - Modify: `crates/sim-core/src/lib.rs`
 - Test: `crates/sim-core/tests/project_v3_contract.rs`
 
-- [ ] **Step 1: Write failing shape and value tests**
+- [x] **Step 1: Write failing shape and value tests**
 
 Test widths `1`, `3`, `27`, reject `0` and `28`, parse known words only when symbol count equals width,
 and prove `1T0` indexes as `[q0=0,q1=T,q2=1]` with decimal value 6.
@@ -77,21 +77,21 @@ assert_eq!(KnownWord::parse("1T0", SignalShape::new(3).unwrap()).unwrap().trit(0
 assert_eq!(KnownWord::parse("1T0", SignalShape::new(3).unwrap()).unwrap().balanced_value(), 6);
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run `cargo test -p sim-core --test project_v3_contract signal_shape -- --nocapture`.
 Expected: unresolved imports for `signal::SignalShape` and `signal::KnownWord`.
 
-- [ ] **Step 3: Implement minimal immutable contracts**
+- [x] **Step 3: Implement minimal immutable contracts**
 
 Implement checked `u8` width, MS-to-LS serde strings, index-0 LST access, and runtime `WordValue(Vec<Trit>)`.
 Do not add bus propagation here.
 
-- [ ] **Step 4: Run GREEN and quality checks**
+- [x] **Step 4: Run GREEN and quality checks**
 
 Run the focused test, `cargo fmt --all -- --check`, and `cargo clippy -p sim-core --all-targets -- -D warnings`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit `feat: define width-aware ternary signals`.
 
