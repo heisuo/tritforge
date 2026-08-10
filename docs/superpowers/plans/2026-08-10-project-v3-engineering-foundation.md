@@ -379,13 +379,13 @@ clear, cursor values, 512-frame display, and balanced/decimal/per-trit bus modes
 - Modify: `crates/sim-core/src/hierarchy.rs`
 - Test: `crates/sim-core/tests/structural_components.rs`
 
-- [ ] Write RED tests proving width 1/3/27 expands to exactly W DFFs, shared controls, simultaneous capture,
+- [x] Write RED tests proving width 1/3/27 expands to exactly W DFFs, shared controls, simultaneous capture,
 hold/reset priority, stable IDs, nested-instance isolation, and expansion-limit accounting.
-- [ ] Implement deterministic `sequential.register` expansion before scalar hierarchy compilation.
-- [ ] Rebuild the Register3 example with width-3 Register while preserving its visible contract and add an
+- [x] Implement deterministic `sequential.register` expansion before scalar hierarchy compilation.
+- [x] Rebuild the Register3 example with width-3 Register while preserving its visible contract and add an
 internal-expansion view.
-- [ ] Run structural, hierarchy, project, and full core tests.
-- [ ] Commit `feat: structurally expand width-aware registers`.
+- [x] Run structural, hierarchy, project, and full core tests.
+- [x] Commit `feat: structurally expand width-aware registers`.
 
 ### Task 15: Expand the Shift Register and Counter
 
