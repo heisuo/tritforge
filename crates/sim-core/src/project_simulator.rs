@@ -12,7 +12,7 @@ use crate::project::{
 };
 use crate::project_validation::{ValidatedProject, resolve_project_ports, validate_project};
 use crate::signal::{KnownWord, SignalError, SignalShape, WordValue};
-use crate::simulator::{SimulationSnapshot, Simulator};
+use crate::simulator::{ClockPhase, SimulationSnapshot, Simulator};
 use crate::trit::{Trit, resolve_drivers};
 
 const MODULE_INPUT: &str = "project.module_input";
@@ -29,6 +29,8 @@ pub struct ProjectSnapshot {
     pub diagnostics: Vec<ProjectDiagnostic>,
     pub stable: bool,
     pub tick_count: u64,
+    #[serde(default)]
+    pub clock_phase: ClockPhase,
     pub compile_count: u64,
 }
 
@@ -554,6 +556,19 @@ impl ProjectSimulator {
 
     #[allow(clippy::result_large_err)]
     pub fn tick(&mut self) -> Result<ProjectSnapshot, ProjectDiagnostic> {
+        self.advance_runtime(Simulator::tick)
+    }
+
+    #[allow(clippy::result_large_err)]
+    pub fn advance_phase(&mut self) -> Result<ProjectSnapshot, ProjectDiagnostic> {
+        self.advance_runtime(Simulator::advance_phase)
+    }
+
+    #[allow(clippy::result_large_err)]
+    fn advance_runtime(
+        &mut self,
+        advance: fn(&mut Simulator) -> Result<SimulationSnapshot, Diagnostic>,
+    ) -> Result<ProjectSnapshot, ProjectDiagnostic> {
         if (self.project_v3.is_none() && self.validated.is_none())
             || self.simulator.is_none()
             || self.compiled.is_none()
@@ -565,12 +580,11 @@ impl ProjectSimulator {
             ));
         }
 
-        let flat = match self
-            .simulator
-            .as_mut()
-            .expect("ready project has a flat simulator")
-            .tick()
-        {
+        let flat = match advance(
+            self.simulator
+                .as_mut()
+                .expect("ready project has a flat simulator"),
+        ) {
             Ok(flat) => flat,
             Err(diagnostic) => {
                 let compiled = self
@@ -770,6 +784,7 @@ impl ProjectSimulator {
             diagnostics: diagnostics.into_vec(),
             stable: flat.stable,
             tick_count: flat.tick_count,
+            clock_phase: flat.clock_phase,
             compile_count: self.compile_count,
         }
     }
@@ -868,6 +883,7 @@ impl ProjectSimulator {
             diagnostics: diagnostics.into_vec(),
             stable: flat.stable,
             tick_count: flat.tick_count,
+            clock_phase: flat.clock_phase,
             compile_count: self.compile_count,
         }
     }

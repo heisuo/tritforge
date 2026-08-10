@@ -1,7 +1,7 @@
 use sim_core::catalog::ComponentProperties;
 use sim_core::circuit::{CircuitDefinition, ComponentInstance, Connection};
 use sim_core::diagnostic::DiagnosticSeverity;
-use sim_core::simulator::{SimulationSnapshot, Simulator};
+use sim_core::simulator::{ClockPhase, SimulationSnapshot, Simulator};
 use sim_core::trit::Trit;
 
 fn component(id: &str, type_id: &str) -> ComponentInstance {
@@ -193,6 +193,55 @@ fn dff_loads_low_and_tick_captures_on_a_complete_clock_pulse() {
 }
 
 #[test]
+fn advance_phase_commits_dffs_only_on_rise_and_counts_period_on_fall() {
+    let mut simulator = Simulator::load(dff_definition(false)).expect("valid DFF circuit");
+
+    let initial = simulator.snapshot();
+    assert_eq!(initial.clock_phase, ClockPhase::LowStable);
+
+    let risen = simulator.advance_phase().expect("rise succeeds");
+    assert_eq!(risen.clock_phase, ClockPhase::HighStable);
+    assert_eq!(risen.output_value("clock", "out"), Some(Trit::Pos));
+    assert_eq!(risen.input_value("dff", "clk"), Some(Trit::Pos));
+    assert_eq!(risen.output_value("dff", "q"), Some(Trit::Pos));
+    assert_eq!(risen.tick_count, 0);
+
+    let updated = simulator
+        .set_input("data", Trit::Neg)
+        .expect("source update succeeds");
+    assert_eq!(updated.clock_phase, ClockPhase::HighStable);
+
+    let fallen = simulator.advance_phase().expect("fall succeeds");
+    assert_eq!(fallen.clock_phase, ClockPhase::LowStable);
+    assert_eq!(fallen.output_value("clock", "out"), Some(Trit::Zero));
+    assert_eq!(fallen.input_value("dff", "clk"), Some(Trit::Zero));
+    assert_eq!(fallen.output_value("dff", "q"), Some(Trit::Pos));
+    assert_eq!(fallen.tick_count, 1);
+}
+
+#[test]
+fn tick_runs_two_transitions_and_returns_to_its_starting_phase() {
+    let mut simulator = Simulator::load(dff_definition(false)).expect("valid DFF circuit");
+
+    let from_low = simulator.tick().expect("low-start tick succeeds");
+    assert_eq!(from_low.clock_phase, ClockPhase::LowStable);
+    assert_eq!(from_low.output_value("clock", "out"), Some(Trit::Zero));
+    assert_eq!(from_low.tick_count, 1);
+
+    simulator.set_input("data", Trit::Neg).unwrap();
+    let high = simulator.advance_phase().expect("enter high phase");
+    assert_eq!(high.clock_phase, ClockPhase::HighStable);
+    assert_eq!(high.output_value("dff", "q"), Some(Trit::Neg));
+
+    simulator.set_input("data", Trit::Zero).unwrap();
+    let from_high = simulator.tick().expect("high-start tick succeeds");
+    assert_eq!(from_high.clock_phase, ClockPhase::HighStable);
+    assert_eq!(from_high.output_value("clock", "out"), Some(Trit::Pos));
+    assert_eq!(from_high.output_value("dff", "q"), Some(Trit::Zero));
+    assert_eq!(from_high.tick_count, 2);
+}
+
+#[test]
 fn dff_enable_reset_priority_and_reset_restore_session_state() {
     let mut simulator = Simulator::load(dff_definition(false)).expect("valid DFF circuit");
 
@@ -219,6 +268,7 @@ fn dff_enable_reset_priority_and_reset_restore_session_state() {
     assert_eq!(reset.output_value("clock", "out"), Some(Trit::Zero));
     assert_eq!(reset.input_value("dff", "clk"), Some(Trit::Zero));
     assert_eq!(reset.tick_count, 0);
+    assert_eq!(reset.clock_phase, ClockPhase::LowStable);
 }
 
 #[test]
@@ -269,6 +319,21 @@ fn clock_through_a_buffer_produces_a_rising_edge() {
     assert_eq!(captured.output_value("clock-buffer", "y"), Some(Trit::Zero));
     assert_eq!(captured.input_value("dff", "clk"), Some(Trit::Zero));
     assert_eq!(captured.tick_count, 1);
+}
+
+#[test]
+fn buffered_clock_exposes_each_stable_phase() {
+    let mut simulator = Simulator::load(dff_definition(true)).expect("valid buffered clock");
+
+    let risen = simulator.advance_phase().expect("buffered rise");
+    assert_eq!(risen.clock_phase, ClockPhase::HighStable);
+    assert_eq!(risen.output_value("clock-buffer", "y"), Some(Trit::Pos));
+    assert_eq!(risen.output_value("dff", "q"), Some(Trit::Pos));
+
+    let fallen = simulator.advance_phase().expect("buffered fall");
+    assert_eq!(fallen.clock_phase, ClockPhase::LowStable);
+    assert_eq!(fallen.output_value("clock-buffer", "y"), Some(Trit::Zero));
+    assert_eq!(fallen.output_value("dff", "q"), Some(Trit::Pos));
 }
 
 #[test]
@@ -919,4 +984,15 @@ fn snapshot_round_trips_through_serde() {
     assert_eq!(round_trip, snapshot);
     assert!(json.contains(r#""api_version":3"#));
     assert!(json.contains(r#""tick_count":0"#));
+    assert!(json.contains(r#""clockPhase":"lowStable""#));
+    assert!(!json.contains("clock_phase"));
+
+    let mut legacy = serde_json::to_value(&snapshot).expect("serialize legacy fixture");
+    legacy
+        .as_object_mut()
+        .expect("snapshot is an object")
+        .remove("clockPhase");
+    let legacy_snapshot: SimulationSnapshot =
+        serde_json::from_value(legacy).expect("pre-phase snapshots remain readable");
+    assert_eq!(legacy_snapshot.clock_phase, ClockPhase::LowStable);
 }

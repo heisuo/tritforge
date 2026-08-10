@@ -22,8 +22,17 @@ pub struct Simulator {
     processed_events: usize,
     stable: bool,
     tick_count: u64,
+    clock_phase: ClockPhase,
     dff_outputs: BTreeMap<String, Trit>,
     clock_levels: BTreeMap<String, Trit>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ClockPhase {
+    #[default]
+    LowStable,
+    HighStable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,6 +44,14 @@ pub struct SimulationSnapshot {
     pub diagnostics: Vec<Diagnostic>,
     pub processed_events: usize,
     pub tick_count: u64,
+    #[serde(default, rename = "clockPhase")]
+    pub clock_phase: ClockPhase,
+}
+
+#[derive(Default)]
+struct PhaseReport {
+    failures: BTreeSet<Diagnostic>,
+    processed_events: usize,
 }
 
 impl SimulationSnapshot {
@@ -110,6 +127,7 @@ impl Simulator {
             processed_events: 0,
             stable: false,
             tick_count: 0,
+            clock_phase: ClockPhase::LowStable,
             dff_outputs,
             clock_levels,
         };
@@ -215,6 +233,7 @@ impl Simulator {
             *value = Trit::Zero;
         }
         self.tick_count = 0;
+        self.clock_phase = ClockPhase::LowStable;
         (self.component_outputs, self.input_nets) = signal_maps(&self.circuit);
         let component_ids = self
             .circuit
@@ -238,16 +257,41 @@ impl Simulator {
     }
 
     #[allow(clippy::result_large_err)]
+    pub fn advance_phase(&mut self) -> Result<SimulationSnapshot, Diagnostic> {
+        let report = self.advance_phase_transaction()?;
+        self.apply_phase_report(&report);
+        Ok(self.snapshot())
+    }
+
+    #[allow(clippy::result_large_err)]
     pub fn tick(&mut self) -> Result<SimulationSnapshot, Diagnostic> {
-        let next_tick_count = self.tick_count.checked_add(1).ok_or_else(|| {
-            Diagnostic::error(
-                "TICK_COUNT_OVERFLOW",
-                "tick count cannot exceed u64::MAX".to_owned(),
-                vec![],
-                vec![],
-                vec![],
-            )
-        })?;
+        let next_tick_count = self.checked_next_tick_count()?;
+        let starting_phase = self.clock_phase;
+        let mut tick_report = PhaseReport::default();
+        if !self.stable {
+            self.record_phase(&mut tick_report);
+        }
+
+        let first = self.advance_phase_transaction()?;
+        tick_report.merge(first);
+        let second = self.advance_phase_transaction()?;
+        tick_report.merge(second);
+
+        debug_assert_eq!(self.clock_phase, starting_phase);
+        debug_assert_eq!(self.tick_count, next_tick_count);
+        self.apply_phase_report(&tick_report);
+        Ok(self.snapshot())
+    }
+
+    #[allow(clippy::result_large_err)]
+    fn advance_phase_transaction(&mut self) -> Result<PhaseReport, Diagnostic> {
+        match self.clock_phase {
+            ClockPhase::LowStable => Ok(self.advance_rising_phase()),
+            ClockPhase::HighStable => self.advance_falling_phase(),
+        }
+    }
+
+    fn advance_rising_phase(&mut self) -> PhaseReport {
         let dff_ids = self.dff_outputs.keys().cloned().collect::<Vec<_>>();
         let clock_ids = self.clock_levels.keys().cloned().collect::<Vec<_>>();
         let clock_inputs_before_rise = dff_ids
@@ -261,17 +305,14 @@ impl Simulator {
                 (component_id.clone(), value)
             })
             .collect::<BTreeMap<_, _>>();
-        let mut phase_failures = BTreeSet::new();
-        let mut tick_processed_events = 0;
-        if !self.stable {
-            self.record_tick_phase(&mut phase_failures, &mut tick_processed_events);
-        }
+        let mut report = PhaseReport::default();
+        self.retain_current_failures(&mut report.failures);
 
         for value in self.clock_levels.values_mut() {
             *value = Trit::Pos;
         }
         self.settle(clock_ids.iter().cloned());
-        self.record_tick_phase(&mut phase_failures, &mut tick_processed_events);
+        self.record_phase(&mut report);
 
         let mut next_dff_outputs = self.dff_outputs.clone();
         for component_id in &dff_ids {
@@ -302,23 +343,51 @@ impl Simulator {
             .collect::<Vec<_>>();
         self.dff_outputs = next_dff_outputs;
         self.settle(changed_dffs);
-        self.record_tick_phase(&mut phase_failures, &mut tick_processed_events);
+        self.record_phase(&mut report);
+
+        self.clock_phase = ClockPhase::HighStable;
+        report
+    }
+
+    #[allow(clippy::result_large_err)]
+    fn advance_falling_phase(&mut self) -> Result<PhaseReport, Diagnostic> {
+        let next_tick_count = self.checked_next_tick_count()?;
+        let clock_ids = self.clock_levels.keys().cloned().collect::<Vec<_>>();
+        let mut report = PhaseReport::default();
+        self.retain_current_failures(&mut report.failures);
 
         for value in self.clock_levels.values_mut() {
             *value = Trit::Zero;
         }
         self.settle(clock_ids);
-        self.record_tick_phase(&mut phase_failures, &mut tick_processed_events);
+        self.record_phase(&mut report);
 
-        if !phase_failures.is_empty() {
+        self.clock_phase = ClockPhase::LowStable;
+        self.tick_count = next_tick_count;
+        Ok(report)
+    }
+
+    fn apply_phase_report(&mut self, report: &PhaseReport) {
+        if !report.failures.is_empty() {
             let mut diagnostics = self.diagnostics.iter().cloned().collect::<BTreeSet<_>>();
-            diagnostics.extend(phase_failures);
+            diagnostics.extend(report.failures.iter().cloned());
             self.diagnostics = diagnostics.into_iter().collect();
             self.stable = false;
         }
-        self.processed_events = tick_processed_events;
-        self.tick_count = next_tick_count;
-        Ok(self.snapshot())
+        self.processed_events = report.processed_events;
+    }
+
+    #[allow(clippy::result_large_err)]
+    fn checked_next_tick_count(&self) -> Result<u64, Diagnostic> {
+        self.tick_count.checked_add(1).ok_or_else(|| {
+            Diagnostic::error(
+                "TICK_COUNT_OVERFLOW",
+                "tick count cannot exceed u64::MAX".to_owned(),
+                vec![],
+                vec![],
+                vec![],
+            )
+        })
     }
 
     pub fn snapshot(&self) -> SimulationSnapshot {
@@ -330,11 +399,25 @@ impl Simulator {
             diagnostics: self.diagnostics.clone(),
             processed_events: self.processed_events,
             tick_count: self.tick_count,
+            clock_phase: self.clock_phase,
         }
     }
 
-    fn record_tick_phase(&self, failures: &mut BTreeSet<Diagnostic>, processed_events: &mut usize) {
-        *processed_events = processed_events.saturating_add(self.processed_events);
+    fn record_phase(&self, report: &mut PhaseReport) {
+        report.processed_events = report
+            .processed_events
+            .saturating_add(self.processed_events);
+        if !self.stable {
+            report.failures.extend(
+                self.diagnostics
+                    .iter()
+                    .filter(|diagnostic| diagnostic.code == "NON_CONVERGENT_COMBINATIONAL_LOOP")
+                    .cloned(),
+            );
+        }
+    }
+
+    fn retain_current_failures(&self, failures: &mut BTreeSet<Diagnostic>) {
         if !self.stable {
             failures.extend(
                 self.diagnostics
@@ -603,6 +686,13 @@ impl Simulator {
     }
 }
 
+impl PhaseReport {
+    fn merge(&mut self, other: Self) {
+        self.failures.extend(other.failures);
+        self.processed_events = self.processed_events.saturating_add(other.processed_events);
+    }
+}
+
 fn signal_maps(circuit: &ValidatedCircuit) -> (BTreeMap<PortRef, Trit>, BTreeMap<PortRef, Trit>) {
     let mut component_outputs = BTreeMap::new();
     let mut input_nets = BTreeMap::new();
@@ -701,6 +791,31 @@ mod tests {
         assert_eq!(diagnostic.code, "TICK_COUNT_OVERFLOW");
         assert_eq!(simulator.snapshot(), before_snapshot);
         assert_eq!(simulator.dff_outputs, before_dff_outputs);
+        assert_eq!(simulator.clock_levels, before_clock_levels);
+    }
+
+    #[test]
+    fn falling_phase_tick_count_overflow_is_atomic() {
+        let mut simulator = Simulator::load(CircuitDefinition {
+            components: vec![ComponentInstance {
+                id: "clock".to_owned(),
+                type_id: "source.clock".to_owned(),
+                properties: ComponentProperties::default(),
+            }],
+            connections: vec![],
+        })
+        .expect("valid clock circuit");
+        simulator.advance_phase().expect("enter high phase");
+        simulator.tick_count = u64::MAX;
+        let before_snapshot = simulator.snapshot();
+        let before_clock_levels = simulator.clock_levels.clone();
+
+        let diagnostic = simulator
+            .advance_phase()
+            .expect_err("falling phase must not wrap the cycle count");
+
+        assert_eq!(diagnostic.code, "TICK_COUNT_OVERFLOW");
+        assert_eq!(simulator.snapshot(), before_snapshot);
         assert_eq!(simulator.clock_levels, before_clock_levels);
     }
 }

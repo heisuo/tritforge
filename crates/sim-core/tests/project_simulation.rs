@@ -5,6 +5,7 @@ use sim_core::project::{
     ProjectDocument, ProjectDocumentV3, ProjectLocation,
 };
 use sim_core::project_simulator::ProjectSimulator;
+use sim_core::simulator::ClockPhase;
 use sim_core::trit::Trit;
 
 fn component(id: &str, type_id: &str, properties: serde_json::Value) -> ProjectComponent {
@@ -295,6 +296,82 @@ fn sequential_project() -> ProjectDocument {
     project(vec![main, bit_cell_module(), spare])
 }
 
+fn nested_sequential_project() -> ProjectDocument {
+    let pair = circuit(
+        "pair",
+        ProjectCircuitKind::Module,
+        vec![
+            module_input("d0-input", "d0"),
+            module_input("d1-input", "d1"),
+            module_input("en-input", "en"),
+            module_input("rst-input", "rst"),
+            module_input("clk-input", "clk"),
+            module_instance("cell-0", "bit-cell"),
+            module_instance("cell-1", "bit-cell"),
+            module_output("q0-output", "q0"),
+            module_output("q1-output", "q1"),
+        ],
+        vec![
+            connection("d0", "d0-input", "out", "cell-0", "d"),
+            connection("d1", "d1-input", "out", "cell-1", "d"),
+            connection("en0", "en-input", "out", "cell-0", "en"),
+            connection("en1", "en-input", "out", "cell-1", "en"),
+            connection("rst0", "rst-input", "out", "cell-0", "rst"),
+            connection("rst1", "rst-input", "out", "cell-1", "rst"),
+            connection("clk0", "clk-input", "out", "cell-0", "clk"),
+            connection("clk1", "clk-input", "out", "cell-1", "clk"),
+            connection("q0", "cell-0", "q", "q0-output", "in"),
+            connection("q1", "cell-1", "q", "q1-output", "in"),
+        ],
+    );
+    let main = circuit(
+        "main",
+        ProjectCircuitKind::Main,
+        vec![
+            component("d0", "source.constant", serde_json::json!({"value": "1"})),
+            component("d1", "source.constant", serde_json::json!({"value": "T"})),
+            component("en", "source.constant", serde_json::json!({"value": "1"})),
+            component("rst", "source.constant", serde_json::json!({"value": "0"})),
+            component("clock", "source.clock", serde_json::json!({})),
+            module_instance("pair", "pair"),
+        ],
+        vec![
+            connection("d0", "d0", "out", "pair", "d0"),
+            connection("d1", "d1", "out", "pair", "d1"),
+            connection("en", "en", "out", "pair", "en"),
+            connection("rst", "rst", "out", "pair", "rst"),
+            connection("clk", "clock", "out", "pair", "clk"),
+        ],
+    );
+    project(vec![main, pair, bit_cell_module()])
+}
+
+fn v3_clock_project() -> ProjectDocumentV3 {
+    ProjectDocumentV3 {
+        format: "logsim-ternary".into(),
+        version: 3,
+        root_circuit_id: "main".into(),
+        circuits: vec![ProjectCircuitV3 {
+            id: "main".into(),
+            name: "Main".into(),
+            kind: ProjectCircuitKind::Main,
+            components: vec![
+                component(
+                    "clock",
+                    "source.clock",
+                    serde_json::json!({"label": "Clock"}),
+                ),
+                component(
+                    "source",
+                    "source.trit_input",
+                    serde_json::json!({"label": "Source", "value": "0"}),
+                ),
+            ],
+            wires: vec![],
+        }],
+    }
+}
+
 fn register3_module() -> ProjectCircuit {
     let mut components = vec![
         module_input("input-d2", "d2"),
@@ -448,6 +525,55 @@ fn register3_instances_capture_hold_and_reset_parallel_words_independently() {
 }
 
 #[test]
+fn phase_rise_commits_sibling_dffs_inside_nested_module_instances_together() {
+    let mut simulator = ProjectSimulator::load(nested_sequential_project(), "main").unwrap();
+
+    let initial = simulator.snapshot().unwrap();
+    assert_eq!(initial.clock_phase, ClockPhase::LowStable);
+    assert_eq!(initial.component_outputs["pair"]["q0"], Trit::Zero);
+    assert_eq!(initial.component_outputs["pair"]["q1"], Trit::Zero);
+
+    let risen = simulator.advance_phase().unwrap();
+    assert_eq!(risen.clock_phase, ClockPhase::HighStable);
+    assert_eq!(risen.component_outputs["pair"]["q0"], Trit::Pos);
+    assert_eq!(risen.component_outputs["pair"]["q1"], Trit::Neg);
+    assert_eq!(risen.tick_count, 0);
+
+    let source_updated = simulator.set_source("main", "d0", Trit::Zero).unwrap();
+    assert_eq!(source_updated.clock_phase, ClockPhase::HighStable);
+}
+
+#[test]
+fn v3_updates_retain_phase_when_reused_and_rebuilds_reset_it() {
+    let mut project = v3_clock_project();
+    let mut simulator = ProjectSimulator::load_v3(project.clone(), "main").unwrap();
+
+    let risen = simulator.advance_phase().unwrap();
+    assert_eq!(risen.clock_phase, ClockPhase::HighStable);
+    assert_eq!(risen.component_outputs["clock"]["out"], Trit::Pos);
+
+    let source_updated = simulator.set_source_word("main", "source", "1").unwrap();
+    assert_eq!(source_updated.clock_phase, ClockPhase::HighStable);
+    assert_eq!(source_updated.component_outputs["source"]["out"], Trit::Pos);
+
+    project.circuits[0].components[0] = component(
+        "clock",
+        "source.clock",
+        serde_json::json!({"label": "Renamed Clock"}),
+    );
+    let retained = simulator.update_project_v3(project.clone()).unwrap();
+    assert_eq!(retained.clock_phase, ClockPhase::HighStable);
+    assert_eq!(retained.component_outputs["clock"]["out"], Trit::Pos);
+
+    project.circuits[0]
+        .components
+        .push(component("probe", "sink.probe", serde_json::json!({})));
+    let rebuilt = simulator.update_project_v3(project).unwrap();
+    assert_eq!(rebuilt.clock_phase, ClockPhase::LowStable);
+    assert_eq!(rebuilt.component_outputs["clock"]["out"], Trit::Zero);
+}
+
+#[test]
 fn ticks_shared_dff_instances_independently_and_retains_state_for_value_updates() {
     let initial = sequential_project();
     let mut simulator = ProjectSimulator::load(initial.clone(), "main").unwrap();
@@ -459,6 +585,7 @@ fn ticks_shared_dff_instances_independently_and_retains_state_for_value_updates(
     assert_eq!(captured.compile_count, 1);
     let serialized = serde_json::to_value(&captured).unwrap();
     assert_eq!(serialized["tickCount"], 1);
+    assert_eq!(serialized["clockPhase"], "lowStable");
     assert!(serialized.get("tick_count").is_none());
 
     let mut changed_data = initial;
@@ -516,6 +643,7 @@ fn switching_active_circuits_resets_sequential_runtime() {
     let switched = simulator.switch_active("bit-cell").unwrap();
     assert_eq!(switched.component_outputs["dff"]["q"], Trit::Zero);
     assert_eq!(switched.tick_count, 0);
+    assert_eq!(switched.clock_phase, ClockPhase::LowStable);
     assert_eq!(switched.compile_count, 2);
 }
 
