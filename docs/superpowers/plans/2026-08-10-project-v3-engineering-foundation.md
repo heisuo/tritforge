@@ -285,12 +285,12 @@ changing route geometry when values change.
 - Modify: `apps/web/src/examples.ts`
 - Test: `apps/web/tests/examples.test.ts`
 
-- [ ] Freeze an editable Project v3 example that splits `1T0`, routes one branch through a named Tunnel, and
+- [x] Freeze an editable Project v3 example that splits `1T0`, routes one branch through a named Tunnel, and
 recombines all branches into the same word.
-- [ ] Test exact component IDs, widths, mapping, local label behavior, and cloned-project isolation.
-- [ ] Add Chinese inspector explanations for bus order, Tunnel scope, and width errors.
-- [ ] Run example tests and browser loading.
-- [ ] Commit `feat: teach named three-trit buses`.
+- [x] Test exact component IDs, widths, mapping, local label behavior, and cloned-project isolation.
+- [x] Add Chinese inspector explanations for bus order, Tunnel scope, and width errors.
+- [x] Run example tests and browser loading.
+- [x] Commit `feat: teach named three-trit buses`.
 
 ## 4. Phase 3C and 3D: Time and Chronogram
 
