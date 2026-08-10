@@ -8,6 +8,7 @@ import {
   validateConnection,
   type CatalogComponent,
 } from "../src/editor-model";
+import { editorHandleId } from "../src/editor/port-handles";
 
 const catalog: CatalogComponent[] = [
   {
@@ -76,6 +77,25 @@ describe("editor document model", () => {
         },
       ],
     });
+  });
+
+  it("strips role-specific handles from legacy circuit definitions", () => {
+    const document = structuredClone(DEFAULT_DOCUMENT);
+    document.nodes[0].data.ports = catalog[0].ports;
+    document.nodes[1].data.ports = catalog[1].ports;
+    document.nodes[2].data.ports = catalog[2].ports;
+    document.edges[0].sourceHandle = editorHandleId("out", "source");
+    document.edges[0].targetHandle = editorHandleId("a", "target");
+    document.edges[1].sourceHandle = editorHandleId("y", "source");
+    document.edges[1].targetHandle = editorHandleId("in", "target");
+
+    const definition = toCircuitDefinition(document);
+
+    expect(definition.connections).toEqual([
+      expect.objectContaining({ source_port_id: "out", target_port_id: "a" }),
+      expect.objectContaining({ source_port_id: "y", target_port_id: "in" }),
+    ]);
+    expect(JSON.stringify(definition)).not.toContain("logsim-port");
   });
 
   it("cycles known input values in balanced ternary order", () => {
@@ -215,5 +235,45 @@ describe("editor document model", () => {
         catalog,
       ),
     ).toEqual({ valid: false, reason: "duplicate" });
+  });
+
+  it("indexes nodes once instead of scanning them for every existing edge", () => {
+    const nodes = Array.from({ length: 120 }, (_, index) => ({
+      ...structuredClone(DEFAULT_DOCUMENT.nodes[0]),
+      id: `node-${index}`,
+      data: {
+        typeId: "wiring.junction",
+        label: `Node ${index}`,
+        ports: [{ id: "net", direction: "inout" as const, width: 1 }],
+      },
+    }));
+    const edges = Array.from({ length: 400 }, (_, index) => ({
+      id: `wire-${index}`,
+      source: `node-${1 + (index % 118)}`,
+      sourceHandle: "net",
+      target: `node-${1 + ((index + 1) % 118)}`,
+      targetHandle: "net",
+    }));
+    let findCalls = 0;
+    const nativeFind = nodes.find.bind(nodes);
+    Object.defineProperty(nodes, "find", {
+      value: (...args: Parameters<typeof nodes.find>) => {
+        findCalls += 1;
+        return nativeFind(...args);
+      },
+    });
+
+    expect(
+      validateConnection(
+        {
+          source: "node-0",
+          sourceHandle: "net",
+          target: "node-119",
+          targetHandle: "net",
+        },
+        { nodes, edges },
+      ),
+    ).toEqual({ valid: true });
+    expect(findCalls).toBe(0);
   });
 });

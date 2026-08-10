@@ -208,6 +208,7 @@ export function renameNodeLabel(
 export function toCircuitDefinition(
   document: EditorDocument,
 ): CircuitDefinition {
+  const nodeById = new Map(document.nodes.map((node) => [node.id, node]));
   return {
     components: document.nodes.map((node) => ({
       id: node.id,
@@ -217,13 +218,25 @@ export function toCircuitDefinition(
           ? {}
           : { value: node.data.sourceValue },
     })),
-    connections: document.edges.map((edge) => ({
-      id: edge.id,
-      source_component_id: edge.source,
-      source_port_id: edge.sourceHandle ?? "",
-      target_component_id: edge.target,
-      target_port_id: edge.targetHandle ?? "",
-    })),
+    connections: document.edges.map((edge) => {
+      const sourceNode = nodeById.get(edge.source);
+      const targetNode = nodeById.get(edge.target);
+      return {
+        id: edge.id,
+        source_component_id: edge.source,
+        source_port_id:
+          semanticPortIdForHandle(
+            sourceNode?.data.ports ?? [],
+            edge.sourceHandle,
+          ) ?? edge.data?.semanticSourcePortId ?? edge.sourceHandle ?? "",
+        target_component_id: edge.target,
+        target_port_id:
+          semanticPortIdForHandle(
+            targetNode?.data.ports ?? [],
+            edge.targetHandle,
+          ) ?? edge.data?.semanticTargetPortId ?? edge.targetHandle ?? "",
+      };
+    }),
   };
 }
 
@@ -245,12 +258,13 @@ export function validateConnection(
   document: EditorDocument,
   catalog: CatalogComponent[] = [],
 ): { valid: true } | { valid: false; reason: ConnectionRejection } {
-  const sourceNode = document.nodes.find(
-    (node) => node.id === connection.source,
-  );
-  const targetNode = document.nodes.find(
-    (node) => node.id === connection.target,
-  );
+  const nodeById = new Map(document.nodes.map((node) => [node.id, node]));
+  const sourceNode = connection.source
+    ? nodeById.get(connection.source)
+    : undefined;
+  const targetNode = connection.target
+    ? nodeById.get(connection.target)
+    : undefined;
   const sourceDescriptor = catalog.find(
     (component) => component.type_id === sourceNode?.data.typeId,
   );
@@ -289,8 +303,8 @@ export function validateConnection(
   }
 
   const duplicate = document.edges.some((edge) => {
-    const edgeSourceNode = document.nodes.find((node) => node.id === edge.source);
-    const edgeTargetNode = document.nodes.find((node) => node.id === edge.target);
+    const edgeSourceNode = nodeById.get(edge.source);
+    const edgeTargetNode = nodeById.get(edge.target);
     const edgeSourcePort = semanticPortIdForHandle(
       edgeSourceNode?.data.ports ?? [],
       edge.sourceHandle,
