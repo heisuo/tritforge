@@ -333,12 +333,12 @@ metadata.
 - Modify: `apps/web/src/wasm-client.ts`
 - Modify: `apps/web/src/project/hierarchy-runtime.ts`
 
-- [ ] Add failing real-WASM tests for phase stepping, watch add/remove, trace retrieval, fault preservation, and
+- [x] Add failing real-WASM tests for phase stepping, watch add/remove, trace retrieval, fault preservation, and
 structured unavailable-signal errors.
-- [ ] Add API v3 methods `advance_phase`, `set_trace_watches`, `trace_frames`, and `clear_trace`.
-- [ ] Type bindings with discriminated frame reasons and word strings.
-- [ ] Run real-WASM, focused Web, and production build.
-- [ ] Commit `feat: expose phase traces through wasm`.
+- [x] Add API v3 methods `advance_phase`, `set_trace_watches`, `trace_frames`, and `clear_trace`.
+- [x] Type bindings with discriminated frame reasons and word strings.
+- [x] Run real-WASM, focused Web, and production build.
+- [x] Commit `feat: expose phase traces through wasm`.
 
 ### Task 12: Implement the Serialized Automatic Clock Scheduler
 
