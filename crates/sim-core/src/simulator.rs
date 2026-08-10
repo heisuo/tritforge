@@ -620,6 +620,9 @@ fn signal_maps(circuit: &ValidatedCircuit) -> (BTreeMap<PortRef, Trit>, BTreeMap
                 PortDirection::Output => {
                     component_outputs.insert(target, Trit::HighZ);
                 }
+                PortDirection::InOut => {
+                    unreachable!("compile-time inout port reached scalar simulator loading")
+                }
             }
         }
     }

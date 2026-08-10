@@ -4,19 +4,44 @@ use crate::catalog::{ComponentKind, PortDirection};
 use crate::diagnostic::Severity;
 use crate::project::{
     ProjectCircuit, ProjectCircuitKind, ProjectComponent, ProjectDiagnostic, ProjectDiagnosticSet,
-    ProjectDocument, ProjectLocation, QualifiedComponentRef, QualifiedConnectionRef,
-    QualifiedPortRef,
+    ProjectDocument, ProjectLocation, ProjectProperties, QualifiedComponentRef,
+    QualifiedConnectionRef, QualifiedPortRef,
 };
+use crate::signal::{KnownWord, SignalShape};
 
 const MODULE_INPUT: &str = "project.module_input";
 const MODULE_OUTPUT: &str = "project.module_output";
 const MODULE_INSTANCE: &str = "project.module_instance";
+const JUNCTION: &str = "wiring.junction";
+const TUNNEL: &str = "wiring.tunnel";
+const SPLITTER: &str = "wiring.splitter";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedProjectPort {
+    pub id: String,
+    pub direction: PortDirection,
+    pub shape: SignalShape,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{message}")]
+pub struct ProjectPortResolveError {
+    pub code: &'static str,
+    pub message: String,
+}
+
+impl ProjectPortResolveError {
+    pub const fn code(&self) -> &'static str {
+        self.code
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModulePort {
     pub id: String,
     pub label: String,
     pub direction: PortDirection,
+    pub shape: SignalShape,
     pub boundary_component_id: String,
 }
 
@@ -26,6 +51,282 @@ pub struct ValidatedProject {
     pub interfaces: BTreeMap<String, Vec<ModulePort>>,
     pub dependencies: BTreeMap<String, Vec<String>>,
     pub warnings: Vec<ProjectDiagnostic>,
+}
+
+impl ValidatedProject {
+    pub fn resolve_component_ports(
+        &self,
+        component: &ProjectComponent,
+    ) -> Result<Vec<ResolvedProjectPort>, ProjectPortResolveError> {
+        if component.type_id != MODULE_INSTANCE {
+            return resolve_project_ports(&component.type_id, &component.properties);
+        }
+
+        let module_id = component
+            .properties
+            .module_id()
+            .ok_or_else(|| invalid_property("module instance requires a non-empty moduleId"))?;
+        let interface = self.interfaces.get(module_id).ok_or_else(|| {
+            resolve_error(
+                "UNKNOWN_MODULE",
+                format!("module instance references unknown module '{module_id}'"),
+            )
+        })?;
+
+        Ok(interface
+            .iter()
+            .map(|port| ResolvedProjectPort {
+                id: port.id.clone(),
+                direction: port.direction,
+                shape: port.shape,
+            })
+            .collect())
+    }
+}
+
+pub fn resolve_project_ports(
+    type_id: &str,
+    properties: &ProjectProperties,
+) -> Result<Vec<ResolvedProjectPort>, ProjectPortResolveError> {
+    match type_id {
+        "source.trit_input" | "source.constant" => {
+            let shape = project_signal_shape(properties)?;
+            require_only_properties(properties, &["label", "value", "width"])?;
+            validate_optional_label(properties)?;
+            validate_optional_word(properties, "value", shape)?;
+            Ok(vec![resolved_port("out", PortDirection::Output, shape)])
+        }
+        "sink.probe" => {
+            let shape = project_signal_shape(properties)?;
+            require_only_properties(properties, &["label", "width"])?;
+            validate_optional_label(properties)?;
+            Ok(vec![resolved_port("in", PortDirection::Input, shape)])
+        }
+        MODULE_INPUT => {
+            let shape = project_signal_shape(properties)?;
+            require_only_properties(properties, &["label", "portId", "previewValue", "width"])?;
+            validate_boundary_identity(properties)?;
+            validate_required_word(properties, "previewValue", shape)?;
+            Ok(vec![resolved_port("out", PortDirection::Output, shape)])
+        }
+        MODULE_OUTPUT => {
+            let shape = project_signal_shape(properties)?;
+            require_only_properties(properties, &["label", "portId", "width"])?;
+            validate_boundary_identity(properties)?;
+            Ok(vec![resolved_port("in", PortDirection::Input, shape)])
+        }
+        JUNCTION => {
+            let shape = project_signal_shape(properties)?;
+            require_only_properties(properties, &["label", "width"])?;
+            validate_optional_label(properties)?;
+            Ok(vec![resolved_port("net", PortDirection::InOut, shape)])
+        }
+        TUNNEL => {
+            let shape = project_signal_shape(properties)?;
+            require_only_properties(properties, &["label", "width"])?;
+            if !properties
+                .get("label")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|label| !label.is_empty())
+            {
+                return Err(invalid_property(
+                    "wiring.tunnel requires a non-empty string label",
+                ));
+            }
+            Ok(vec![resolved_port("net", PortDirection::InOut, shape)])
+        }
+        SPLITTER => resolve_splitter_ports(properties),
+        MODULE_INSTANCE => Err(invalid_property(
+            "module instance ports require a validated referenced interface",
+        )),
+        _ => {
+            let Some(kind) = ComponentKind::from_type_id(type_id) else {
+                return Err(resolve_error(
+                    "UNKNOWN_COMPONENT_TYPE",
+                    format!("unknown component type '{type_id}'"),
+                ));
+            };
+            require_only_properties(properties, &["label"])?;
+            validate_optional_label(properties)?;
+            let shape = default_signal_shape();
+            Ok(kind
+                .port_descriptors()
+                .into_iter()
+                .map(|port| resolved_port(&port.id, port.direction, shape))
+                .collect())
+        }
+    }
+}
+
+fn resolve_splitter_ports(
+    properties: &ProjectProperties,
+) -> Result<Vec<ResolvedProjectPort>, ProjectPortResolveError> {
+    let trunk_shape = project_signal_shape(properties)?;
+    require_only_properties(properties, &["branchCount", "mapping", "width"])?;
+
+    let branch_count = properties
+        .get("branchCount")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|count| usize::try_from(count).ok())
+        .filter(|count| (1..=usize::from(trunk_shape.width())).contains(count))
+        .ok_or_else(|| invalid_splitter_map("branchCount must be between 1 and width"))?;
+    let mapping = properties
+        .get("mapping")
+        .and_then(serde_json::Value::as_array)
+        .filter(|mapping| mapping.len() == usize::from(trunk_shape.width()))
+        .ok_or_else(|| invalid_splitter_map("mapping length must equal width"))?;
+
+    let mut branch_widths = vec![0_u8; branch_count];
+    for value in mapping {
+        let branch = value
+            .as_u64()
+            .and_then(|branch| usize::try_from(branch).ok())
+            .filter(|branch| *branch < branch_count)
+            .ok_or_else(|| {
+                invalid_splitter_map("mapping entries must be integer branch indexes")
+            })?;
+        branch_widths[branch] += 1;
+    }
+    if branch_widths.contains(&0) {
+        return Err(invalid_splitter_map(
+            "mapping must assign at least one trunk bit to every branch",
+        ));
+    }
+
+    let mut ports = Vec::with_capacity(branch_count + 1);
+    ports.push(resolved_port("trunk", PortDirection::InOut, trunk_shape));
+    for (branch, width) in branch_widths.into_iter().enumerate() {
+        let shape = SignalShape::new(width).expect("covered splitter branch has valid width");
+        ports.push(resolved_port(
+            &format!("branch{branch}"),
+            PortDirection::InOut,
+            shape,
+        ));
+    }
+    Ok(ports)
+}
+
+fn project_signal_shape(
+    properties: &ProjectProperties,
+) -> Result<SignalShape, ProjectPortResolveError> {
+    let Some(width) = properties.get("width") else {
+        return Ok(default_signal_shape());
+    };
+    let Some(width) = width.as_u64().and_then(|width| u8::try_from(width).ok()) else {
+        return Err(invalid_signal_width(width.to_string()));
+    };
+    SignalShape::new(width).map_err(|_| invalid_signal_width(width.to_string()))
+}
+
+fn default_signal_shape() -> SignalShape {
+    SignalShape::new(1).expect("width one is supported")
+}
+
+fn resolved_port(id: &str, direction: PortDirection, shape: SignalShape) -> ResolvedProjectPort {
+    ResolvedProjectPort {
+        id: id.to_owned(),
+        direction,
+        shape,
+    }
+}
+
+fn require_only_properties(
+    properties: &ProjectProperties,
+    allowed: &[&str],
+) -> Result<(), ProjectPortResolveError> {
+    if let Some(property) = properties.keys().find(|key| !allowed.contains(key)) {
+        return Err(invalid_property(format!(
+            "property '{property}' is not allowed"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_optional_label(properties: &ProjectProperties) -> Result<(), ProjectPortResolveError> {
+    if properties
+        .get("label")
+        .is_some_and(|label| !label.as_str().is_some_and(|label| !label.is_empty()))
+    {
+        return Err(invalid_property("label must be a non-empty string"));
+    }
+    Ok(())
+}
+
+fn validate_boundary_identity(
+    properties: &ProjectProperties,
+) -> Result<(), ProjectPortResolveError> {
+    let valid_port_id = properties
+        .port_id()
+        .is_some_and(|port_id| !port_id.trim().is_empty());
+    let valid_label = properties
+        .label()
+        .is_some_and(|label| !label.trim().is_empty());
+    if !valid_port_id || !valid_label {
+        return Err(invalid_property(
+            "module boundary requires non-empty portId and label strings",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_optional_word(
+    properties: &ProjectProperties,
+    key: &str,
+    shape: SignalShape,
+) -> Result<(), ProjectPortResolveError> {
+    let Some(value) = properties.get(key) else {
+        return Ok(());
+    };
+    validate_word_value(value, key, shape)
+}
+
+fn validate_required_word(
+    properties: &ProjectProperties,
+    key: &str,
+    shape: SignalShape,
+) -> Result<(), ProjectPortResolveError> {
+    let value = properties
+        .get(key)
+        .ok_or_else(|| invalid_property(format!("property '{key}' is required")))?;
+    validate_word_value(value, key, shape)
+}
+
+fn validate_word_value(
+    value: &serde_json::Value,
+    key: &str,
+    shape: SignalShape,
+) -> Result<(), ProjectPortResolveError> {
+    let value = value
+        .as_str()
+        .ok_or_else(|| invalid_property(format!("property '{key}' must be a known word")))?;
+    KnownWord::parse(value, shape).map_err(|error| {
+        invalid_property(format!(
+            "property '{key}' is not a valid known word: {error}"
+        ))
+    })?;
+    Ok(())
+}
+
+fn resolve_error(code: &'static str, message: impl Into<String>) -> ProjectPortResolveError {
+    ProjectPortResolveError {
+        code,
+        message: message.into(),
+    }
+}
+
+fn invalid_signal_width(width: impl std::fmt::Display) -> ProjectPortResolveError {
+    resolve_error(
+        "INVALID_SIGNAL_WIDTH",
+        format!("signal width must be an integer between 1 and 27, got {width}"),
+    )
+}
+
+fn invalid_splitter_map(message: impl Into<String>) -> ProjectPortResolveError {
+    resolve_error("INVALID_SPLITTER_MAP", message)
+}
+
+fn invalid_property(message: impl Into<String>) -> ProjectPortResolveError {
+    resolve_error("INVALID_PROPERTY", message)
 }
 
 pub fn validate_project(
@@ -236,15 +537,10 @@ fn validate_component(
                     &[],
                 ));
             }
-            if !valid_boundary_properties(component) {
-                diagnostics.insert(error(
-                    "INVALID_PROPERTY",
-                    format!("module boundary '{}' has invalid properties", component.id),
-                    &circuit.id,
-                    &[&component.id],
-                    &[],
-                    &[],
-                ));
+            if let Err(resolve_error) =
+                resolve_project_ports(&component.type_id, &component.properties)
+            {
+                diagnostics.insert(component_resolve_error(circuit, component, resolve_error));
             }
         }
         MODULE_INSTANCE => {
@@ -260,16 +556,10 @@ fn validate_component(
             }
         }
         type_id => match ComponentKind::from_type_id(type_id) {
-            Some(kind) if valid_builtin_properties(component, kind) => {}
-            Some(_) => {
-                diagnostics.insert(error(
-                    "INVALID_PROPERTY",
-                    format!("component '{}' has invalid properties", component.id),
-                    &circuit.id,
-                    &[&component.id],
-                    &[],
-                    &[],
-                ));
+            Some(kind) => {
+                if let Err(resolve_error) = validate_builtin_properties(component, kind) {
+                    diagnostics.insert(component_resolve_error(circuit, component, resolve_error));
+                }
             }
             None => {
                 diagnostics.insert(error(
@@ -289,21 +579,7 @@ fn validate_component(
 }
 
 fn valid_boundary_properties(component: &ProjectComponent) -> bool {
-    let has_identity = component
-        .properties
-        .port_id()
-        .is_some_and(|port_id| !port_id.trim().is_empty())
-        && component
-            .properties
-            .label()
-            .is_some_and(|label| !label.trim().is_empty());
-    if component.type_id == MODULE_INPUT {
-        has_identity
-            && component.properties.preview_value().is_some()
-            && has_only_properties(component, &["portId", "label", "previewValue"])
-    } else {
-        has_identity && has_only_properties(component, &["portId", "label"])
-    }
+    resolve_project_ports(&component.type_id, &component.properties).is_ok()
 }
 
 fn valid_instance_properties(component: &ProjectComponent) -> bool {
@@ -318,11 +594,32 @@ fn valid_instance_properties(component: &ProjectComponent) -> bool {
         && has_only_properties(component, &["moduleId", "label"])
 }
 
-fn valid_builtin_properties(component: &ProjectComponent, kind: ComponentKind) -> bool {
+fn validate_builtin_properties(
+    component: &ProjectComponent,
+    kind: ComponentKind,
+) -> Result<(), ProjectPortResolveError> {
+    let width_aware = matches!(
+        kind,
+        ComponentKind::TritInput | ComponentKind::Constant | ComponentKind::Probe
+    );
+    let shape = if width_aware {
+        project_signal_shape(&component.properties)?
+    } else {
+        if component.properties.get("width").is_some() {
+            return Err(invalid_property(format!(
+                "component type '{}' does not accept width",
+                component.type_id
+            )));
+        }
+        default_signal_shape()
+    };
     let value = component.properties.get("value");
     let valid_value = match kind {
         ComponentKind::TritInput | ComponentKind::Constant => {
-            value.is_none() || component.properties.known_value().is_some()
+            value.is_none()
+                || value
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|value| KnownWord::parse(value, shape).is_ok())
         }
         _ => value.is_none(),
     };
@@ -330,7 +627,33 @@ fn valid_builtin_properties(component: &ProjectComponent, kind: ComponentKind) -
         .properties
         .get("label")
         .is_none_or(|label| label.as_str().is_some_and(|label| !label.is_empty()));
-    valid_value && valid_label
+    if valid_value && valid_label {
+        Ok(())
+    } else {
+        Err(invalid_property(format!(
+            "component '{}' has invalid properties",
+            component.id
+        )))
+    }
+}
+
+fn valid_builtin_properties(component: &ProjectComponent, kind: ComponentKind) -> bool {
+    validate_builtin_properties(component, kind).is_ok()
+}
+
+fn component_resolve_error(
+    circuit: &ProjectCircuit,
+    component: &ProjectComponent,
+    resolve_error: ProjectPortResolveError,
+) -> ProjectDiagnostic {
+    error(
+        resolve_error.code(),
+        format!("component '{}': {resolve_error}", component.id),
+        &circuit.id,
+        &[&component.id],
+        &[],
+        &[],
+    )
 }
 
 fn has_only_properties(component: &ProjectComponent, allowed: &[&str]) -> bool {
@@ -358,10 +681,11 @@ fn build_interfaces(
                 MODULE_OUTPUT => Some(PortDirection::Output),
                 _ => None,
             };
-            let (Some(direction), Some(port_id), Some(label)) = (
+            let (Some(direction), Some(port_id), Some(label), Ok(shape)) = (
                 direction,
                 component.properties.port_id(),
                 component.properties.label(),
+                project_signal_shape(&component.properties),
             ) else {
                 continue;
             };
@@ -374,6 +698,7 @@ fn build_interfaces(
                 id: port_id.to_owned(),
                 label: label.to_owned(),
                 direction,
+                shape,
                 boundary_component_id: component.id.clone(),
             });
         }

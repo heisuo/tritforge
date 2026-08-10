@@ -10,6 +10,7 @@ use crate::trit::Trit;
 pub enum PortDirection {
     Input,
     Output,
+    InOut,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

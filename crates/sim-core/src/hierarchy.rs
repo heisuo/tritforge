@@ -680,6 +680,9 @@ impl HierarchyAnalyzer<'_> {
             let role = match port.direction {
                 PortDirection::Input => NodeRole::PrimitiveInput(flat_port),
                 PortDirection::Output => NodeRole::PrimitiveOutput(flat_port),
+                PortDirection::InOut => {
+                    unreachable!("compile-time inout port reached scalar hierarchy expansion")
+                }
             };
             let node = NodeKey::new(&circuit.id, path, &component.id, &port.id);
             self.nodes.insert(node.clone(), role);
@@ -756,6 +759,9 @@ impl HierarchyAnalyzer<'_> {
         let boundary_port = match port.direction {
             PortDirection::Input => "out",
             PortDirection::Output => "in",
+            PortDirection::InOut => {
+                unreachable!("module interfaces cannot contain compile-time inout ports")
+            }
         };
         let boundary_node = NodeKey::new(
             child_id,
@@ -766,6 +772,9 @@ impl HierarchyAnalyzer<'_> {
         match port.direction {
             PortDirection::Input => self.add_edge(instance_node, boundary_node, None),
             PortDirection::Output => self.add_edge(boundary_node, instance_node, None),
+            PortDirection::InOut => {
+                unreachable!("module interfaces cannot contain compile-time inout ports")
+            }
         }
     }
 
@@ -846,6 +855,9 @@ impl HierarchyAnalyzer<'_> {
                 PortDirection::Output => reverse_projection
                     .ports(&active_port.node, &mut reverse_ports)
                     .len(),
+                PortDirection::InOut => {
+                    unreachable!("compile-time inout port reached scalar wiring analysis")
+                }
             };
             projection_endpoints =
                 projection_endpoints

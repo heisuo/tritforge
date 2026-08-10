@@ -288,6 +288,9 @@ impl ProjectSimulator {
             .map(|entry| match entry.direction {
                 PortDirection::Input => entry.endpoints.len() + entry.drivers.len(),
                 PortDirection::Output => entry.drivers.len(),
+                PortDirection::InOut => {
+                    unreachable!("compile-time inout port reached scalar project metrics")
+                }
             })
             .sum();
         Some(ProjectCompileMetrics {
@@ -392,6 +395,9 @@ impl ProjectSimulator {
             let target = match entry.direction {
                 PortDirection::Input => &mut input_nets,
                 PortDirection::Output => &mut component_outputs,
+                PortDirection::InOut => {
+                    unreachable!("compile-time inout port reached scalar project snapshot")
+                }
             };
             target
                 .entry(reference.component_id.clone())

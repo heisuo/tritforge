@@ -416,6 +416,104 @@ fn rejects_reserved_properties_that_do_not_belong_to_a_special_component() {
 }
 
 #[test]
+fn validates_width_aware_project_components_with_precise_diagnostics() {
+    let valid = main_circuit(vec![
+        component(
+            "source",
+            "source.constant",
+            serde_json::json!({"width": 3, "value": "1T0"}),
+        ),
+        component("probe", "sink.probe", serde_json::json!({"width": 3})),
+    ]);
+    assert!(validate_project(project(vec![valid])).is_ok());
+
+    for width in [0, 28] {
+        assert_code(
+            validate_project(project(vec![main_circuit(vec![component(
+                "probe",
+                "sink.probe",
+                serde_json::json!({"width": width}),
+            )])])),
+            "INVALID_SIGNAL_WIDTH",
+        );
+    }
+
+    assert_code(
+        validate_project(project(vec![main_circuit(vec![component(
+            "source",
+            "source.constant",
+            serde_json::json!({"width": 3, "value": "1X0"}),
+        )])])),
+        "INVALID_PROPERTY",
+    );
+}
+
+#[test]
+fn v2_validation_keeps_v3_helpers_out_of_the_scalar_runtime() {
+    for type_id in ["wiring.junction", "wiring.tunnel", "wiring.splitter"] {
+        assert_code(
+            validate_project(project(vec![main_circuit(vec![component(
+                "helper",
+                type_id,
+                serde_json::json!({}),
+            )])])),
+            "UNKNOWN_COMPONENT_TYPE",
+        );
+    }
+}
+
+#[test]
+fn module_instances_preserve_dynamic_interface_shapes_and_order() {
+    let module = module_circuit(
+        "word-module",
+        vec![
+            component(
+                "input",
+                "project.module_input",
+                serde_json::json!({
+                    "portId": "data",
+                    "label": "Data",
+                    "previewValue": "1T0",
+                    "width": 3
+                }),
+            ),
+            component(
+                "output",
+                "project.module_output",
+                serde_json::json!({"portId": "result", "label": "Result", "width": 3}),
+            ),
+        ],
+    );
+    let instance = module_instance("instance", "word-module");
+    let validated =
+        validate_project(project(vec![main_circuit(vec![instance.clone()]), module])).unwrap();
+
+    let interface = validated.interfaces.get("word-module").unwrap();
+    assert_eq!(
+        interface
+            .iter()
+            .map(|port| (port.id.as_str(), port.direction, port.shape.width()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("data", PortDirection::Input, 3),
+            ("result", PortDirection::Output, 3),
+        ]
+    );
+    assert_eq!(
+        validated
+            .resolve_component_ports(&instance)
+            .unwrap()
+            .into_iter()
+            .map(|port| (port.id, port.direction, port.shape.width()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("data".into(), PortDirection::Input, 3),
+            ("result".into(), PortDirection::Output, 3),
+        ]
+    );
+}
+
+#[test]
 fn malformed_but_identifiable_boundaries_do_not_cascade_to_unknown_ports() {
     let malformed_output = component(
         "output",
