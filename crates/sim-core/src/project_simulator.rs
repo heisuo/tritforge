@@ -843,7 +843,7 @@ impl ProjectSimulator {
             .simulator
             .as_mut()
             .expect("ready project has a simulator")
-            .reset();
+            .reset_preserving_sources();
         self.snapshot = Some(self.project_snapshot(&flat));
         self.trace.clear();
         self.trace_diagnostics.clear();

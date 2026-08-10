@@ -226,6 +226,14 @@ impl Simulator {
     pub fn reset(&mut self) -> SimulationSnapshot {
         self.source_properties
             .clone_from(&self.original_source_properties);
+        self.reset_runtime_state()
+    }
+
+    pub(crate) fn reset_preserving_sources(&mut self) -> SimulationSnapshot {
+        self.reset_runtime_state()
+    }
+
+    fn reset_runtime_state(&mut self) -> SimulationSnapshot {
         for value in self.dff_outputs.values_mut() {
             *value = Trit::Zero;
         }

@@ -341,6 +341,65 @@ fn project_trace_watch_replacement_history_clear_and_reset_are_stable() {
 }
 
 #[wasm_bindgen_test]
+fn project_reset_preserves_current_word_source_through_label_only_update() {
+    let mut project = project(vec![circuit(
+        "main",
+        ProjectCircuitKind::Main,
+        vec![component(
+            "word",
+            "source.trit_input",
+            serde_json::json!({"width": 3, "value": "1T0", "label": "Before"}),
+        )],
+    )]);
+    let mut simulator = WasmProjectSimulator::new();
+    simulator
+        .load_project(js_project(&project), "main")
+        .expect("load project");
+    simulator
+        .set_trace_watches(js_watches(&[trace_watch(
+            "word",
+            "main",
+            &[],
+            "word",
+            "out",
+        )]))
+        .expect("watch word source");
+    simulator
+        .set_source("main", "word", "T01")
+        .expect("update word source");
+
+    let reset: ProjectSnapshot =
+        serde_wasm_bindgen::from_value(simulator.reset().expect("reset project")).unwrap();
+    assert_eq!(
+        reset.component_output_words["word"]["out"].to_string(),
+        "T01"
+    );
+    assert_eq!(reset.tick_count, 0);
+    assert_eq!(reset.clock_phase, ClockPhase::LowStable);
+    let frames = trace_frames(&simulator);
+    assert_eq!(frames.len(), 1);
+    assert_eq!(frames[0].reason, TraceFrameReason::Reset);
+    assert_eq!(frames[0].values[0].value.to_string(), "T01");
+
+    project.circuits[0].components[0] = component(
+        "word",
+        "source.trit_input",
+        serde_json::json!({"width": 3, "value": "T01", "label": "After"}),
+    );
+    let updated: ProjectSnapshot = serde_wasm_bindgen::from_value(
+        simulator
+            .update_project(js_project(&project))
+            .expect("label-only update"),
+    )
+    .unwrap();
+    assert_eq!(
+        updated.component_output_words["word"]["out"].to_string(),
+        "T01"
+    );
+    assert_eq!(trace_frames(&simulator), frames);
+}
+
+#[wasm_bindgen_test]
 fn project_trace_nested_qualified_refs_preserve_instance_values() {
     let main = connected_circuit(
         "main",
