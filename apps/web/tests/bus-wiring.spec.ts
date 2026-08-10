@@ -342,6 +342,63 @@ test("keeps 27 splitter branches and a 27-trit word inside stable node bounds", 
   expect(["0px", "normal"]).toContain(containment.letterSpacing);
   expect(containment.inside).toBe(true);
 
+  await node(page, "trit-input-1").dispatchEvent("click", { detail: 2 });
+  const inspector = page.getByRole("complementary", { name: "检查器" });
+  const signalColumns = inspector.locator(".signal-columns");
+  const outputColumn = signalColumns.locator(".signal-group").nth(1);
+  const inspectorWord = outputColumn.locator(".signal-row strong", {
+    hasText: word,
+  });
+  await expect(inspectorWord).toHaveText(word);
+  const inspectorGeometry = await inspectorWord.evaluate((element) => {
+    const value = element as HTMLElement;
+    const inspectorElement = value.closest<HTMLElement>(".inspector");
+    const column = value.closest<HTMLElement>(".signal-group");
+    const columns = value.closest<HTMLElement>(".signal-columns");
+    const inspectorRect = inspectorElement?.getBoundingClientRect();
+    const columnRect = column?.getBoundingClientRect();
+    const columnsRect = columns?.getBoundingClientRect();
+    const valueRect = value.getBoundingClientRect();
+    return {
+      scrollWidth: value.scrollWidth,
+      clientWidth: value.clientWidth,
+      columnScrollWidth: column?.scrollWidth ?? 0,
+      columnClientWidth: column?.clientWidth ?? 0,
+      columnsScrollWidth: columns?.scrollWidth ?? 0,
+      columnsClientWidth: columns?.clientWidth ?? 0,
+      text: value.textContent,
+      insideInspector:
+        !!inspectorRect &&
+        valueRect.left >= inspectorRect.left &&
+        valueRect.right <= inspectorRect.right,
+      insideColumn:
+        !!columnRect &&
+        valueRect.left >= columnRect.left &&
+        valueRect.right <= columnRect.right,
+      columnInsideGrid:
+        !!columnRect &&
+        !!columnsRect &&
+        columnRect.left >= columnsRect.left &&
+        columnRect.right <= columnsRect.right,
+      columnInsideViewport:
+        !!columnRect && columnRect.left >= 0 && columnRect.right <= innerWidth,
+    };
+  });
+  expect(inspectorGeometry.text).toBe(word);
+  expect(inspectorGeometry.scrollWidth).toBeLessThanOrEqual(
+    inspectorGeometry.clientWidth,
+  );
+  expect(inspectorGeometry.insideInspector).toBe(true);
+  expect(inspectorGeometry.insideColumn).toBe(true);
+  expect(inspectorGeometry.columnScrollWidth).toBeLessThanOrEqual(
+    inspectorGeometry.columnClientWidth,
+  );
+  expect(inspectorGeometry.columnsScrollWidth).toBeLessThanOrEqual(
+    inspectorGeometry.columnsClientWidth,
+  );
+  expect(inspectorGeometry.columnInsideGrid).toBe(true);
+  expect(inspectorGeometry.columnInsideViewport).toBe(true);
+
   await connect(
     page,
     "handle-trit-input-1-output-out",
@@ -368,7 +425,6 @@ test("keeps 27 splitter branches and a 27-trit word inside stable node bounds", 
     "color",
     "rgb(66, 106, 112)",
   );
-
   await page.screenshot({
     path: "test-results/bus-wiring-27-limits-1440x900.png",
     fullPage: true,

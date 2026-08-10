@@ -894,24 +894,41 @@ function Workbench() {
   );
 
   const cycleInput = useCallback(
-    (node: EditorNode) => {
-      const current = node.data.sourceValue ?? "0";
+    (circuitId: string, componentId: string) => {
+      const state = store.getState();
+      const circuit = state.project.circuits.find((item) => item.id === circuitId);
+      const component = circuit?.components.find((item) => item.id === componentId);
+      if (!component) return;
+      const valueKey =
+        component.typeId === "project.module_input" ? "previewValue" : "value";
+      const width =
+        typeof component.properties.width === "number"
+          ? component.properties.width
+          : 1;
+      const storedValue = component.properties[valueKey];
+      const current =
+        typeof storedValue === "string" ? storedValue : "0".repeat(width);
       const next = cycleKnownWord(current);
       try {
-        store.getState().setSource(activeCircuitId, node.id, next);
-        setNodes((items) =>
-          items.map((item) =>
-            item.id === node.id
-              ? { ...item, data: { ...item.data, sourceValue: next } }
-              : item,
-          ),
-        );
-        setStatusMessage(`输入 ${node.id}: ${current} -> ${next}`);
+        state.setSource(circuitId, componentId, next);
+        const latest = store.getState();
+        const latestCircuitId =
+          latest.activePath.at(-1)?.circuitId ?? latest.project.rootCircuitId;
+        if (latestCircuitId === circuitId) {
+          setNodes((items) =>
+            items.map((item) =>
+              item.id === componentId
+                ? { ...item, data: { ...item.data, sourceValue: next } }
+                : item,
+            ),
+          );
+        }
+        setStatusMessage(`输入 ${componentId}: ${current} -> ${next}`);
       } catch (error) {
         editFailure("输入更新失败", error);
       }
     },
-    [activeCircuitId, editFailure, store],
+    [editFailure, store],
   );
 
   const enterModuleInstance = useCallback(
@@ -944,8 +961,10 @@ function Workbench() {
       }
       if (inputClickTimerRef.current) clearTimeout(inputClickTimerRef.current);
       if (event.detail > 1) return;
+      const circuitId = activeCircuitId;
+      const componentId = node.id;
       inputClickTimerRef.current = setTimeout(() => {
-        cycleInput(node);
+        cycleInput(circuitId, componentId);
         inputClickTimerRef.current = null;
       }, 220);
     },
@@ -1209,6 +1228,10 @@ function Workbench() {
   const commitSelectedProperties = useCallback(
     (properties: Record<string, unknown>): string | undefined => {
       if (!selectedNodeId) return "没有选中的元件 [UNKNOWN_COMPONENT]";
+      if (inputClickTimerRef.current) {
+        clearTimeout(inputClickTimerRef.current);
+        inputClickTimerRef.current = null;
+      }
       try {
         store
           .getState()
@@ -1476,7 +1499,10 @@ function ExampleHelp({ example }: { example: TernaryExample }) {
 }
 
 function SignalRows({ title, values }: { title: string; values: Record<string, TernaryWord> }) {
-  return <div className="signal-group"><h3>{title}</h3>{Object.keys(values).length === 0 ? <span className="muted">无端口</span> : Object.entries(values).map(([port, value]) => <div className="signal-row" key={port}><code>{port}</code><strong style={{ color: wireSignalColor(value, value.length) }}>{value}</strong></div>)}</div>;
+  return <div className="signal-group"><h3>{title}</h3>{Object.keys(values).length === 0 ? <span className="muted">无端口</span> : Object.entries(values).map(([port, value]) => {
+    const lengthClass = value.length > 24 ? "is-length-27" : value.length > 18 ? "is-length-long" : value.length > 9 ? "is-length-medium" : "is-length-short";
+    return <div className={`signal-row ${value.length > 18 ? "is-long-word" : ""}`} key={port}><code>{port}</code><strong className={lengthClass} aria-label={`${port} ${value}`} style={{ color: wireSignalColor(value, value.length) }}>{value}</strong></div>;
+  })}</div>;
 }
 
 function NodeInspector({ node, descriptor, snapshot }: { node: EditorNode; descriptor: CatalogComponent; snapshot: ProjectSimulationSnapshot | null }) {

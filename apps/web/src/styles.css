@@ -1061,17 +1061,30 @@ button {
 
 .signal-columns {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
   margin-top: 12px;
 }
 
+.signal-group {
+  min-width: 0;
+}
+
 .signal-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 5px;
   align-items: center;
+  min-width: 0;
   justify-content: space-between;
   min-height: 25px;
   border-bottom: 1px solid #edf0f1;
+}
+
+.signal-row.is-long-word {
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  padding: 3px 0;
 }
 
 .signal-row code {
@@ -1080,8 +1093,26 @@ button {
 }
 
 .signal-row strong {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 15px;
+  letter-spacing: 0;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.signal-row strong.is-length-medium {
+  font-size: 10px;
+}
+
+.signal-row strong.is-length-long {
+  font-size: 8px;
+}
+
+.signal-row strong.is-length-27 {
+  font-size: 7px;
 }
 
 .property-editor form {

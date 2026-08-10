@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -432,6 +433,7 @@ describe("App", () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -789,6 +791,73 @@ describe("App", () => {
         ?.properties.value,
     ).toBe("T01");
     expect(runtimeMock.setSource).not.toHaveBeenCalled();
+  });
+
+  it("cancels the delayed cycle when a width property commit wins the click race", async () => {
+    const { container } = render(<App />);
+    await screen.findByText(/层级模拟器已就绪/);
+    fireEvent.click(screen.getByRole("button", { name: "添加Trit Input" }));
+    runtimeMock.updateProject.mockClear();
+    vi.useFakeTimers();
+
+    fireEvent.click(
+      container.querySelector('.react-flow__node[data-id="trit-input-1"]')!,
+      { detail: 1 },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "宽度 3 trit" }));
+    fireEvent.change(screen.getByLabelText("源字值"), {
+      target: { value: "1T0" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "应用属性" }));
+    expect(runtimeMock.updateProject).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(220);
+    });
+
+    expect(runtimeMock.updateProject).toHaveBeenCalledTimes(1);
+    const candidate = runtimeMock.updateProject.mock.calls[0][0] as {
+      circuits: Array<{
+        components: Array<{
+          id: string;
+          properties: { width?: number; value?: string };
+        }>;
+      }>;
+    };
+    expect(
+      candidate.circuits[0].components.find(
+        (item) => item.id === "trit-input-1",
+      )?.properties,
+    ).toMatchObject({ width: 3, value: "1T0" });
+    expect(screen.queryByText(/输入更新失败/)).not.toBeInTheDocument();
+  });
+
+  it("keeps source double-click rename while canceling its pending single-click cycle", async () => {
+    const prompt = vi.spyOn(window, "prompt").mockReturnValue("Renamed Input");
+    const { container } = render(<App />);
+    await screen.findByText(/层级模拟器已就绪/);
+    fireEvent.click(screen.getByRole("button", { name: "添加Trit Input" }));
+    runtimeMock.updateProject.mockClear();
+    vi.useFakeTimers();
+    const source = container.querySelector(
+      '.react-flow__node[data-id="trit-input-1"]',
+    )!;
+
+    fireEvent.click(source, { detail: 1 });
+    fireEvent.doubleClick(source, { detail: 2 });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(220);
+    });
+
+    expect(prompt).toHaveBeenCalledWith("修改模块名称", "Trit Input");
+    expect(runtimeMock.updateProject).toHaveBeenCalledTimes(1);
+    expect(
+      container.querySelector(
+        '.react-flow__node[data-id="trit-input-1"] .node-heading span',
+      ),
+    ).toHaveTextContent("Renamed Input");
+    expect(screen.getByRole("heading", { name: "Renamed Input" })).toBeInTheDocument();
+    expect(screen.queryByText(/^输入 trit-input-1:/)).not.toBeInTheDocument();
   });
 
   it("keeps structural edits atomic when runtime rejects and transacts source undo and redo once", async () => {
