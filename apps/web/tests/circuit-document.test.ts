@@ -68,6 +68,22 @@ describe("versioned circuit documents", () => {
     expect(document.connections[0].targetComponentId).toBe("probe-1");
   });
 
+  it("preserves known multi-trit words in the legacy editor document adapter", () => {
+    const document = parseCircuitDocument(JSON.stringify({
+      ...createEmptyCircuitDocument(),
+      components: [
+        {
+          id: "word",
+          typeId: "source.trit_input",
+          position: { x: 0, y: 0 },
+          properties: { value: "1T0", width: 3 },
+        },
+      ],
+    }));
+
+    expect(toEditorDocument(document).nodes[0].data.sourceValue).toBe("1T0");
+  });
+
   it("rejects a non-positive viewport zoom", () => {
     expect(() =>
       parseCircuitDocument(JSON.stringify({

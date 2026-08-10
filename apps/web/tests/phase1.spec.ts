@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import path from "node:path";
 
 function watchConsoleErrors(page: Page): string[] {
   const errors: string[] = [];
@@ -118,6 +119,34 @@ test("edits and simulates a ternary circuit through Rust/WASM", async ({
   await page.locator('.react-flow__edge[data-id="wire-4"]').click({ force: true });
   await page.getByRole("button", { name: "删除所选" }).click();
   await expect(node(page, "probe-1").locator(".node-signal")).toHaveText("0");
+  expect(consoleErrors).toEqual([]);
+});
+
+test("validates width-aware and inout connections through the production editor path", async ({
+  page,
+}) => {
+  const consoleErrors = watchConsoleErrors(page);
+  await waitForSimulator(page);
+  await page
+    .getByLabel("选择三进制工程文件")
+    .setInputFiles(path.join(import.meta.dirname, "fixtures/task6-connections-v3.json"));
+  await expect(page.getByText(/已导入工程/)).toBeVisible();
+
+  await connect(
+    page,
+    "handle-word-source-output-out",
+    "handle-scalar-probe-input-in",
+  );
+  await expect(page.getByText(/信号宽度不一致/)).toBeVisible();
+  await expect(page.locator(".react-flow__edge")).toHaveCount(0);
+
+  await connect(
+    page,
+    "handle-word-source-output-out",
+    "handle-word-tunnel-input-net",
+  );
+  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
+  await expect(page.getByText("1 WIRES")).toBeVisible();
   expect(consoleErrors).toEqual([]);
 });
 

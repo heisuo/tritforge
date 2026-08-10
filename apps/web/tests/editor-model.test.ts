@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_DOCUMENT,
   cycleKnownTrit,
+  cycleKnownWord,
   renameNodeLabel,
   toCircuitDefinition,
   validateConnection,
@@ -82,6 +83,11 @@ describe("editor document model", () => {
     expect(values.slice(1)).toEqual(values.slice(0, -1).map(cycleKnownTrit));
   });
 
+  it("cycles every trit in a known word without changing its width", () => {
+    expect(cycleKnownWord("1T0")).toBe("T01");
+    expect(() => cycleKnownWord("10X")).toThrow(/unknown ternary symbol/);
+  });
+
   it("renames only the node label without changing circuit topology", () => {
     const renamedNodes = renameNodeLabel(
       DEFAULT_DOCUMENT.nodes,
@@ -109,8 +115,8 @@ describe("editor document model", () => {
         {
           source: "neg-1",
           sourceHandle: "a",
-          target: "input-1",
-          targetHandle: "out",
+          target: "probe-1",
+          targetHandle: "in",
         },
         DEFAULT_DOCUMENT,
         catalog,
@@ -145,6 +151,37 @@ describe("editor document model", () => {
           targetHandle: "a",
         },
         DEFAULT_DOCUMENT,
+        catalog,
+      ),
+    ).toEqual({ valid: false, reason: "duplicate" });
+  });
+
+  it("accepts resolved inout ports and detects reversed duplicates", () => {
+    const document = structuredClone(DEFAULT_DOCUMENT);
+    document.nodes[1].data.ports = [
+      { id: "a", direction: "inout", width: 1 },
+    ];
+    expect(
+      validateConnection(
+        {
+          source: "input-1",
+          sourceHandle: "out",
+          target: "neg-1",
+          targetHandle: "a",
+        },
+        { ...document, edges: [] },
+        catalog,
+      ),
+    ).toEqual({ valid: true });
+    expect(
+      validateConnection(
+        {
+          source: "neg-1",
+          sourceHandle: "a",
+          target: "input-1",
+          targetHandle: "out",
+        },
+        document,
         catalog,
       ),
     ).toEqual({ valid: false, reason: "duplicate" });

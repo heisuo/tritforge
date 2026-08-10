@@ -180,7 +180,7 @@ test("one Half Adder definition update reaches both instances without source rec
   expect(result.compileCountAfterUpdate).toBe(2);
 });
 
-test("exports, clears, and imports a v2 hierarchy and reports recursive imports", async ({
+test("exports v3, clears, and reimports it while reporting recursive v2 imports", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -196,9 +196,15 @@ test("exports, clears, and imports a v2 hierarchy and reports recursive imports"
   const exported = Buffer.concat(chunks);
   const document = JSON.parse(exported.toString("utf8")) as {
     version: number;
-    circuits: Array<{ id: string }>;
+    circuits: Array<{
+      id: string;
+      wires: unknown[];
+      connections?: unknown[];
+    }>;
   };
-  expect(document.version).toBe(2);
+  expect(document.version).toBe(3);
+  expect(document.circuits.every((circuit) => Array.isArray(circuit.wires))).toBe(true);
+  expect(document.circuits.every((circuit) => circuit.connections === undefined)).toBe(true);
   expect(document.circuits.map((circuit) => circuit.id)).toEqual([
     "main",
     "full-adder",

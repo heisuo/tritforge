@@ -30,7 +30,7 @@ function signalForPort(
   inputs: Record<string, TritSymbol>,
   outputs: Record<string, TritSymbol>,
 ): TritSymbol {
-  return port.direction === "input"
+  return port.direction !== "output"
     ? inputs[port.id] ?? "Z"
     : outputs[port.id] ?? "Z";
 }
@@ -77,22 +77,24 @@ export function CircuitNode({
   const inputs = data.inputSignals ?? {};
   const outputs = data.outputSignals ?? {};
   const ports = data.ports ?? [];
-  const inputPorts = ports.filter((port) => port.direction === "input");
-  const outputPorts = ports.filter((port) => port.direction === "output");
+  const inputPorts = ports.filter((port) => port.direction !== "output");
+  const outputPorts = ports.filter((port) => port.direction !== "input");
   const registerWord =
     data.typeId === "project.module_instance" &&
     data.properties?.moduleId === "register3"
       ? `${outputs.q2 ?? "Z"}${outputs.q1 ?? "Z"}${outputs.q0 ?? "Z"}`
       : null;
-  const primarySignal =
+  const displaySignal =
     data.typeId === "sink.probe" || data.typeId === "project.module_output"
       ? inputs.in ?? "Z"
       : data.typeId === "sequential.dff"
         ? outputs.q ?? "Z"
         : registerWord
-          ? outputs.q2 ?? "Z"
+          ? registerWord
           : outputs.out ?? outputs.y ?? outputs.sum ?? data.sourceValue ?? "Z";
-  const displaySignal = registerWord ?? primarySignal;
+  const primarySignal: TritSymbol = isTritSymbol(displaySignal)
+    ? displaySignal
+    : "X";
 
   return (
     <div
@@ -163,6 +165,10 @@ export function CircuitNode({
       })}
     </div>
   );
+}
+
+function isTritSymbol(value: string): value is TritSymbol {
+  return value === "T" || value === "0" || value === "1" || value === "X" || value === "Z" || value === "E";
 }
 
 export { SIGNAL_COLORS };

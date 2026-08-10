@@ -1,0 +1,33 @@
+{
+  "format": "logsim-ternary",
+  "version": 3,
+  "rootCircuitId": "main",
+  "circuits": [
+    {
+      "id": "main",
+      "name": "Task 6 Connections",
+      "kind": "main",
+      "components": [
+        {
+          "id": "word-source",
+          "typeId": "source.trit_input",
+          "position": { "x": 100, "y": 180 },
+          "properties": { "label": "Word Source", "width": 3, "value": "1T0" }
+        },
+        {
+          "id": "scalar-probe",
+          "typeId": "sink.probe",
+          "position": { "x": 650, "y": 100 },
+          "properties": { "label": "Scalar Probe", "width": 1 }
+        },
+        {
+          "id": "word-tunnel",
+          "typeId": "wiring.tunnel",
+          "position": { "x": 650, "y": 300 },
+          "properties": { "label": "DATA", "width": 3 }
+        }
+      ],
+      "wires": []
+    }
+  ]
+}

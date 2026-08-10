@@ -157,6 +157,48 @@ function addWordEndpoints(
 }
 
 describe("project v3 store", () => {
+  it("normalizes imported wires at every store and history boundary", () => {
+    const imported = emptyProject();
+    imported.circuits[0].components = [
+      component("z-source", "source.constant", { width: 1, value: "1" }),
+      component("a-probe", "sink.probe", { width: 1 }),
+    ];
+    imported.circuits[0].wires = [
+      {
+        id: "wire-reversed",
+        endpointA: { componentId: "z-source", portId: "out" },
+        endpointB: { componentId: "a-probe", portId: "in" },
+      },
+    ];
+    const store = createProjectStore(imported, { portResolver: resolver() });
+
+    expect(store.getState().project.circuits[0].wires[0]).toMatchObject({
+      id: "wire-reversed",
+      endpointA: { componentId: "a-probe", portId: "in" },
+      endpointB: { componentId: "z-source", portId: "out" },
+    });
+
+    const replacement = structuredClone(imported);
+    replacement.circuits[0].wires[0] = {
+      id: "wire-reversed",
+      endpointA: { componentId: "z-source", portId: "out" },
+      endpointB: { componentId: "a-probe", portId: "in" },
+    };
+    replacement.circuits[0].components[0].properties.value = "T";
+    store.getState().replaceProject(replacement);
+    store.getState().undo();
+    store.getState().redo();
+
+    for (const project of [
+      store.getState().project,
+      ...store.getState().past,
+      ...store.getState().future,
+    ]) {
+      expect(project.circuits[0].wires[0].endpointA.componentId).toBe("a-probe");
+      expect(project.circuits[0].wires[0].endpointB.componentId).toBe("z-source");
+    }
+  });
+
   it("allocates collision-free module IDs and enters shared definitions", () => {
     const store = createProjectStore(emptyProject(), { portResolver: resolver() });
 
@@ -269,24 +311,18 @@ describe("project v3 store", () => {
     expect(store.getState().project.circuits[0].wires).toHaveLength(2);
   });
 
-  it("runs whole-project Rust validation on the candidate wire before commit", () => {
-    const base = resolver();
-    const applyProject = vi.fn();
+  it("lets the accepted runtime compile perform whole-project validation once", () => {
+    const applyProject = vi.fn((project: ProjectDocumentV3) => {
+      if (project.circuits.some((circuit) =>
+        circuit.wires.some((wire) => wire.id === "compiler-rejects"),
+      )) {
+        throw Object.assign(new Error("candidate project rejected"), {
+          code: "MULTIPLE_DRIVERS",
+        });
+      }
+    });
     const store = createProjectStore(emptyProject(), {
-      portResolver: {
-        ...base,
-        resolveModuleInterfaces(value) {
-          const project = value as ProjectDocumentV3;
-          if (project.circuits.some((circuit) =>
-            circuit.wires.some((wire) => wire.id === "compiler-rejects"),
-          )) {
-            throw Object.assign(new Error("candidate project rejected"), {
-              code: "MULTIPLE_DRIVERS",
-            });
-          }
-          return base.resolveModuleInterfaces(value);
-        },
-      },
+      portResolver: resolver(),
       applyProject,
     });
     addWordEndpoints(store);
@@ -300,7 +336,7 @@ describe("project v3 store", () => {
       }),
     ).toThrowError(expect.objectContaining({ code: "MULTIPLE_DRIVERS" }));
     expect(store.getState().project.circuits[0].wires).toEqual([]);
-    expect(applyProject).not.toHaveBeenCalled();
+    expect(applyProject).toHaveBeenCalledTimes(1);
   });
 
   it("records width and splitter mapping property edits as one undo step each", () => {
@@ -565,8 +601,8 @@ describe("project v3 store", () => {
 
     expect(store.getState().activePath).toEqual([{ circuitId: "main" }]);
     expect(store.getState().selectionByCircuit.main).toEqual({
-      componentIds: ["child-1"],
-      wireIds: ["wire-draft"],
+      componentIds: [],
+      wireIds: [],
     });
     expect(store.getState().project.version).toBe(3);
     expect(store.getState().past).toHaveLength(beforeUndo - 1);
@@ -580,5 +616,114 @@ describe("project v3 store", () => {
   it("keeps error codes available on typed edit errors", () => {
     const error = new ProjectEditError("WIDTH_MISMATCH", "nope");
     expect(error).toMatchObject({ name: "ProjectEditError", code: "WIDTH_MISMATCH" });
+  });
+
+  it("runs an installed runtime applier before every semantic commit and rolls back on failure", () => {
+    const accepted: string[] = [];
+    const store = createProjectStore(emptyProject(), { portResolver: resolver() });
+    store.getState().setApplyProject((project) => {
+      const count = project.circuits[0].components.length;
+      accepted.push(`components:${count}`);
+      if (count === 2) throw new Error("runtime rejected candidate");
+    });
+
+    store.getState().addComponent(
+      "main",
+      component("source", "source.constant", { width: 1, value: "0" }),
+    );
+    const before = {
+      project: structuredClone(store.getState().project),
+      past: structuredClone(store.getState().past),
+      structureRevision: store.getState().structureRevision,
+    };
+    expect(() =>
+      store.getState().addComponent(
+        "main",
+        component("probe", "sink.probe", { width: 1 }),
+      ),
+    ).toThrow("runtime rejected candidate");
+    expect(store.getState().project).toEqual(before.project);
+    expect(store.getState().past).toEqual(before.past);
+    expect(store.getState().structureRevision).toBe(before.structureRevision);
+
+    store.getState().undo();
+    store.getState().redo();
+    expect(accepted).toEqual([
+      "components:1",
+      "components:2",
+      "components:0",
+      "components:1",
+    ]);
+  });
+
+  it("sanitizes component and wire selections after edits, replace, undo, and redo", () => {
+    const store = createProjectStore(emptyProject(), { portResolver: resolver() });
+    addWordEndpoints(store, 1, 1);
+    store.getState().addWire("main", {
+      id: "wire-1",
+      endpointA: { componentId: "source", portId: "out" },
+      endpointB: { componentId: "probe", portId: "in" },
+    });
+    store.getState().setSelection("main", ["source", "missing"], ["wire-1", "gone"]);
+
+    store.getState().setCircuit("main", {
+      components: [
+        component("source", "source.constant", { width: 1, value: "0" }),
+      ],
+      wires: [],
+    });
+    expect(store.getState().selectionByCircuit.main).toEqual({
+      componentIds: ["source"],
+      wireIds: [],
+    });
+
+    store.getState().undo();
+    expect(store.getState().selectionByCircuit.main).toEqual({
+      componentIds: ["source"],
+      wireIds: [],
+    });
+    store.getState().redo();
+    expect(store.getState().selectionByCircuit.main).toEqual({
+      componentIds: ["source"],
+      wireIds: [],
+    });
+
+    store.getState().replaceProject(emptyProject());
+    expect(store.getState().selectionByCircuit).toEqual({});
+  });
+
+  it("caches Rust port shapes and skips semantic resolution for position-only edits", () => {
+    const base = resolver();
+    const tracked: ProjectStorePortResolver = {
+      resolvePorts: vi.fn(base.resolvePorts),
+      resolveModuleInterfaces: vi.fn(base.resolveModuleInterfaces),
+    };
+    const applyProject = vi.fn();
+    const store = createProjectStore(emptyProject(), {
+      portResolver: tracked,
+      applyProject,
+    });
+    addWordEndpoints(store);
+    store.getState().addWire("main", {
+      id: "wire-1",
+      endpointA: { componentId: "source", portId: "out" },
+      endpointB: { componentId: "probe", portId: "in" },
+    });
+    const portCalls = vi.mocked(tracked.resolvePorts).mock.calls.length;
+    const interfaceCalls = vi.mocked(tracked.resolveModuleInterfaces).mock.calls.length;
+    applyProject.mockClear();
+
+    const circuit = store.getState().project.circuits[0];
+    store.getState().setCircuit("main", {
+      components: circuit.components.map((item, index) => ({
+        ...item,
+        position: { x: index * 100 + 12, y: 34 },
+      })),
+      wires: circuit.wires,
+    });
+
+    expect(tracked.resolvePorts).toHaveBeenCalledTimes(portCalls);
+    expect(tracked.resolveModuleInterfaces).toHaveBeenCalledTimes(interfaceCalls);
+    expect(applyProject).not.toHaveBeenCalled();
   });
 });

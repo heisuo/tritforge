@@ -71,6 +71,7 @@ const runtimeMock = vi.hoisted(() => {
   });
   return {
     makeSnapshot: snapshot,
+    dependencyCycleError,
     resolveProjectModuleInterfaces,
     resolveProjectModulePorts,
     ...projectSimulator,
@@ -90,6 +91,9 @@ vi.mock("../src/wasm-client", () => ({
       }
       if (typeId === "sink.probe" || typeId === "project.module_output") {
         return [{ id: "in", direction: "input", width }];
+      }
+      if (typeId === "wiring.tunnel") {
+        return [{ id: "net", direction: "inout", width }];
       }
       return [{ id: "out", direction: "output", width }];
     },
@@ -266,6 +270,56 @@ function recursiveProject() {
         ],
         connections: [],
       },
+    ],
+  };
+}
+
+function reversedEndpointProject(width = 1) {
+  const sourceValue = width === 3 ? "1T0" : "1";
+  const circuit = (id: string, kind: "main" | "module") => ({
+    id,
+    name: kind === "main" ? "Main" : "Reversed Module",
+    kind,
+    components: [
+      {
+        id: "z-source",
+        typeId: "source.trit_input",
+        position: { x: 80, y: 100 },
+        properties: { width, value: sourceValue, label: "Word Source" },
+      },
+      {
+        id: "a-probe",
+        typeId: "sink.probe",
+        position: { x: 500, y: 100 },
+        properties: { width, label: "Word Probe" },
+      },
+    ],
+    wires: [
+      {
+        id: `wire-${id}`,
+        endpointA: { componentId: "z-source", portId: "out" },
+        endpointB: { componentId: "a-probe", portId: "in" },
+      },
+    ],
+  });
+  return {
+    format: "logsim-ternary",
+    version: 3,
+    rootCircuitId: "main",
+    circuits: [
+      {
+        ...circuit("main", "main"),
+        components: [
+          ...circuit("main", "main").components,
+          {
+            id: "module-1",
+            typeId: "project.module_instance",
+            position: { x: 300, y: 300 },
+            properties: { moduleId: "reversed", label: "Reversed Module" },
+          },
+        ],
+      },
+      circuit("reversed", "module"),
     ],
   };
 }
@@ -465,6 +519,9 @@ describe("App", () => {
     expect(runtimeMock.resolveProjectModuleInterfaces).not.toHaveBeenCalled();
 
     const input = screen.getByLabelText("选择三进制工程文件");
+    runtimeMock.loadProject.mockImplementationOnce(() => {
+      throw runtimeMock.dependencyCycleError();
+    });
     const file = new File([JSON.stringify(recursiveProject())], "recursive.json", {
       type: "application/json",
     });
@@ -483,12 +540,12 @@ describe("App", () => {
     expect(screen.getByRole("application")).toBeInTheDocument();
     expect(screen.getByText("4 COMPONENTS")).toBeInTheDocument();
     expect(screen.getByText("1 COMPILES")).toBeInTheDocument();
-    expect(runtimeMock.resolveProjectModuleInterfaces).toHaveBeenCalledTimes(1);
+    expect(runtimeMock.resolveProjectModuleInterfaces).not.toHaveBeenCalled();
     expect(runtimeMock.resolveProjectModulePorts).not.toHaveBeenCalled();
   });
 
-  it("does not commit an input when the runtime rejects its update", async () => {
-    runtimeMock.setSource.mockImplementationOnce(() => {
+  it("does not commit an input when the runtime transaction rejects its update", async () => {
+    runtimeMock.updateProject.mockImplementationOnce(() => {
       throw new Error("source blocked");
     });
     const { container } = render(<App />);
@@ -499,6 +556,94 @@ describe("App", () => {
     expect(await screen.findByText(/source blocked/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "撤销" })).toBeDisabled();
   });
+
+  it("orients normalized wires from resolved output to input across import, navigation, and undo", async () => {
+    const signalSnapshot = (active?: string): ProjectSimulationSnapshot => ({
+      ...runtimeMock.makeSnapshot(),
+      componentOutputs: { "z-source": { out: "1" } },
+      inputNets: { "a-probe": { in: "T" } },
+      componentOutputWords: { "z-source": { out: "1" } },
+      inputNetWords: { "a-probe": { in: "T" } },
+      tickCount: active === "reversed" ? 2 : 1,
+    });
+    runtimeMock.loadProject.mockImplementation((_project?: unknown, active?: string) =>
+      signalSnapshot(active),
+    );
+    runtimeMock.switchActive.mockImplementation((active?: string) =>
+      signalSnapshot(active),
+    );
+    runtimeMock.updateProject.mockImplementation(() => signalSnapshot("reversed"));
+    const { container } = render(<App />);
+    await importProject(reversedEndpointProject());
+
+    const assertWire = (id: string) => {
+      const state = JSON.parse(
+        screen.getByRole("region", { name: "电路画布" }).getAttribute("data-wire-state") ?? "[]",
+      ) as Array<Record<string, string>>;
+      expect(state.find((wire) => wire.id === id)).toEqual({
+        id,
+        source: "z-source",
+        sourcePort: "out",
+        target: "a-probe",
+        targetPort: "in",
+        signal: "T",
+      });
+    };
+    await waitFor(() => assertWire("wire-main"));
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑 Reversed Module" }));
+    await waitFor(() => assertWire("wire-reversed"));
+    runtimeMock.updateProject.mockClear();
+    fireEvent.click(container.querySelector('.react-flow__node[data-id="z-source"]')!);
+    await waitFor(() => expect(runtimeMock.updateProject).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "撤销" }));
+    await waitFor(() => assertWire("wire-reversed"));
+  });
+
+  it("keeps width-3 source words valid when clicking the scalar-compatible source UI", async () => {
+    const { container } = render(<App />);
+    await importProject(reversedEndpointProject(3));
+    runtimeMock.updateProject.mockClear();
+
+    fireEvent.click(container.querySelector('.react-flow__node[data-id="z-source"]')!);
+
+    await waitFor(() => expect(runtimeMock.updateProject).toHaveBeenCalledTimes(1));
+    const candidate = runtimeMock.updateProject.mock.calls[0][0] as {
+      circuits: Array<{ components: Array<{ id: string; properties: { value?: string } }> }>;
+    };
+    expect(
+      candidate.circuits[0].components.find((item) => item.id === "z-source")
+        ?.properties.value,
+    ).toBe("T01");
+    expect(runtimeMock.setSource).not.toHaveBeenCalled();
+  });
+
+  it("keeps structural edits atomic when runtime rejects and transacts source undo and redo once", async () => {
+    const { container } = render(<App />);
+    await screen.findByText(/层级模拟器已就绪/);
+    runtimeMock.updateProject.mockClear();
+    runtimeMock.updateProject.mockImplementationOnce(() => {
+      throw new Error("structure blocked");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /NEG/ }));
+    expect(await screen.findByText(/structure blocked/)).toBeInTheDocument();
+    expect(container.querySelectorAll(".react-flow__node")).toHaveLength(3);
+    expect(screen.getByRole("button", { name: "撤销" })).toBeDisabled();
+
+    runtimeMock.updateProject.mockImplementation((_project?: unknown) =>
+      runtimeMock.makeSnapshot(),
+    );
+    runtimeMock.updateProject.mockClear();
+    fireEvent.click(container.querySelector('.react-flow__node[data-id="input-1"]')!);
+    await waitFor(() => expect(runtimeMock.updateProject).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "撤销" }));
+    await waitFor(() => expect(runtimeMock.updateProject).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: "重做" }));
+    await waitFor(() => expect(runtimeMock.updateProject).toHaveBeenCalledTimes(3));
+    expect(runtimeMock.setSource).not.toHaveBeenCalled();
+  });
+
 
   it("follows qualified diagnostic instance paths", async () => {
     runtimeMock.loadProject.mockImplementation((project?: unknown) => {

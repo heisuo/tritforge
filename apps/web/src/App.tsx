@@ -3,7 +3,6 @@ import {
   BackgroundVariant,
   ReactFlow,
   ReactFlowProvider,
-  addEdge,
   applyEdgeChanges,
   applyNodeChanges,
   type Connection,
@@ -62,18 +61,19 @@ import {
 } from "./editor/circuit-document";
 import {
   createDefaultDocument,
-  cycleKnownTrit,
+  cycleKnownWord,
   makeComponentId,
   makeConnectionId,
   renameNodeLabel,
+  validateConnection,
   type CatalogComponent,
   type ConnectionCandidate,
   type EditorDocument,
   type EditorEdge,
   type EditorNode,
-  type KnownTrit,
   type ProjectSimulationDiagnostic,
   type ProjectSimulationSnapshot,
+  type TernaryWord,
   type TritSymbol,
 } from "./editor-model";
 import {
@@ -98,15 +98,16 @@ import {
 import {
   HierarchyRuntime,
   HierarchyRuntimeError,
-  toRuntimeProject,
 } from "./project/hierarchy-runtime";
-import { createProjectStore } from "./project/project-store";
+import {
+  ProjectEditError,
+  createProjectStore,
+} from "./project/project-store";
+import { edgeNetValue, projectToEditor } from "./project/editor-projection";
 import {
   createWasmRuntime,
   wasmErrorMessage,
   wasmProjectError,
-  type ProjectModuleInterfaceResolver,
-  type ProjectModuleInterfaces,
   type WasmRuntime,
 } from "./wasm-client";
 import { assignWireLanes } from "./wire-routing";
@@ -194,14 +195,6 @@ function descriptorIcon(descriptor: CatalogComponent) {
   return CircleDot;
 }
 
-function edgeSignal(
-  edge: EditorEdge,
-  snapshot: ProjectSimulationSnapshot | null,
-): TritSymbol {
-  if (!edge.sourceHandle) return "Z";
-  return snapshot?.componentOutputs[edge.source]?.[edge.sourceHandle] ?? "Z";
-}
-
 function instanceId(moduleId: string, nodes: EditorNode[]): string {
   const stem = moduleId.replace(/-\d+$/, "") || "module";
   const used = new Set(nodes.map((node) => node.id));
@@ -217,38 +210,10 @@ function nextId(stem: string, used: string[]): string {
   return `${stem}-${suffix}`;
 }
 
-function sourceChanges(
-  before: ProjectDocumentV3,
-  after: ProjectDocumentV3,
-): Array<{ circuitId: string; componentId: string; value: string }> {
-  const oldValues = new Map<string, unknown>();
-  for (const circuit of before.circuits) {
-    for (const component of circuit.components) {
-      oldValues.set(
-        `${circuit.id}\0${component.id}`,
-        component.typeId === "project.module_input"
-          ? component.properties.previewValue
-          : component.properties.value,
-      );
-    }
-  }
-  const updates: Array<{ circuitId: string; componentId: string; value: string }> = [];
-  for (const circuit of after.circuits) {
-    for (const component of circuit.components) {
-      const value =
-        component.typeId === "project.module_input"
-          ? component.properties.previewValue
-          : component.properties.value;
-      if (
-        typeof value === "string" &&
-        /^[T01]+$/.test(value) &&
-        oldValues.get(`${circuit.id}\0${component.id}`) !== value
-      ) {
-        updates.push({ circuitId: circuit.id, componentId: component.id, value });
-      }
-    }
-  }
-  return updates;
+function wordColor(value: TernaryWord): string {
+  return value.length === 1 && value in SIGNAL_COLORS
+    ? SIGNAL_COLORS[value as TritSymbol]
+    : SIGNAL_COLORS.X;
 }
 
 function readTextFile(file: File): Promise<string> {
@@ -267,6 +232,7 @@ function Workbench() {
   const activePath = useStore(store, (state) => state.activePath);
   const canUndo = useStore(store, (state) => state.past.length > 0);
   const canRedo = useStore(store, (state) => state.future.length > 0);
+  const structureRevision = useStore(store, (state) => state.structureRevision);
   const activeCircuitId = activePath.at(-1)?.circuitId ?? project.rootCircuitId;
   const activeCircuit =
     project.circuits.find((circuit) => circuit.id === activeCircuitId) ??
@@ -296,8 +262,8 @@ function Workbench() {
   const runtimeRef = useRef<HierarchyRuntime | null>(null);
   const wasmRef = useRef<WasmRuntime | null>(null);
   const baseCatalogRef = useRef<CatalogComponent[]>([]);
-  const moduleInterfaceResolverRef = useRef<ProjectModuleInterfaceResolver | null>(null);
-  const moduleInterfacesRef = useRef<ProjectModuleInterfaces | null>(null);
+  const runtimeActiveCircuitRef = useRef<string | null>(null);
+  const pendingActiveCircuitRef = useRef<string | null>(null);
   const flowRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const instanceRef = useRef<ReactFlowInstance<EditorNode, EditorEdge> | null>(null);
@@ -341,16 +307,21 @@ function Workbench() {
     setStatusMessage(`${prefix}: ${decoded.message}`);
   }, []);
 
+  const editFailure = useCallback((prefix: string, error: unknown) => {
+    if (error instanceof HierarchyRuntimeError) {
+      runtimeFailure(prefix, error, false);
+      return;
+    }
+    const code = error instanceof ProjectEditError ? ` [${error.code}]` : "";
+    setStatusMessage(`${prefix}${code}: ${wasmErrorMessage(error)}`);
+  }, [runtimeFailure]);
+
   const prepareProjectCatalog = useCallback(
     (
       nextProject: ProjectDocumentV3,
       nextActiveCircuitId: string,
-      resolveInterfaces = true,
     ) => {
-      const interfaces = resolveInterfaces
-        ? moduleInterfaceResolverRef.current?.(toRuntimeProject(nextProject))
-        : moduleInterfacesRef.current;
-      if (!interfaces) return null;
+      const interfaces = store.getState().resolveProjectModuleInterfaces();
       return {
         catalog: buildProjectCatalog(
           baseCatalogRef.current,
@@ -361,37 +332,16 @@ function Workbench() {
         interfaces,
       };
     },
-    [],
+    [store],
   );
 
   const acceptProjectCatalog = useCallback(
     (prepared: ReturnType<typeof prepareProjectCatalog>) => {
       if (!prepared) return;
-      moduleInterfacesRef.current = prepared.interfaces;
       setDynamicCatalog(prepared.catalog);
     },
     [],
   );
-
-  const syncStructure = useCallback(() => {
-    const runtime = runtimeRef.current;
-    if (!runtime) return;
-    try {
-      const state = store.getState();
-      const nextActiveCircuitId =
-        state.activePath.at(-1)?.circuitId ?? state.project.rootCircuitId;
-      const nextCatalog = prepareProjectCatalog(
-        state.project,
-        nextActiveCircuitId,
-      );
-      const nextSnapshot = runtime.updateProject(state.project);
-      acceptProjectCatalog(nextCatalog);
-      setSuccessfulSnapshot(nextSnapshot);
-      setStatusMessage("工程结构已由 Rust/WASM 重新求值");
-    } catch (error) {
-      runtimeFailure("工程校验失败", error, false);
-    }
-  }, [acceptProjectCatalog, prepareProjectCatalog, runtimeFailure, setSuccessfulSnapshot, store]);
 
   const tickSimulation = useCallback(() => {
     const runtime = runtimeRef.current;
@@ -409,7 +359,9 @@ function Workbench() {
     const circuitId = state.activePath.at(-1)?.circuitId ?? state.project.rootCircuitId;
     const circuit = state.project.circuits.find((item) => item.id === circuitId);
     if (!circuit) return;
-    const next = toEditorDocument(circuitDocument(circuit));
+    const next = projectToEditor(circuit, (componentId) =>
+      state.resolveComponentPorts(circuitId, componentId),
+    );
     const selection = state.selectionByCircuit[circuitId];
     setNodes(
       next.nodes.map((node) => ({
@@ -446,9 +398,9 @@ function Workbench() {
       const nextCatalog = prepareProjectCatalog(
         store.getState().project,
         targetCircuitId,
-        false,
       );
       const nextSnapshot = runtime?.switchActive(targetCircuitId);
+      if (nextSnapshot) runtimeActiveCircuitRef.current = targetCircuitId;
       acceptProjectCatalog(nextCatalog);
       if (nextSnapshot) setSuccessfulSnapshot(nextSnapshot);
       updatePath();
@@ -469,7 +421,6 @@ function Workbench() {
         const runtime = new HierarchyRuntime(wasm.projectSimulator);
         runtimeRef.current = runtime;
         baseCatalogRef.current = wasm.catalog;
-        moduleInterfaceResolverRef.current = wasm.resolveProjectModuleInterfaces;
         store.getState().setPortResolver({
           resolvePorts: wasm.resolveProjectPorts,
           resolveModuleInterfaces: wasm.resolveProjectModuleInterfaces,
@@ -485,8 +436,29 @@ function Workbench() {
             currentCircuitId,
           );
           const nextSnapshot = runtime.load(state.project, currentCircuitId);
+          runtimeActiveCircuitRef.current = currentCircuitId;
+          store.getState().setApplyProject((nextProject) => {
+            const requested = pendingActiveCircuitRef.current;
+            const currentState = store.getState();
+            const currentActive =
+              requested ??
+              currentState.activePath.at(-1)?.circuitId ??
+              nextProject.rootCircuitId;
+            const nextActive = nextProject.circuits.some(
+              (circuit) => circuit.id === currentActive,
+            )
+              ? currentActive
+              : nextProject.rootCircuitId;
+            const accepted =
+              requested !== null || runtimeActiveCircuitRef.current !== nextActive
+                ? runtime.load(nextProject, nextActive)
+                : runtime.updateProject(nextProject);
+            runtimeActiveCircuitRef.current = nextActive;
+            setSuccessfulSnapshot(accepted);
+          });
           acceptProjectCatalog(nextCatalog);
           setSuccessfulSnapshot(nextSnapshot);
+          restoreActiveCircuit();
           setWasmState("ready");
           setStatusMessage("Rust/WASM 层级模拟器已就绪");
         } catch (error) {
@@ -501,6 +473,7 @@ function Workbench() {
       });
     return () => {
       mounted = false;
+      store.getState().setApplyProject(undefined);
     };
   }, []);
 
@@ -513,30 +486,54 @@ function Workbench() {
     return () => media.removeEventListener("change", update);
   }, []);
 
+  useEffect(() => {
+    if (wasmState !== "ready") return;
+    try {
+      acceptProjectCatalog(
+        prepareProjectCatalog(store.getState().project, activeCircuitId),
+      );
+    } catch (error) {
+      editFailure("元件目录更新失败", error);
+    }
+  }, [
+    acceptProjectCatalog,
+    activeCircuitId,
+    editFailure,
+    prepareProjectCatalog,
+    store,
+    structureRevision,
+    wasmState,
+  ]);
+
   const applyEditorDocument = useCallback(
     (next: EditorDocument) => {
-      const viewport = instanceRef.current?.getViewport();
-      const saved = fromEditorDocument(next, viewport);
-      store.getState().setCircuit(activeCircuitId, {
-        components: saved.components,
-        wires: saved.connections.map((connection) => ({
-          id: connection.id,
-          endpointA: {
-            componentId: connection.sourceComponentId,
-            portId: connection.sourcePortId,
-          },
-          endpointB: {
-            componentId: connection.targetComponentId,
-            portId: connection.targetPortId,
-          },
-        })),
-        ...(saved.viewport ? { viewport: saved.viewport } : {}),
-      });
-      setNodes(next.nodes);
-      setEdges(next.edges);
-      syncStructure();
+      try {
+        const viewport = instanceRef.current?.getViewport();
+        const saved = fromEditorDocument(next, viewport);
+        store.getState().setCircuit(activeCircuitId, {
+          components: saved.components,
+          wires: saved.connections.map((connection) => ({
+            id: connection.id,
+            endpointA: {
+              componentId: connection.sourceComponentId,
+              portId: connection.sourcePortId,
+            },
+            endpointB: {
+              componentId: connection.targetComponentId,
+              portId: connection.targetPortId,
+            },
+          })),
+          ...(saved.viewport ? { viewport: saved.viewport } : {}),
+        });
+        setNodes(next.nodes);
+        setEdges(next.edges);
+        return true;
+      } catch (error) {
+        editFailure("工程编辑失败", error);
+        return false;
+      }
     },
-    [activeCircuitId, store, syncStructure],
+    [activeCircuitId, editFailure, store],
   );
 
   const renderedNodes = useMemo(
@@ -547,7 +544,7 @@ function Workbench() {
           ...node,
           data: {
             ...node.data,
-            ports: descriptor?.ports ?? [],
+            ports: node.data.ports ?? descriptor?.ports ?? [],
             inputSignals: snapshot?.inputNets[node.id] ?? {},
             outputSignals: snapshot?.componentOutputs[node.id] ?? {},
           },
@@ -574,52 +571,28 @@ function Workbench() {
   const renderedEdges = useMemo(
     () =>
       edges.map((edge) => {
-        const signal = edgeSignal(edge, snapshot);
+        const signal = edgeNetValue(edge, snapshot);
+        const color = wordColor(signal);
         return {
           ...edge,
           type: "logic" as const,
           data: { ...edge.data, ...wireLanes[edge.id] },
           label: signal,
-          labelStyle: { fill: SIGNAL_COLORS[signal], fontSize: 12, fontWeight: 800 },
+          labelStyle: { fill: color, fontSize: 12, fontWeight: 800 },
           labelBgStyle: { fill: "#ffffff", fillOpacity: 0.92 },
           labelBgPadding: [4, 3] as [number, number],
           labelBgBorderRadius: 2,
-          style: { stroke: SIGNAL_COLORS[signal], strokeWidth: 2.2 },
+          style: { stroke: color, strokeWidth: 2.2 },
         };
       }),
-    [edges, snapshot, wireLanes],
+    [edges, nodes, snapshot, wireLanes],
   );
 
   const validateUiConnection = useCallback(
     (connection: ConnectionCandidate) => {
-      const source = nodes.find((node) => node.id === connection.source);
-      const target = nodes.find((node) => node.id === connection.target);
-      const sourcePort = source
-        ? descriptorForNode(source)?.ports.find((port) => port.id === connection.sourceHandle)
-        : undefined;
-      const targetPort = target
-        ? descriptorForNode(target)?.ports.find((port) => port.id === connection.targetHandle)
-        : undefined;
-      if (!source || !target || !sourcePort || !targetPort) {
-        return { valid: false as const, reason: "missing_endpoint" as const };
-      }
-      if (sourcePort.direction !== "output" || targetPort.direction !== "input") {
-        return { valid: false as const, reason: "invalid_direction" as const };
-      }
-      if (
-        edges.some(
-          (edge) =>
-            edge.source === connection.source &&
-            edge.sourceHandle === connection.sourceHandle &&
-            edge.target === connection.target &&
-            edge.targetHandle === connection.targetHandle,
-        )
-      ) {
-        return { valid: false as const, reason: "duplicate" as const };
-      }
-      return { valid: true as const };
+      return validateConnection(connection, { nodes, edges });
     },
-    [descriptorForNode, edges, nodes],
+    [edges, nodes],
   );
 
   const onConnect = useCallback(
@@ -628,18 +601,40 @@ function Workbench() {
       if (!result.valid) {
         const messages = {
           duplicate: "已拒绝完全重复的连线",
-          invalid_direction: "连线必须从输出端口指向输入端口",
+          invalid_direction: "端口方向不兼容",
           missing_endpoint: "连线端点不存在",
+          width_mismatch: "连线失败: 两端信号宽度不一致",
         };
         setStatusMessage(messages[result.reason]);
         return;
       }
-      applyEditorDocument({
-        nodes,
-        edges: addEdge({ ...connection, id: makeConnectionId(edges) }, edges),
-      });
+      try {
+        if (!connection.source || !connection.sourceHandle || !connection.target || !connection.targetHandle) {
+          setStatusMessage("连线失败: 连线端点不存在");
+          return;
+        }
+        store.getState().addWire(activeCircuitId, {
+          id: makeConnectionId(edges),
+          endpointA: {
+            componentId: connection.source,
+            portId: connection.sourceHandle,
+          },
+          endpointB: {
+            componentId: connection.target,
+            portId: connection.targetHandle,
+          },
+        });
+        restoreActiveCircuit();
+        setStatusMessage("连线已添加");
+      } catch (error) {
+        const code = error instanceof ProjectEditError ? ` [${error.code}]` : "";
+        if (error instanceof HierarchyRuntimeError) {
+          setDiagnostics(error.diagnostics);
+        }
+        setStatusMessage(`连线失败${code}: ${wasmErrorMessage(error)}`);
+      }
     },
-    [applyEditorDocument, edges, nodes, validateUiConnection],
+    [activeCircuitId, edges, restoreActiveCircuit, store, validateUiConnection],
   );
 
   const addBuiltin = useCallback(
@@ -660,25 +655,29 @@ function Workbench() {
       const id = makeComponentId(typeId, nodes);
       const sourceValue =
         typeId === "source.trit_input" || typeId === "source.constant"
-          ? ("0" as KnownTrit)
+          ? "0"
           : undefined;
-      applyEditorDocument({
-        nodes: [
-          ...nodes,
-          {
-            id,
-            type: "component",
-            position: nextPosition,
-            data: {
-              typeId,
-              label: DISPLAY_NAMES[typeId] ?? descriptor.display_name,
-              ...(sourceValue ? { sourceValue } : {}),
+      if (
+        applyEditorDocument({
+          nodes: [
+            ...nodes,
+            {
+              id,
+              type: "component",
+              position: nextPosition,
+              data: {
+                typeId,
+                label: DISPLAY_NAMES[typeId] ?? descriptor.display_name,
+                ports: descriptor.ports,
+                ...(sourceValue ? { sourceValue } : {}),
+              },
             },
-          },
-        ],
-        edges,
-      });
-      setSelectedNodeId(id);
+          ],
+          edges,
+        })
+      ) {
+        setSelectedNodeId(id);
+      }
     },
     [applyEditorDocument, baseByType, edges, nodes],
   );
@@ -703,15 +702,14 @@ function Workbench() {
           position,
           properties: { moduleId, label: module.name },
         });
-        syncStructure();
         restoreActiveCircuit();
         setSelectedNodeId(id);
         setStatusMessage(`已放置模块 ${module.name}`);
       } catch (error) {
-        setStatusMessage(`模块放置失败: ${wasmErrorMessage(error)}`);
+        editFailure("模块放置失败", error);
       }
     },
-    [activeCircuitId, nodes, project.circuits, restoreActiveCircuit, store, syncStructure],
+    [activeCircuitId, editFailure, nodes, project.circuits, restoreActiveCircuit, store],
   );
 
   const openCircuit = useCallback(
@@ -731,7 +729,6 @@ function Workbench() {
     if (!name) return;
     try {
       const id = store.getState().createModule(name);
-      syncStructure();
       if (
         commitNavigation(
           id,
@@ -742,9 +739,9 @@ function Workbench() {
         setStatusMessage(`已新建模块 ${name}`);
       }
     } catch (error) {
-      setStatusMessage(`新建模块失败: ${wasmErrorMessage(error)}`);
+      editFailure("新建模块失败", error);
     }
-  }, [commitNavigation, store, syncStructure]);
+  }, [commitNavigation, editFailure, store]);
 
   const addBoundary = useCallback(
     (direction: "input" | "output") => {
@@ -761,19 +758,22 @@ function Workbench() {
       const count = activeCircuit.components.filter(
         (item) => item.typeId === `project.module_${direction}`,
       ).length;
-      store.getState().addComponent(activeCircuit.id, {
-        id,
-        typeId: `project.module_${direction}`,
-        position: { x: direction === "input" ? 80 : 650, y: 100 + count * 150 },
-        properties:
-          direction === "input"
-            ? { portId, label: `Input ${count + 1}`, previewValue: "0" }
-            : { portId, label: `Output ${count + 1}` },
-      });
-      syncStructure();
-      restoreActiveCircuit();
+      try {
+        store.getState().addComponent(activeCircuit.id, {
+          id,
+          typeId: `project.module_${direction}`,
+          position: { x: direction === "input" ? 80 : 650, y: 100 + count * 150 },
+          properties:
+            direction === "input"
+              ? { portId, label: `Input ${count + 1}`, previewValue: "0" }
+              : { portId, label: `Output ${count + 1}` },
+        });
+        restoreActiveCircuit();
+      } catch (error) {
+        editFailure("模块端口添加失败", error);
+      }
     },
-    [activeCircuit, restoreActiveCircuit, store, syncStructure],
+    [activeCircuit, editFailure, restoreActiveCircuit, store],
   );
 
   const navigateBreadcrumb = useCallback(
@@ -793,13 +793,9 @@ function Workbench() {
   const cycleInput = useCallback(
     (node: EditorNode) => {
       const current = node.data.sourceValue ?? "0";
-      const next = cycleKnownTrit(current);
+      const next = cycleKnownWord(current);
       try {
-        const runtime = runtimeRef.current;
-        if (!runtime) throw new Error("Rust/WASM runtime is not ready");
-        const nextSnapshot = runtime.setSource(activeCircuitId, node.id, next);
         store.getState().setSource(activeCircuitId, node.id, next);
-        if (nextSnapshot) setSuccessfulSnapshot(nextSnapshot);
         setNodes((items) =>
           items.map((item) =>
             item.id === node.id
@@ -809,10 +805,10 @@ function Workbench() {
         );
         setStatusMessage(`输入 ${node.id}: ${current} -> ${next}`);
       } catch (error) {
-        setStatusMessage(`输入更新失败: ${wasmErrorMessage(error)}`);
+        editFailure("输入更新失败", error);
       }
     },
-    [activeCircuitId, setSuccessfulSnapshot, store],
+    [activeCircuitId, editFailure, store],
   );
 
   const enterModuleInstance = useCallback(
@@ -868,7 +864,6 @@ function Workbench() {
       if (node.data.typeId.startsWith("project.module_")) {
         try {
           store.getState().renameModulePort(activeCircuitId, node.id, nextLabel);
-          syncStructure();
           restoreActiveCircuit();
         } catch (error) {
           setStatusMessage(`重命名失败: ${wasmErrorMessage(error)}`);
@@ -885,7 +880,6 @@ function Workbench() {
       nodes,
       restoreActiveCircuit,
       store,
-      syncStructure,
     ],
   );
 
@@ -895,7 +889,6 @@ function Workbench() {
     if (selectedNode?.data.typeId === "project.module_input" || selectedNode?.data.typeId === "project.module_output") {
       try {
         store.getState().deleteModulePort(activeCircuitId, selectedNode.id);
-        syncStructure();
         restoreActiveCircuit();
         setStatusMessage("已删除模块端口");
       } catch (error) {
@@ -909,7 +902,7 @@ function Workbench() {
       ...selectedEdgeIds,
       ...edges.filter((edge) => edge.selected).map((edge) => edge.id),
     ]);
-    applyEditorDocument({
+    const committed = applyEditorDocument({
       nodes: nodes.filter((node) => !nodeIds.has(node.id)),
       edges: edges.filter(
         (edge) =>
@@ -918,6 +911,7 @@ function Workbench() {
           !nodeIds.has(edge.target),
       ),
     });
+    if (!committed) return;
     setSelectedNodeId(null);
     setSelectedEdgeIds([]);
   }, [
@@ -929,33 +923,19 @@ function Workbench() {
     selectedEdgeIds,
     selectedNodeId,
     store,
-    syncStructure,
   ]);
 
   const deleteModule = useCallback(
     (moduleId: string) => {
       try {
         store.getState().deleteModule(moduleId);
-        const state = store.getState();
-        const nextActiveId =
-          state.activePath.at(-1)?.circuitId ?? state.project.rootCircuitId;
-        const runtime = runtimeRef.current;
-        const nextCatalog = prepareProjectCatalog(state.project, nextActiveId);
-        if (runtime) {
-          const nextSnapshot =
-            moduleId === activeCircuitId
-              ? runtime.load(state.project, nextActiveId)
-              : runtime.updateProject(state.project);
-          setSuccessfulSnapshot(nextSnapshot);
-        }
-        acceptProjectCatalog(nextCatalog);
         restoreActiveCircuit();
         setStatusMessage("模块已删除");
       } catch (error) {
-        setStatusMessage(`删除受保护: ${wasmErrorMessage(error)}`);
+        editFailure("删除受保护", error);
       }
     },
-    [acceptProjectCatalog, activeCircuitId, prepareProjectCatalog, restoreActiveCircuit, setSuccessfulSnapshot, store],
+    [editFailure, restoreActiveCircuit, store],
   );
 
   const renameModule = useCallback(
@@ -968,85 +948,44 @@ function Workbench() {
       if (!name) return;
       try {
         store.getState().renameModule(moduleId, name);
-        syncStructure();
         restoreActiveCircuit();
         setStatusMessage(`模块已重命名为 ${name}`);
       } catch (error) {
-        setStatusMessage(`模块重命名失败: ${wasmErrorMessage(error)}`);
+        editFailure("模块重命名失败", error);
       }
     },
-    [restoreActiveCircuit, store, syncStructure],
+    [editFailure, restoreActiveCircuit, store],
   );
 
   const historyStep = useCallback(
     (direction: "undo" | "redo") => {
       persistViewport();
-      const before = store.getState();
-      const beforeProject = before.project;
-      const beforeStructure = before.structureRevision;
-      const beforeActive = before.activePath.at(-1)?.circuitId;
-      before[direction]();
-      const after = store.getState();
-      const runtime = runtimeRef.current;
       try {
-        const afterActive = after.activePath.at(-1)?.circuitId;
-        const structureChanged = after.structureRevision !== beforeStructure;
-        const nextCatalog = afterActive
-          ? structureChanged
-            ? prepareProjectCatalog(after.project, afterActive)
-            : afterActive !== beforeActive
-              ? prepareProjectCatalog(after.project, afterActive, false)
-              : null
-          : null;
-        if (runtime) {
-          if (afterActive && afterActive !== beforeActive) {
-            setSuccessfulSnapshot(runtime.load(after.project, afterActive));
-          } else if (structureChanged) {
-            setSuccessfulSnapshot(runtime.updateProject(after.project));
-          } else {
-            for (const update of sourceChanges(beforeProject, after.project)) {
-              const next = runtime.setSource(
-                update.circuitId,
-                update.componentId,
-                update.value,
-              );
-              if (next) setSuccessfulSnapshot(next);
-            }
-          }
-        }
-        acceptProjectCatalog(nextCatalog);
+        store.getState()[direction]();
         restoreActiveCircuit();
         setStatusMessage(direction === "undo" ? "已撤销上一步编辑" : "已重做编辑");
       } catch (error) {
-        runtimeFailure("历史恢复失败", error, false);
+        editFailure("历史恢复失败", error);
       }
     },
-    [acceptProjectCatalog, persistViewport, prepareProjectCatalog, restoreActiveCircuit, runtimeFailure, setSuccessfulSnapshot, store],
+    [editFailure, persistViewport, restoreActiveCircuit, store],
   );
 
   const loadProject = useCallback(
     (nextProject: ProjectDocumentV3, message: string) => {
       try {
-        const runtime = runtimeRef.current;
-        const nextCatalog = prepareProjectCatalog(
-          nextProject,
-          nextProject.rootCircuitId,
-        );
-        const nextSnapshot = runtime?.load(
-          nextProject,
-          nextProject.rootCircuitId,
-        );
+        pendingActiveCircuitRef.current = nextProject.rootCircuitId;
         store.getState().replaceProject(nextProject);
-        acceptProjectCatalog(nextCatalog);
-        if (nextSnapshot) setSuccessfulSnapshot(nextSnapshot);
         restoreActiveCircuit();
         setStatusMessage(message);
       } catch (error) {
         runtimeFailure("工程加载失败", error, false);
         restoreActiveCircuit();
+      } finally {
+        pendingActiveCircuitRef.current = null;
       }
     },
-    [acceptProjectCatalog, prepareProjectCatalog, restoreActiveCircuit, runtimeFailure, setSuccessfulSnapshot, store],
+    [restoreActiveCircuit, runtimeFailure, store],
   );
 
   const loadExample = useCallback(
@@ -1093,15 +1032,18 @@ function Workbench() {
   );
 
   const clearCircuit = useCallback(() => {
-    store.getState().setCircuit(activeCircuitId, {
-      components: [],
-      wires: [],
-    });
-    setNodes([]);
-    setEdges([]);
-    syncStructure();
-    setStatusMessage("画布已清空");
-  }, [activeCircuitId, store, syncStructure]);
+    try {
+      store.getState().setCircuit(activeCircuitId, {
+        components: [],
+        wires: [],
+      });
+      setNodes([]);
+      setEdges([]);
+      setStatusMessage("画布已清空");
+    } catch (error) {
+      editFailure("清空失败", error);
+    }
+  }, [activeCircuitId, editFailure, store]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -1347,7 +1289,7 @@ function Workbench() {
           ))}
         </aside>
 
-        <section className="canvas" aria-label="电路画布" ref={flowRef} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }} onDrop={(event: DragEvent<HTMLDivElement>) => { event.preventDefault(); const typeId = event.dataTransfer.getData("application/logsim-component"); if (typeId && instanceRef.current) addBuiltin(typeId, instanceRef.current.screenToFlowPosition({ x: event.clientX, y: event.clientY })); }}>
+        <section className="canvas" aria-label="电路画布" data-wire-state={JSON.stringify(renderedEdges.map((edge) => ({ id: edge.id, source: edge.source, sourcePort: edge.sourceHandle, target: edge.target, targetPort: edge.targetHandle, signal: edge.label })))} ref={flowRef} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }} onDrop={(event: DragEvent<HTMLDivElement>) => { event.preventDefault(); const typeId = event.dataTransfer.getData("application/logsim-component"); if (typeId && instanceRef.current) addBuiltin(typeId, instanceRef.current.screenToFlowPosition({ x: event.clientX, y: event.clientY })); }}>
           {wasmState !== "loading" ? (
             <ReactFlow<EditorNode, EditorEdge>
               key={`${activeCircuitId}-${reloadRevision}`}
@@ -1359,7 +1301,6 @@ function Workbench() {
               onNodesChange={handleNodesChange}
               onEdgesChange={handleEdgesChange}
               onConnect={onConnect}
-              isValidConnection={(connection) => validateUiConnection(connection).valid}
               onNodeClick={onNodeClick}
               onNodeDoubleClick={onNodeDoubleClick}
               onNodeDragStop={handleNodeDragStop}

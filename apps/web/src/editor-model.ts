@@ -75,7 +75,7 @@ export interface ComponentNodeData extends Record<string, unknown> {
   typeId: string;
   label: string;
   properties?: Record<string, unknown>;
-  sourceValue?: KnownTrit;
+  sourceValue?: TernaryWord;
   ports?: CatalogPort[];
   inputSignals?: Record<string, TritSymbol>;
   outputSignals?: Record<string, TritSymbol>;
@@ -96,7 +96,7 @@ export interface CircuitDefinition {
   components: Array<{
     id: string;
     type_id: string;
-    properties: { value?: KnownTrit };
+    properties: { value?: string };
   }>;
   connections: Array<{
     id: string;
@@ -171,6 +171,17 @@ export function cycleKnownTrit(value: KnownTrit): KnownTrit {
   return "T";
 }
 
+export function cycleKnownWord(value: TernaryWord): TernaryWord {
+  return [...value]
+    .map((trit) => {
+      if (trit !== "T" && trit !== "0" && trit !== "1") {
+        throw new Error(`Cannot cycle unknown ternary symbol '${trit}'`);
+      }
+      return cycleKnownTrit(trit);
+    })
+    .join("");
+}
+
 export function renameNodeLabel(
   nodes: EditorNode[],
   nodeId: string,
@@ -225,7 +236,7 @@ export interface ConnectionCandidate {
 export function validateConnection(
   connection: ConnectionCandidate,
   document: EditorDocument,
-  catalog: CatalogComponent[],
+  catalog: CatalogComponent[] = [],
 ): { valid: true } | { valid: false; reason: ConnectionRejection } {
   const sourceNode = document.nodes.find(
     (node) => node.id === connection.source,
@@ -239,10 +250,10 @@ export function validateConnection(
   const targetDescriptor = catalog.find(
     (component) => component.type_id === targetNode?.data.typeId,
   );
-  const sourcePort = sourceDescriptor?.ports.find(
+  const sourcePort = (sourceNode?.data.ports ?? sourceDescriptor?.ports)?.find(
     (port) => port.id === connection.sourceHandle,
   );
-  const targetPort = targetDescriptor?.ports.find(
+  const targetPort = (targetNode?.data.ports ?? targetDescriptor?.ports)?.find(
     (port) => port.id === connection.targetHandle,
   );
 
@@ -256,10 +267,7 @@ export function validateConnection(
   ) {
     return { valid: false, reason: "missing_endpoint" };
   }
-  if (
-    sourcePort.direction === "input" ||
-    targetPort.direction === "output"
-  ) {
+  if (!directionsCompatible(sourcePort.direction, targetPort.direction)) {
     return { valid: false, reason: "invalid_direction" };
   }
   if (sourcePort.width !== targetPort.width) {
@@ -268,16 +276,28 @@ export function validateConnection(
 
   const duplicate = document.edges.some(
     (edge) =>
-      edge.source === connection.source &&
-      edge.sourceHandle === connection.sourceHandle &&
-      edge.target === connection.target &&
-      edge.targetHandle === connection.targetHandle,
+      ((edge.source === connection.source &&
+        edge.sourceHandle === connection.sourceHandle &&
+        edge.target === connection.target &&
+        edge.targetHandle === connection.targetHandle) ||
+        (edge.source === connection.target &&
+          edge.sourceHandle === connection.targetHandle &&
+          edge.target === connection.source &&
+          edge.targetHandle === connection.sourceHandle)),
   );
   if (duplicate) {
     return { valid: false, reason: "duplicate" };
   }
 
   return { valid: true };
+}
+
+function directionsCompatible(
+  left: CatalogPort["direction"],
+  right: CatalogPort["direction"],
+): boolean {
+  if (left === "inout" || right === "inout") return true;
+  return left !== right;
 }
 
 export function makeComponentId(

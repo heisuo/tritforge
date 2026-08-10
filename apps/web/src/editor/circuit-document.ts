@@ -2,7 +2,7 @@ import type {
   EditorDocument,
   EditorEdge,
   EditorNode,
-  KnownTrit,
+  TernaryWord,
 } from "../editor-model";
 
 export interface EditorComponent {
@@ -110,6 +110,10 @@ export function toEditorDocument(document: CircuitDocument): EditorDocument {
   const nodes: EditorNode[] = document.components.map((component) => {
     const { label, value, previewValue, ...extraProperties } =
       component.properties;
+    const sourceValue = knownWordAt(
+      value ?? previewValue,
+      `component '${component.id}' source value`,
+    );
     return {
       id: component.id,
       type: "component",
@@ -123,9 +127,7 @@ export function toEditorDocument(document: CircuitDocument): EditorDocument {
         ...(Object.keys(extraProperties).length > 0
           ? { properties: extraProperties }
           : {}),
-        ...(value === undefined && previewValue === undefined
-          ? {}
-          : { sourceValue: (value ?? previewValue) as KnownTrit }),
+        ...(sourceValue === undefined ? {} : { sourceValue }),
       },
     };
   });
@@ -189,15 +191,8 @@ function componentAt(value: unknown, index: number): EditorComponent {
   const component = recordAt(value, path);
   assertAllowedKeys(component, COMPONENT_KEYS, path);
   const properties = recordAt(component.properties, `${path}.properties`);
-  const sourceValue = properties.value;
-  if (
-    sourceValue !== undefined &&
-    sourceValue !== "T" &&
-    sourceValue !== "0" &&
-    sourceValue !== "1"
-  ) {
-    throw new Error(`${path}.properties.value must be T, 0, or 1`);
-  }
+  knownWordAt(properties.value, `${path}.properties.value`);
+  knownWordAt(properties.previewValue, `${path}.properties.previewValue`);
   if (
     properties.label !== undefined &&
     (typeof properties.label !== "string" || properties.label.length === 0)
@@ -210,6 +205,14 @@ function componentAt(value: unknown, index: number): EditorComponent {
     position: pointAt(component.position, `${path}.position`),
     properties: { ...properties },
   };
+}
+
+function knownWordAt(value: unknown, path: string): TernaryWord | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !/^[T01]+$/.test(value)) {
+    throw new Error(`${path} must be a known ternary word`);
+  }
+  return value;
 }
 
 function connectionAt(value: unknown, index: number): EditorConnection {
