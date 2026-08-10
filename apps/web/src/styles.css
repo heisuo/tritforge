@@ -973,6 +973,31 @@ button {
   font-weight: 700;
 }
 
+.example-lessons {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.example-lessons div {
+  padding-left: 9px;
+  border-left: 2px solid #c9d7d4;
+}
+
+.example-lessons dt {
+  margin-bottom: 3px;
+  color: #26363d;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.example-lessons dd {
+  margin: 0;
+  color: #5d696f;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
 .component-help p {
   margin: 7px 0 0;
   color: #526068;

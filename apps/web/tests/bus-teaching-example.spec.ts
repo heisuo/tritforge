@@ -1,0 +1,145 @@
+import { expect, test, type Page } from "@playwright/test";
+
+function watchConsoleErrors(page: Page): string[] {
+  const errors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  page.on("pageerror", (error) => errors.push(error.message));
+  return errors;
+}
+
+function node(page: Page, id: string) {
+  return page.locator(`.react-flow__node[data-id="${id}"]`);
+}
+
+async function loadLesson(page: Page) {
+  await page.goto("/");
+  await expect(page.getByText("WASM v3")).toBeVisible();
+  await page.getByRole("button", { name: "示例库" }).click();
+  await page
+    .getByRole("button", { name: "载入示例：3-trit 总线、分线与本地 Tunnel" })
+    .click();
+  await expect(
+    page.getByText(/已载入示例: 3-trit 总线、分线与本地 Tunnel/),
+  ).toBeVisible();
+}
+
+test("real WASM reassembles 1T0 through scalar branches and a local tunnel", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.getByText("WASM v3")).toBeVisible();
+
+  const result = await page.evaluate(async () => {
+    const [{ cloneBusWiringProject }, wasm] = await Promise.all([
+      import("../src/examples/bus-wiring"),
+      import("../src/wasm/pkg/sim_wasm.js"),
+    ]);
+    await wasm.default();
+    const simulator = new wasm.WasmProjectSimulator();
+    const snapshot = simulator.loadProject(cloneBusWiringProject(), "main");
+    return {
+      stable: snapshot.stable,
+      compileCount: snapshot.compileCount,
+      final: snapshot.inputNetWords["probe-word"]?.in,
+      lst:
+        snapshot.inputNets["probe-lst"]?.in ??
+        snapshot.inputNetWords["probe-lst"]?.in,
+      mid:
+        snapshot.inputNets["probe-mid"]?.in ??
+        snapshot.inputNetWords["probe-mid"]?.in,
+      mst:
+        snapshot.inputNets["probe-mst"]?.in ??
+        snapshot.inputNetWords["probe-mst"]?.in,
+      diagnostics: snapshot.diagnostics,
+    };
+  });
+
+  expect(result).toEqual({
+    stable: true,
+    compileCount: 1,
+    final: "1T0",
+    lst: "0",
+    mid: "T",
+    mst: "1",
+    diagnostics: [],
+  });
+});
+
+test("desktop loads the editable lesson without node or page overlap", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const consoleErrors = watchConsoleErrors(page);
+  await loadLesson(page);
+
+  await expect(node(page, "probe-lst").locator(".node-signal")).toHaveText("0");
+  await expect(node(page, "probe-mid").locator(".node-signal")).toHaveText("T");
+  await expect(node(page, "probe-mst").locator(".node-signal")).toHaveText("1");
+  await expect(node(page, "probe-word").locator(".node-signal")).toHaveText(
+    "1T0",
+  );
+  await expect(page.getByText("字序与位序")).toBeVisible();
+  await expect(page.getByText("本地 Tunnel", { exact: true })).toBeVisible();
+
+  await node(page, "word-input").click();
+  await page.getByLabel("源字值").fill("T01");
+  await page.getByRole("button", { name: "应用属性" }).click();
+  await expect(page.getByText("属性已更新")).toBeVisible();
+  await expect(node(page, "probe-lst").locator(".node-signal")).toHaveText("1");
+  await expect(node(page, "probe-mid").locator(".node-signal")).toHaveText("0");
+  await expect(node(page, "probe-mst").locator(".node-signal")).toHaveText("T");
+  await expect(node(page, "probe-word").locator(".node-signal")).toHaveText(
+    "T01",
+  );
+
+  await page.getByLabel("源字值").fill("1T0");
+  await page.getByRole("button", { name: "应用属性" }).click();
+  await expect(node(page, "probe-word").locator(".node-signal")).toHaveText(
+    "1T0",
+  );
+
+  const geometry = await page.locator(".react-flow__node").evaluateAll((elements) => {
+    const rectangles = elements.map((element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        id: element.getAttribute("data-id"),
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+      };
+    });
+    const overlaps: string[] = [];
+    for (let left = 0; left < rectangles.length; left += 1) {
+      for (let right = left + 1; right < rectangles.length; right += 1) {
+        const a = rectangles[left];
+        const b = rectangles[right];
+        const overlapWidth = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+        const overlapHeight = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+        if (overlapWidth > 1 && overlapHeight > 1) {
+          overlaps.push(`${a.id}/${b.id}`);
+        }
+      }
+    }
+    return {
+      overlaps,
+      count: rectangles.length,
+      pageClientWidth: document.documentElement.clientWidth,
+      pageScrollWidth: document.documentElement.scrollWidth,
+      pageClientHeight: document.documentElement.clientHeight,
+      pageScrollHeight: document.documentElement.scrollHeight,
+    };
+  });
+
+  expect(geometry.count).toBe(10);
+  expect(geometry.overlaps).toEqual([]);
+  expect(geometry.pageScrollWidth).toBeLessThanOrEqual(geometry.pageClientWidth);
+  expect(geometry.pageScrollHeight).toBeLessThanOrEqual(geometry.pageClientHeight);
+  await page.screenshot({
+    path: "test-results/bus-tunnel-teaching-1440x900.png",
+    fullPage: true,
+  });
+  expect(consoleErrors).toEqual([]);
+});

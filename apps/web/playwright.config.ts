@@ -8,6 +8,7 @@ export default defineConfig({
     "sequential.spec.ts",
     "register3.spec.ts",
     "bus-wiring.spec.ts",
+    "bus-teaching-example.spec.ts",
   ],
   fullyParallel: false,
   workers: 1,

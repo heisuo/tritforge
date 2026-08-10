@@ -1112,10 +1112,13 @@ function Workbench() {
 
   const loadExample = useCallback(
     (exampleId: ExampleId) => {
-      const legacy =
+      const exampleProject =
         cloneExampleProject(exampleId) ??
         migrateV1ToV2(fromEditorDocument(cloneExampleDocument(exampleId)));
-      const next = migrateV2ToV3(legacy);
+      const next =
+        exampleProject.version === 3
+          ? exampleProject
+          : migrateV2ToV3(exampleProject);
       const example = EXAMPLES.find((item) => item.id === exampleId);
       loadProject(next, `已载入示例: ${example?.name ?? exampleId}`);
       setActiveExampleId(exampleId);
@@ -1494,7 +1497,7 @@ function Workbench() {
 
 function ExampleHelp({ example }: { example: TernaryExample }) {
   return (
-    <section className="inspector-section example-help"><span className="type-chip">当前示例</span><h2>{example.name}</h2><div className="example-path"><span>{example.composition}</span></div><p>{example.description}</p><p className="example-expected">{example.expected}</p><dl className="ternary-key"><div><dt className="signal-T">T</dt><dd>-1，负一</dd></div><div><dt className="signal-0">0</dt><dd>0，中性值</dd></div><div><dt className="signal-1">1</dt><dd>+1，正一</dd></div></dl></section>
+    <section className="inspector-section example-help"><span className="type-chip">当前示例</span><h2>{example.name}</h2><div className="example-path"><span>{example.composition}</span></div><p>{example.description}</p><p className="example-expected">{example.expected}</p>{example.lessons && <dl className="example-lessons">{example.lessons.map((lesson) => <div key={lesson.title}><dt>{lesson.title}</dt><dd>{lesson.text}</dd></div>)}</dl>}<dl className="ternary-key"><div><dt className="signal-T">T</dt><dd>-1，负一</dd></div><div><dt className="signal-0">0</dt><dd>0，中性值</dd></div><div><dt className="signal-1">1</dt><dd>+1，正一</dd></div></dl></section>
   );
 }
 

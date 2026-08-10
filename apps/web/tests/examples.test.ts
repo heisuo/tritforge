@@ -5,6 +5,7 @@ import {
   cloneExampleDocument,
   cloneExampleProject,
 } from "../src/examples";
+import { cloneBusWiringProject } from "../src/examples/bus-wiring";
 
 const TYPE_IDS = [
   "source.trit_input",
@@ -37,6 +38,7 @@ describe("example library", () => {
       "full-adder",
       "hierarchical-adder",
       "ripple-adder-3",
+      "bus-tunnel-3",
       "driver-conflict",
       "sequential-dff",
       "register3",
@@ -208,6 +210,153 @@ describe("example library", () => {
         .properties.value,
     ).toBe("1");
     exposed.circuits[0].components[0].properties.value = "1";
+  });
+
+  it("defines the 3-trit bus lesson with stable components and placement", () => {
+    const project = cloneBusWiringProject();
+    const circuit = project.circuits[0];
+
+    expect(project).toMatchObject({
+      format: "logsim-ternary",
+      version: 3,
+      rootCircuitId: "main",
+    });
+    expect(circuit.components).toEqual([
+      {
+        id: "word-input",
+        typeId: "source.trit_input",
+        position: { x: 20, y: 280 },
+        properties: { label: "输入字 1T0", value: "1T0", width: 3 },
+      },
+      {
+        id: "split-word",
+        typeId: "wiring.splitter",
+        position: { x: 210, y: 250 },
+        properties: {
+          label: "拆分 1T0",
+          width: 3,
+          branchCount: 3,
+          mapping: [0, 1, 2],
+        },
+      },
+      {
+        id: "lst-junction",
+        typeId: "wiring.junction",
+        position: { x: 400, y: 75 },
+        properties: { label: "LST 扇出", width: 1 },
+      },
+      {
+        id: "probe-lst",
+        typeId: "sink.probe",
+        position: { x: 590, y: 40 },
+        properties: { label: "branch0 / LST = 0", width: 1 },
+      },
+      {
+        id: "tunnel-send",
+        typeId: "wiring.tunnel",
+        position: { x: 395, y: 400 },
+        properties: { label: "DATA_MID", width: 1 },
+      },
+      {
+        id: "tunnel-receive",
+        typeId: "wiring.tunnel",
+        position: { x: 595, y: 370 },
+        properties: { label: "DATA_MID", width: 1 },
+      },
+      {
+        id: "probe-mid",
+        typeId: "sink.probe",
+        position: { x: 770, y: 470 },
+        properties: { label: "branch1 = T", width: 1 },
+      },
+      {
+        id: "probe-mst",
+        typeId: "sink.probe",
+        position: { x: 565, y: 590 },
+        properties: { label: "branch2 / MST = 1", width: 1 },
+      },
+      {
+        id: "join-word",
+        typeId: "wiring.splitter",
+        position: { x: 825, y: 255 },
+        properties: {
+          label: "重组 1T0",
+          width: 3,
+          branchCount: 3,
+          mapping: [0, 1, 2],
+        },
+      },
+      {
+        id: "probe-word",
+        typeId: "sink.probe",
+        position: { x: 1050, y: 285 },
+        properties: { label: "重组结果 1T0", width: 3 },
+      },
+    ]);
+  });
+
+  it("routes one scalar branch through a disconnected local tunnel pair", () => {
+    const circuit = cloneBusWiringProject().circuits[0];
+
+    expect(circuit.wires).toEqual([
+      { id: "word-to-split", endpointA: { componentId: "word-input", portId: "out" }, endpointB: { componentId: "split-word", portId: "trunk" } },
+      { id: "branch0-to-junction", endpointA: { componentId: "split-word", portId: "branch0" }, endpointB: { componentId: "lst-junction", portId: "net" } },
+      { id: "junction-to-lst-probe", endpointA: { componentId: "lst-junction", portId: "net" }, endpointB: { componentId: "probe-lst", portId: "in" } },
+      { id: "junction-to-join", endpointA: { componentId: "lst-junction", portId: "net" }, endpointB: { componentId: "join-word", portId: "branch0" } },
+      { id: "branch1-to-tunnel", endpointA: { componentId: "split-word", portId: "branch1" }, endpointB: { componentId: "tunnel-send", portId: "net" } },
+      { id: "tunnel-to-join", endpointA: { componentId: "tunnel-receive", portId: "net" }, endpointB: { componentId: "join-word", portId: "branch1" } },
+      { id: "tunnel-to-mid-probe", endpointA: { componentId: "tunnel-receive", portId: "net" }, endpointB: { componentId: "probe-mid", portId: "in" } },
+      { id: "branch2-to-join", endpointA: { componentId: "split-word", portId: "branch2" }, endpointB: { componentId: "join-word", portId: "branch2" } },
+      { id: "branch2-to-mst-probe", endpointA: { componentId: "split-word", portId: "branch2" }, endpointB: { componentId: "probe-mst", portId: "in" } },
+      { id: "join-to-word-probe", endpointA: { componentId: "join-word", portId: "trunk" }, endpointB: { componentId: "probe-word", portId: "in" } },
+    ]);
+
+    const tunnels = circuit.components.filter(
+      (component) => component.typeId === "wiring.tunnel",
+    );
+    expect(tunnels.map((component) => component.properties.label)).toEqual([
+      "DATA_MID",
+      "DATA_MID",
+    ]);
+    expect(
+      circuit.wires.some(
+        (wire) =>
+          new Set([
+            wire.endpointA.componentId,
+            wire.endpointB.componentId,
+          ]).has("tunnel-send") &&
+          new Set([
+            wire.endpointA.componentId,
+            wire.endpointB.componentId,
+          ]).has("tunnel-receive"),
+      ),
+    ).toBe(false);
+  });
+
+  it("deep-clones the bus lesson and registers its inspector teaching notes", () => {
+    const copy = cloneBusWiringProject();
+    copy.circuits[0].components[0].properties.value = "000";
+    copy.circuits[0].wires[0].endpointA.componentId = "changed";
+
+    expect(cloneBusWiringProject().circuits[0].components[0].properties.value).toBe(
+      "1T0",
+    );
+    expect(
+      cloneBusWiringProject().circuits[0].wires[0].endpointA.componentId,
+    ).toBe("word-input");
+
+    const registered = cloneExampleProject("bus-tunnel-3");
+    expect(registered?.version).toBe(3);
+    const example = EXAMPLES.find((item) => item.id === "bus-tunnel-3")!;
+    expect(example.lessons).toEqual([
+      expect.objectContaining({ title: "字序与位序" }),
+      expect.objectContaining({ title: "分支映射" }),
+      expect.objectContaining({ title: "本地 Tunnel" }),
+      expect.objectContaining({ title: "重组与宽度" }),
+    ]);
+    expect(example.lessons?.map((lesson) => lesson.text).join(" ")).toMatch(
+      /MS-first.*index 0.*LST.*\[0,1,2\].*DATA_MID.*同一电路.*1T0.*3-trit.*1-trit/,
+    );
   });
 });
 

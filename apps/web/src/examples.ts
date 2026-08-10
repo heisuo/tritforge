@@ -5,10 +5,12 @@ import type {
   KnownTrit,
 } from "./editor-model";
 import { toEditorDocument } from "./editor/circuit-document";
+import { cloneBusWiringProject } from "./examples/bus-wiring";
 import { cloneHierarchicalAdderProject } from "./examples/hierarchical-adder";
 import { cloneRegister3Project } from "./examples/register3";
 import { cloneSequentialDffProject } from "./examples/sequential-dff";
 import type { ProjectDocumentV2 } from "./project/project-document";
+import type { ProjectDocumentV3 } from "./project/project-v3";
 
 export type ExampleId =
   | "neg"
@@ -19,6 +21,7 @@ export type ExampleId =
   | "full-adder"
   | "hierarchical-adder"
   | "ripple-adder-3"
+  | "bus-tunnel-3"
   | "driver-conflict"
   | "sequential-dff"
   | "register3";
@@ -30,8 +33,9 @@ export interface TernaryExample {
   description: string;
   composition: string;
   expected: string;
+  lessons?: Array<{ title: string; text: string }>;
   document: EditorDocument;
-  project?: ProjectDocumentV2;
+  project?: ProjectDocumentV2 | ProjectDocumentV3;
 }
 
 function node(
@@ -89,6 +93,33 @@ const register3Document = toEditorDocument({
   connections: register3Root.connections,
   ...(register3Root.viewport ? { viewport: register3Root.viewport } : {}),
 });
+const busWiringProject = cloneBusWiringProject();
+const busWiringRoot = busWiringProject.circuits[0];
+const busWiringDocument: EditorDocument = {
+  nodes: busWiringRoot.components.map((item) => {
+    const { label, value, ...properties } = item.properties;
+    return {
+      id: item.id,
+      type: "component",
+      position: { ...item.position },
+      data: {
+        typeId: item.typeId,
+        label: typeof label === "string" ? label : item.typeId,
+        ...(typeof value === "string" ? { sourceValue: value } : {}),
+        ...(Object.keys(properties).length > 0
+          ? { properties: structuredClone(properties) }
+          : {}),
+      },
+    };
+  }),
+  edges: busWiringRoot.wires.map((item) => ({
+    id: item.id,
+    source: item.endpointA.componentId,
+    sourceHandle: item.endpointA.portId,
+    target: item.endpointB.componentId,
+    targetHandle: item.endpointB.portId,
+  })),
+};
 
 export const EXAMPLES: TernaryExample[] = [
   {
@@ -300,6 +331,36 @@ export const EXAMPLES: TernaryExample[] = [
     },
   },
   {
+    id: "bus-tunnel-3",
+    name: "3-trit 总线、分线与本地 Tunnel",
+    category: "总线布线",
+    description:
+      "把一个 3-trit 字拆成三条标量支路，中间支路通过同名 Tunnel 跨越空白区域，再按原位序重组。",
+    composition:
+      "Input[3] → Splitter → Junction / DATA_MID Tunnel / direct → Splitter → Probe[3]",
+    expected: "输入与重组结果均为 1T0；三条支路依次显示 0、T、1。",
+    lessons: [
+      {
+        title: "字序与位序",
+        text: "界面按 MS-first 显示 1T0；内部 index 0 是 LST，所以 branch0 取到最右侧的 0。",
+      },
+      {
+        title: "分支映射",
+        text: "映射 [0,1,2] 表示 trunk 的 index 0、1、2 分别进入 branch0、1、2。",
+      },
+      {
+        title: "本地 Tunnel",
+        text: "两个 DATA_MID 没有直连 wire，但同名 Tunnel 会在同一电路内连接；名称不会跨子电路生效。",
+      },
+      {
+        title: "重组与宽度",
+        text: "第二个 Splitter 以相同映射重组出 1T0；3-trit 端口不能直接接 1-trit 端口，必须先分线。",
+      },
+    ],
+    document: busWiringDocument,
+    project: cloneBusWiringProject(),
+  },
+  {
     id: "driver-conflict",
     name: "多驱动冲突",
     category: "网络诊断",
@@ -355,8 +416,26 @@ export function cloneExampleDocument(id: ExampleId): EditorDocument {
   };
 }
 
-export function cloneExampleProject(id: ExampleId): ProjectDocumentV2 | null {
+type V2ProjectExampleId =
+  | "hierarchical-adder"
+  | "sequential-dff"
+  | "register3";
+type DocumentOnlyExampleId = Exclude<
+  ExampleId,
+  V2ProjectExampleId | "bus-tunnel-3"
+>;
+
+export function cloneExampleProject(id: "bus-tunnel-3"): ProjectDocumentV3;
+export function cloneExampleProject(id: V2ProjectExampleId): ProjectDocumentV2;
+export function cloneExampleProject(id: DocumentOnlyExampleId): null;
+export function cloneExampleProject(
+  id: ExampleId,
+): ProjectDocumentV2 | ProjectDocumentV3 | null;
+export function cloneExampleProject(
+  id: ExampleId,
+): ProjectDocumentV2 | ProjectDocumentV3 | null {
   if (id === "hierarchical-adder") return cloneHierarchicalAdderProject();
+  if (id === "bus-tunnel-3") return cloneBusWiringProject();
   if (id === "sequential-dff") return cloneSequentialDffProject();
   if (id === "register3") return cloneRegister3Project();
   return null;
