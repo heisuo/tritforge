@@ -79,12 +79,20 @@ export function CircuitNode({
   const ports = data.ports ?? [];
   const inputPorts = ports.filter((port) => port.direction === "input");
   const outputPorts = ports.filter((port) => port.direction === "output");
+  const registerWord =
+    data.typeId === "project.module_instance" &&
+    data.properties?.moduleId === "register3"
+      ? `${outputs.q2 ?? "Z"}${outputs.q1 ?? "Z"}${outputs.q0 ?? "Z"}`
+      : null;
   const primarySignal =
     data.typeId === "sink.probe" || data.typeId === "project.module_output"
       ? inputs.in ?? "Z"
       : data.typeId === "sequential.dff"
         ? outputs.q ?? "Z"
-      : outputs.out ?? outputs.y ?? outputs.sum ?? data.sourceValue ?? "Z";
+        : registerWord
+          ? outputs.q2 ?? "Z"
+          : outputs.out ?? outputs.y ?? outputs.sum ?? data.sourceValue ?? "Z";
+  const displaySignal = registerWord ?? primarySignal;
 
   return (
     <div
@@ -103,8 +111,8 @@ export function CircuitNode({
         <ComponentIcon typeId={data.typeId} />
         <span>{data.label}</span>
       </div>
-      <strong className="node-signal" aria-label={`信号 ${primarySignal}`}>
-        {primarySignal}
+      <strong className="node-signal" aria-label={`信号 ${displaySignal}`}>
+        {displaySignal}
       </strong>
       <div className="node-id">{data.typeId}</div>
 

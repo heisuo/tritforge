@@ -10,6 +10,7 @@ export default defineConfig({
       "tests/phase1.spec.ts",
       "tests/hierarchy.spec.ts",
       "tests/sequential.spec.ts",
+      "tests/register3.spec.ts",
       "node_modules/**",
       "dist/**",
     ],

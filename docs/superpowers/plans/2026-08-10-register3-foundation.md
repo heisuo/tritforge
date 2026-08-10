@@ -98,13 +98,13 @@ git commit -m "test: prove three-trit register state semantics"
 - Modify: `apps/web/src/App.tsx`
 - Create: `docs/images/phase3b-register3.png`
 
-- [ ] **Step 1: Write the browser flow**
+- [x] **Step 1: Write the browser flow**
 
 At 1440x900, load `3-trit 并行寄存器`, assert `Q=000`, tick to `1T0`, disable EN and change D,
 assert hold after tick, assert synchronous reset to `000`, double-click the module instance and
 see all three DFFs, then check no page overflow or console/page errors.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 npm --prefix apps/web run test:e2e -- tests/register3.spec.ts
@@ -112,18 +112,18 @@ npm --prefix apps/web run test:e2e -- tests/register3.spec.ts
 
 Expected: fail until the spec is included and the new example is available.
 
-- [ ] **Step 3: Wire Playwright and update the phase badge**
+- [x] **Step 3: Wire Playwright and update the phase badge**
 
 Include `register3.spec.ts` in Playwright `testMatch`, exclude it from Vitest, and update the
 header badge from `PHASE 3A` to `PHASE 3B`.
 
-- [ ] **Step 4: Capture and inspect the desktop screenshot**
+- [x] **Step 4: Capture and inspect the desktop screenshot**
 
 Capture the loaded register after its first tick to `docs/images/phase3b-register3.png`. Inspect
 the original image for clipped dynamic ports, overlapping wires, unreadable trits, or hidden
 toolbar/status controls.
 
-- [ ] **Step 5: Run GREEN and commit**
+- [x] **Step 5: Run GREEN and commit**
 
 ```bash
 npm --prefix apps/web run test:e2e -- tests/register3.spec.ts

@@ -1177,7 +1177,7 @@ function Workbench() {
         <div className="brand">
           <Workflow aria-hidden="true" />
           <strong>LOGSIM TERNARY</strong>
-          <span>PHASE 3A</span>
+          <span>PHASE 3B</span>
         </div>
         <div className={`toolbar ${mobileMenuOpen ? "is-open" : ""}`} role="toolbar" aria-label="画布工具">
           <button className="mobile-only icon-button" type="button" title="打开工具菜单" aria-label="打开工具菜单" aria-expanded={mobileMenuOpen} aria-controls="mobile-toolbar-menu" onClick={() => setMobileMenuOpen((value) => !value)}><Menu aria-hidden="true" /></button>
