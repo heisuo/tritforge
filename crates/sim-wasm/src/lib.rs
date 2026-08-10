@@ -1,6 +1,7 @@
 use serde::Serialize;
 use sim_core::catalog::PortDirection;
 use sim_core::circuit::CircuitDefinition;
+use sim_core::connectivity::resolve_project_module_ports_v3;
 use sim_core::diagnostic::Diagnostic;
 use sim_core::project::{ProjectDiagnostic, ProjectDocumentV3, ProjectProperties};
 use sim_core::project_simulator::ProjectSimulator;
@@ -47,20 +48,15 @@ pub fn resolve_project_ports(type_id: &str, properties: JsValue) -> Result<JsVal
         BoundaryError::<ProjectDiagnostic>::new(error.code(), error.to_string(), Vec::new())
             .into_js()
     })?;
-    to_js_value(
-        &ports
-            .into_iter()
-            .map(|port| ResolvedProjectPortView {
-                id: port.id,
-                direction: match port.direction {
-                    PortDirection::Input => "input",
-                    PortDirection::Output => "output",
-                    PortDirection::InOut => "inout",
-                },
-                width: port.shape.width(),
-            })
-            .collect::<Vec<_>>(),
-    )
+    resolved_ports_to_js(ports)
+}
+
+#[wasm_bindgen(js_name = resolveProjectModulePorts)]
+pub fn resolve_project_module_ports(project: JsValue, module_id: &str) -> Result<JsValue, JsValue> {
+    let project = parse_project(project)?;
+    let ports =
+        resolve_project_module_ports_v3(project, module_id).map_err(project_diagnostics_error)?;
+    resolved_ports_to_js(ports)
 }
 
 #[wasm_bindgen]
@@ -264,6 +260,25 @@ fn parse_project(project: JsValue) -> Result<ProjectDocumentV3, JsValue> {
         )
         .into_js()
     })
+}
+
+fn resolved_ports_to_js(
+    ports: Vec<sim_core::project_validation::ResolvedProjectPort>,
+) -> Result<JsValue, JsValue> {
+    to_js_value(
+        &ports
+            .into_iter()
+            .map(|port| ResolvedProjectPortView {
+                id: port.id,
+                direction: match port.direction {
+                    PortDirection::Input => "input",
+                    PortDirection::Output => "output",
+                    PortDirection::InOut => "inout",
+                },
+                width: port.shape.width(),
+            })
+            .collect::<Vec<_>>(),
+    )
 }
 
 fn project_diagnostics_error(diagnostics: Vec<ProjectDiagnostic>) -> JsValue {

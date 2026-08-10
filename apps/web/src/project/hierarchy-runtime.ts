@@ -1,5 +1,4 @@
 import type { ProjectSimulationSnapshot } from "../editor-model";
-import type { EditorComponent } from "../editor/circuit-document";
 import {
   wasmProjectError,
   type WasmProjectError,
@@ -191,44 +190,22 @@ export function toRuntimeProject(
     format: projectV3.format,
     version: projectV3.version,
     rootCircuitId: projectV3.rootCircuitId,
-    circuits: projectV3.circuits.map((circuit) => {
-      const boundaries = circuit.components
-        .filter(isBoundary)
-        .slice()
-        .sort(
-          (left, right) =>
-            left.position.y - right.position.y || left.id.localeCompare(right.id),
-        );
-      const ordinary = circuit.components.filter(
-        (component) => !isBoundary(component),
-      );
-      return {
-        id: circuit.id,
-        name: circuit.name,
-        kind: circuit.kind,
-        components: (circuit.kind === "module"
-          ? [...boundaries, ...ordinary]
-          : circuit.components
-        ).map((component) => ({
-          id: component.id,
-          typeId: component.typeId,
-          properties: structuredClone(component.properties),
-        })),
-        wires: circuit.wires.map((wire) => ({
-          id: wire.id,
-          endpointA: { ...wire.endpointA },
-          endpointB: { ...wire.endpointB },
-        })),
-      };
-    }),
+    circuits: projectV3.circuits.map((circuit) => ({
+      id: circuit.id,
+      name: circuit.name,
+      kind: circuit.kind,
+      components: circuit.components.map((component) => ({
+        id: component.id,
+        typeId: component.typeId,
+        properties: structuredClone(component.properties),
+      })),
+      wires: circuit.wires.map((wire) => ({
+        id: wire.id,
+        endpointA: { ...wire.endpointA },
+        endpointB: { ...wire.endpointB },
+      })),
+    })),
   };
-}
-
-function isBoundary(component: EditorComponent): boolean {
-  return (
-    component.typeId === "project.module_input" ||
-    component.typeId === "project.module_output"
-  );
 }
 
 function withSourceValue(

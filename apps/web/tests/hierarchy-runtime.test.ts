@@ -235,7 +235,7 @@ describe("hierarchy runtime", () => {
     ).toEqual({ width: 3, label: "DATA" });
   });
 
-  it("sorts boundary ports for Rust while preserving v3 component properties", () => {
+  it("strips editor metadata without assigning coordinate-based port semantics", () => {
     const runtimeProject = toRuntimeProject(project());
     const halfAdder = runtimeProject.circuits.find(
       (circuit) => circuit.id === "half-adder",
@@ -246,15 +246,16 @@ describe("hierarchy runtime", () => {
     expect(halfAdder).toHaveProperty("wires");
     expect(halfAdder).not.toHaveProperty("connections");
     expect(halfAdder.components.map((component) => component.id)).toEqual([
-      "input-a",
       "input-b",
       "ordinary",
+      "input-a",
     ]);
     expect(halfAdder.components.every((component) => !("position" in component))).toBe(
       true,
     );
-    expect(halfAdder.components[0].properties.label).toBe("A");
-    expect(halfAdder.components[2].properties.label).toBe("Editor label");
+    expect(halfAdder.components[0].properties.label).toBe("B");
+    expect(halfAdder.components[1].properties.label).toBe("Editor label");
+    expect(halfAdder.components[2].properties.label).toBe("A");
   });
 
   it("contains no TypeScript gate equations or hierarchy flattener", () => {

@@ -54,6 +54,9 @@ vi.mock("../src/wasm/pkg/sim_wasm", () => ({
   resolveProjectPorts: (_typeId: string, properties: unknown) => [
     { id: "out", direction: "output", width: (properties as { width?: number }).width ?? 1 },
   ],
+  resolveProjectModulePorts: (_project: unknown, moduleId: string) => [
+    { id: `${moduleId}-in`, direction: "input", width: 3 },
+  ],
   WasmSimulator: wasmMock.WasmSimulator,
   WasmProjectSimulator: wasmMock.WasmProjectSimulator,
 }));
@@ -95,6 +98,9 @@ describe("WASM runtime initialization", () => {
     expect(project.componentOutputWords.dff.q).toBe("1");
     expect(runtime.resolveProjectPorts("source.constant", { width: 3 })).toEqual([
       { id: "out", direction: "output", width: 3 },
+    ]);
+    expect(runtime.resolveProjectModulePorts({ version: 3 }, "word")).toEqual([
+      { id: "word-in", direction: "input", width: 3 },
     ]);
     expectTypeOf(flat).toEqualTypeOf<SimulationSnapshot>();
     expectTypeOf(project).toEqualTypeOf<ProjectSimulationSnapshot>();

@@ -63,15 +63,28 @@ export interface ResolvedProjectPort {
   width: number;
 }
 
+export interface ResolvedProjectModulePort {
+  id: string;
+  direction: "input" | "output";
+  width: number;
+}
+
 export type ProjectPortResolver = (
   typeId: string,
   properties: Record<string, unknown>,
 ) => ResolvedProjectPort[];
 
+/** Returns Rust-validated logical module ports in canonical port-ID order. */
+export type ProjectModulePortResolver = (
+  project: unknown,
+  moduleId: string,
+) => ResolvedProjectModulePort[];
+
 export interface WasmRuntime {
   apiVersion: number;
   catalog: CatalogComponent[];
   resolveProjectPorts: ProjectPortResolver;
+  resolveProjectModulePorts: ProjectModulePortResolver;
   simulator: WasmSimulatorBinding;
   projectSimulator: WasmProjectSimulatorBinding;
 }
@@ -97,6 +110,8 @@ export async function createWasmRuntime(): Promise<WasmRuntime> {
     apiVersion: wasm.apiVersion(),
     catalog: wasm.componentCatalog() as CatalogComponent[],
     resolveProjectPorts: wasm.resolveProjectPorts as ProjectPortResolver,
+    resolveProjectModulePorts:
+      wasm.resolveProjectModulePorts as ProjectModulePortResolver,
     simulator: new wasm.WasmSimulator() as WasmSimulatorBinding,
     projectSimulator:
       new wasm.WasmProjectSimulator() as WasmProjectSimulatorBinding,

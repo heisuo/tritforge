@@ -40,6 +40,7 @@ vi.mock("../src/wasm-client", () => ({
         width: typeof properties.width === "number" ? properties.width : 1,
       },
     ],
+    resolveProjectModulePorts: () => [],
     catalog: [
       {
         type_id: "source.trit_input",
@@ -112,7 +113,7 @@ describe("sequential App controls", () => {
 
   afterEach(() => cleanup());
 
-  it("shows and triggers one ready Tick, exposes sequential palette, and keeps Clock properties empty", async () => {
+  it("shows and triggers one ready Tick and preserves the Clock display label", async () => {
     mock.tick.mockImplementationOnce(() => ({ ...mock.makeSnapshot(), tickCount: 1 }));
     render(<App />);
 
@@ -135,6 +136,6 @@ describe("sequential App controls", () => {
     const clock = lastProject.circuits
       .find((circuit) => circuit.id === "main")
       ?.components.find((component) => component.typeId === "source.clock");
-    expect(clock?.properties).toEqual({});
+    expect(clock?.properties).toEqual({ label: "Clock" });
   });
 });

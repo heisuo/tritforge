@@ -2,7 +2,8 @@ import type {
   CatalogComponent,
   CatalogPort,
 } from "../editor-model";
-import type { ProjectPortResolver } from "../wasm-client";
+import type { ProjectModulePortResolver } from "../wasm-client";
+import { toRuntimeProject } from "./hierarchy-runtime";
 import type { ProjectDocumentV2 } from "./project-document";
 import type { ProjectDocumentV3 } from "./project-v3";
 
@@ -22,9 +23,10 @@ export function buildProjectCatalog(
   builtins: CatalogComponent[],
   project: CatalogProjectDocument,
   activeCircuitId: string,
-  resolvePorts: ProjectPortResolver,
+  resolveModulePorts: ProjectModulePortResolver,
 ): ProjectCatalogComponent[] {
   const forbidden = cycleCausingCandidates(project, activeCircuitId);
+  const runtimeProject = toRuntimeProject(project);
   const dynamic = project.circuits
     .filter(
       (circuit) =>
@@ -37,42 +39,12 @@ export function buildProjectCatalog(
       category: "project-module",
       kind: "module_instance",
       moduleId: circuit.id,
-      ports: orderedBoundaryPorts(circuit.components, resolvePorts),
+      ports: resolveModulePorts(runtimeProject, circuit.id).map((port) => ({
+        ...port,
+      })),
       truth_table: [],
     }));
   return [...builtins.map(cloneDescriptor), ...dynamic];
-}
-
-function orderedBoundaryPorts(
-  components: CatalogProjectDocument["circuits"][number]["components"],
-  resolvePorts: ProjectPortResolver,
-): ProjectCatalogPort[] {
-  return components
-    .filter(
-      (component) =>
-        component.typeId === "project.module_input" ||
-        component.typeId === "project.module_output",
-    )
-    .slice()
-    .sort(
-      (left, right) =>
-        left.position.y - right.position.y || left.id.localeCompare(right.id),
-    )
-    .map((component) => {
-      const [resolved] = resolvePorts(component.typeId, component.properties);
-      if (!resolved) {
-        throw new Error(`No resolved port for module boundary '${component.id}'`);
-      }
-      return {
-        id: String(component.properties.portId),
-        label: String(component.properties.label),
-        direction:
-          component.typeId === "project.module_input"
-            ? ("input" as const)
-            : ("output" as const),
-        width: resolved.width,
-      };
-    });
 }
 
 function cloneDescriptor(descriptor: CatalogComponent): ProjectCatalogComponent {

@@ -51,6 +51,7 @@ vi.mock("../src/wasm-client", () => ({
         width: typeof properties.width === "number" ? properties.width : 1,
       },
     ],
+    resolveProjectModulePorts: () => [],
     catalog: [
       {
         type_id: "source.trit_input",

@@ -2,15 +2,25 @@ import { describe, expect, it, vi } from "vitest";
 import type { CatalogComponent } from "../src/editor-model";
 import { buildProjectCatalog } from "../src/project/project-catalog";
 import type { ProjectDocumentV2 } from "../src/project/project-document";
-import type { ProjectPortResolver } from "../src/wasm-client";
+import type { ProjectModulePortResolver } from "../src/wasm-client";
 
-const resolvePorts = vi.fn(((typeId, properties) => [
-  {
-    id: typeId === "project.module_output" ? "in" : "out",
-    direction: typeId === "project.module_output" ? "input" : "output",
-    width: typeof properties.width === "number" ? properties.width : 1,
-  },
-]) satisfies ProjectPortResolver);
+const resolveModulePorts = vi.fn(((project, moduleId) => {
+  expect((project as { version: number }).version).toBe(3);
+  if (moduleId === "a") {
+    return [
+      { id: "a", direction: "input", width: 3 },
+      { id: "b", direction: "input", width: 1 },
+      { id: "y", direction: "output", width: 1 },
+    ];
+  }
+  if (moduleId === "c") {
+    return [
+      { id: "a", direction: "input", width: 1 },
+      { id: "z", direction: "input", width: 1 },
+    ];
+  }
+  return [];
+}) satisfies ProjectModulePortResolver);
 
 function moduleCircuit(id: string, components: ProjectDocumentV2["circuits"][number]["components"] = []) {
   return { id, name: id.toUpperCase(), kind: "module" as const, components, connections: [] };
@@ -56,7 +66,7 @@ function project(): ProjectDocumentV2 {
 }
 
 describe("project catalog", () => {
-  it("merges built-ins with dynamic descriptors and ordered boundary ports", () => {
+  it("merges built-ins with Rust-resolved module ports", () => {
     const builtin: CatalogComponent = {
       type_id: "gate.buf",
       display_name: "BUF",
@@ -66,8 +76,14 @@ describe("project catalog", () => {
       truth_table: [],
     };
 
-    resolvePorts.mockClear();
-    const catalog = buildProjectCatalog([builtin], project(), "main", resolvePorts);
+    resolveModulePorts.mockClear();
+    const value = project();
+    const catalog = buildProjectCatalog(
+      [builtin],
+      value,
+      "main",
+      resolveModulePorts,
+    );
     const descriptor = catalog.find(
       (item) => item.category === "project-module" && item.moduleId === "a",
     );
@@ -80,14 +96,14 @@ describe("project catalog", () => {
       kind: "module_instance",
       moduleId: "a",
       ports: [
-        { id: "a", label: "A", direction: "input", width: 3 },
-        { id: "b", label: "B", direction: "input", width: 1 },
-        { id: "y", label: "Y", direction: "output", width: 1 },
+        { id: "a", direction: "input", width: 3 },
+        { id: "b", direction: "input", width: 1 },
+        { id: "y", direction: "output", width: 1 },
       ],
     });
-    expect(resolvePorts).toHaveBeenCalledWith(
-      "project.module_input",
-      expect.objectContaining({ width: 3 }),
+    expect(resolveModulePorts).toHaveBeenCalledWith(
+      expect.objectContaining({ version: 3 }),
+      "a",
     );
 
     catalog[0].ports[0].id = "mutated";
@@ -95,7 +111,7 @@ describe("project catalog", () => {
   });
 
   it("excludes self and candidates that would create a dependency cycle", () => {
-    const catalog = buildProjectCatalog([], project(), "b", resolvePorts);
+    const catalog = buildProjectCatalog([], project(), "b", resolveModulePorts);
     const moduleIds = catalog
       .filter((item) => item.category === "project-module")
       .map((item) => item.moduleId);
@@ -103,7 +119,7 @@ describe("project catalog", () => {
     expect(moduleIds).toEqual(["c"]);
   });
 
-  it("uses the component ID as the stable tie-breaker for equal y positions", () => {
+  it("uses Rust module-port ordering instead of boundary coordinates", () => {
     const value = project();
     const module = value.circuits.find((circuit) => circuit.id === "c")!;
     module.components = [
@@ -121,10 +137,15 @@ describe("project catalog", () => {
       },
     ];
 
-    const descriptor = buildProjectCatalog([], value, "main", resolvePorts).find(
+    const descriptor = buildProjectCatalog(
+      [],
+      value,
+      "main",
+      resolveModulePorts,
+    ).find(
       (item) => item.moduleId === "c",
     )!;
 
-    expect(descriptor.ports.map((port) => port.id)).toEqual(["z", "a"]);
+    expect(descriptor.ports.map((port) => port.id)).toEqual(["a", "z"]);
   });
 });

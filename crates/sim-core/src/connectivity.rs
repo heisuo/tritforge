@@ -156,6 +156,11 @@ struct InterfacePort {
     scalar_ids: Vec<String>,
 }
 
+struct ResolvedProjectV3Lowering {
+    lowered: LoweredProjectV3,
+    module_interfaces: BTreeMap<String, Vec<ResolvedProjectPort>>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct BitNode {
     component_id: String,
@@ -342,10 +347,53 @@ pub fn lower_project_v3(
     lower_project_v3_for_active(project, &active_circuit_id)
 }
 
+pub fn resolve_project_module_ports_v3(
+    project: ProjectDocumentV3,
+    module_id: &str,
+) -> Result<Vec<ResolvedProjectPort>, Vec<ProjectDiagnostic>> {
+    let target = project
+        .circuits
+        .iter()
+        .find(|circuit| circuit.id == module_id)
+        .map(|circuit| circuit.kind);
+    let root_circuit_id = project.root_circuit_id.clone();
+    let resolved = lower_project_v3_with_interfaces(project, &root_circuit_id)?;
+    match target {
+        None => Err(vec![v3_error(
+            "UNKNOWN_MODULE",
+            format!("unknown module circuit '{module_id}'"),
+            &root_circuit_id,
+            &[],
+            &[],
+            &[],
+        )]),
+        Some(ProjectCircuitKind::Main) => Err(vec![v3_error(
+            "MODULE_REFERENCE_NOT_MODULE",
+            format!("circuit '{module_id}' is not a module"),
+            module_id,
+            &[],
+            &[],
+            &[],
+        )]),
+        Some(ProjectCircuitKind::Module) => Ok(resolved
+            .module_interfaces
+            .get(module_id)
+            .expect("validated module has a resolved interface")
+            .to_vec()),
+    }
+}
+
 fn lower_project_v3_for_active(
     project: ProjectDocumentV3,
     active_circuit_id: &str,
 ) -> Result<LoweredProjectV3, Vec<ProjectDiagnostic>> {
+    lower_project_v3_with_interfaces(project, active_circuit_id).map(|resolved| resolved.lowered)
+}
+
+fn lower_project_v3_with_interfaces(
+    project: ProjectDocumentV3,
+    active_circuit_id: &str,
+) -> Result<ResolvedProjectV3Lowering, Vec<ProjectDiagnostic>> {
     let mut diagnostics = ProjectDiagnosticSet::new();
     validate_v3_header_and_ids(&project, &mut diagnostics);
 
@@ -434,6 +482,23 @@ fn lower_project_v3_for_active(
     }
 
     let mut interfaces = build_interfaces(&unique_circuits, &resolved_ports, &mut diagnostics);
+    let module_interfaces = interfaces
+        .iter()
+        .map(|(module_id, ports)| {
+            (
+                module_id.clone(),
+                ports
+                    .iter()
+                    .map(|port| ResolvedProjectPort {
+                        id: port.id.clone(),
+                        direction: port.direction,
+                        shape: crate::signal::SignalShape::new(port.width)
+                            .expect("validated interface widths are signal shapes"),
+                    })
+                    .collect(),
+            )
+        })
+        .collect();
     assign_scalar_interface_ids(&mut interfaces);
     resolve_instances(
         &unique_circuits,
@@ -479,10 +544,13 @@ fn lower_project_v3_for_active(
         ));
     }
 
-    Ok(LoweredProjectV3 {
-        project: scalar_project,
-        reassembly,
-        provenance,
+    Ok(ResolvedProjectV3Lowering {
+        lowered: LoweredProjectV3 {
+            project: scalar_project,
+            reassembly,
+            provenance,
+        },
+        module_interfaces,
     })
 }
 

@@ -99,7 +99,7 @@ import { createProjectStore } from "./project/project-store";
 import {
   createWasmRuntime,
   wasmErrorMessage,
-  type ProjectPortResolver,
+  type ProjectModulePortResolver,
   type WasmRuntime,
 } from "./wasm-client";
 import { assignWireLanes } from "./wire-routing";
@@ -262,7 +262,7 @@ function Workbench() {
   const [nodes, setNodes] = useState<EditorNode[]>(initialEditor.nodes);
   const [edges, setEdges] = useState<EditorEdge[]>(initialEditor.edges);
   const [baseCatalog, setBaseCatalog] = useState<CatalogComponent[]>([]);
-  const [portResolver, setPortResolver] = useState<ProjectPortResolver | null>(null);
+  const [portResolver, setPortResolver] = useState<ProjectModulePortResolver | null>(null);
   const [snapshot, setSnapshot] = useState<ProjectSimulationSnapshot | null>(null);
   const [diagnostics, setDiagnostics] = useState<ProjectSimulationDiagnostic[]>([]);
   const [wasmState, setWasmState] = useState<"loading" | "ready" | "error">("loading");
@@ -407,7 +407,7 @@ function Workbench() {
         const runtime = new HierarchyRuntime(wasm.projectSimulator);
         runtimeRef.current = runtime;
         setBaseCatalog(wasm.catalog);
-        setPortResolver(() => wasm.resolveProjectPorts);
+        setPortResolver(() => wasm.resolveProjectModulePorts);
         setWasmVersion(wasm.apiVersion);
         try {
           const state = store.getState();
