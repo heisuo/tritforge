@@ -176,36 +176,36 @@ Commit `feat: resolve dynamic project port shapes`.
 - Modify: `crates/sim-core/src/lib.rs`
 - Test: `crates/sim-core/tests/connectivity_lowering.rs`
 
-- [ ] **Step 1: Write failing network equivalence tests**
+- [x] **Step 1: Write failing network equivalence tests**
 
 Cover wire-order permutation, shared endpoints, circuit-local Tunnel union, Tunnel width conflicts, scalar
 fanout, same-value multiple drivers, conflicting drivers, Splitter split/combine, arbitrary mappings, and nested
 module bus boundaries.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run `cargo test -p sim-core --test connectivity_lowering`.
 Expected: no v3 connectivity compiler exists.
 
-- [ ] **Step 3: Implement symbolic union before allocation**
+- [x] **Step 3: Implement symbolic union before allocation**
 
 Use union-find over qualified logical endpoints. Union direct wire endpoints and same-circuit Tunnel ports.
 Validate widths before allocating `width` scalar representatives. Consume Junction/Tunnel as wiring helpers.
 
-- [ ] **Step 4: Lower Splitter bit equivalences and scalar nets**
+- [x] **Step 4: Lower Splitter bit equivalences and scalar nets**
 
 Map each trunk scalar index to its branch-local scalar index. Produce deterministic flat IDs, provenance for
 every original wire, and reassembly entries for Project snapshots.
 
-- [ ] **Step 5: Enforce existing safety budgets before expansion**
+- [x] **Step 5: Enforce existing safety budgets before expansion**
 
 Count logical width multiplication and reject over-limit projects at the original v3 component/wire location.
 
-- [ ] **Step 6: Run core regression**
+- [x] **Step 6: Run core regression**
 
 Run `cargo test -p sim-core` and Clippy. Existing scalar, hierarchy, and Register3 tests must remain green.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 Commit `feat: lower v3 buses into scalar networks`.
 
