@@ -225,15 +225,15 @@ describe("example library", () => {
       {
         id: "word-input",
         typeId: "source.trit_input",
-        position: { x: 20, y: 280 },
-        properties: { label: "输入字 1T0", value: "1T0", width: 3 },
+        position: { x: 0, y: 280 },
+        properties: { label: "三位输入", value: "1T0", width: 3 },
       },
       {
         id: "split-word",
         typeId: "wiring.splitter",
-        position: { x: 210, y: 250 },
+        position: { x: 250, y: 250 },
         properties: {
-          label: "拆分 1T0",
+          label: "拆分总线",
           width: 3,
           branchCount: 3,
           mapping: [0, 1, 2],
@@ -242,45 +242,45 @@ describe("example library", () => {
       {
         id: "lst-junction",
         typeId: "wiring.junction",
-        position: { x: 400, y: 75 },
+        position: { x: 460, y: 75 },
         properties: { label: "LST 扇出", width: 1 },
       },
       {
         id: "probe-lst",
         typeId: "sink.probe",
-        position: { x: 590, y: 40 },
-        properties: { label: "branch0 / LST = 0", width: 1 },
+        position: { x: 670, y: 35 },
+        properties: { label: "branch0 / LST", width: 1 },
       },
       {
         id: "tunnel-send",
         typeId: "wiring.tunnel",
-        position: { x: 395, y: 400 },
+        position: { x: 550, y: 500 },
         properties: { label: "DATA_MID", width: 1 },
       },
       {
         id: "tunnel-receive",
         typeId: "wiring.tunnel",
-        position: { x: 595, y: 370 },
+        position: { x: 520, y: 170 },
         properties: { label: "DATA_MID", width: 1 },
       },
       {
         id: "probe-mid",
         typeId: "sink.probe",
-        position: { x: 770, y: 470 },
-        properties: { label: "branch1 = T", width: 1 },
+        position: { x: 730, y: 505 },
+        properties: { label: "branch1", width: 1 },
       },
       {
         id: "probe-mst",
         typeId: "sink.probe",
-        position: { x: 565, y: 590 },
-        properties: { label: "branch2 / MST = 1", width: 1 },
+        position: { x: 590, y: 650 },
+        properties: { label: "branch2 / MST", width: 1 },
       },
       {
         id: "join-word",
         typeId: "wiring.splitter",
-        position: { x: 825, y: 255 },
+        position: { x: 830, y: 255 },
         properties: {
-          label: "重组 1T0",
+          label: "重组三位总线",
           width: 3,
           branchCount: 3,
           mapping: [0, 1, 2],
@@ -289,8 +289,8 @@ describe("example library", () => {
       {
         id: "probe-word",
         typeId: "sink.probe",
-        position: { x: 1050, y: 285 },
-        properties: { label: "重组结果 1T0", width: 3 },
+        position: { x: 1060, y: 95 },
+        properties: { label: "重组输出", width: 3 },
       },
     ]);
   });

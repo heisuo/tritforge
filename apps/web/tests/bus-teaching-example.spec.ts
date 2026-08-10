@@ -93,6 +93,32 @@ test("desktop loads the editable lesson without node or page overlap", async ({
   await expect(node(page, "probe-word").locator(".node-signal")).toHaveText(
     "T01",
   );
+  const headings = await page.locator(".react-flow__node").evaluateAll((elements) =>
+    Object.fromEntries(
+      elements.map((element) => [
+        element.getAttribute("data-id"),
+        element
+          .querySelector(
+            ".node-heading span, .splitter-title strong, .wiring-tunnel strong",
+          )
+          ?.textContent?.trim() ?? "",
+      ]),
+    ),
+  );
+  expect(headings).toMatchObject({
+    "word-input": "三位输入",
+    "split-word": "拆分总线",
+    "probe-lst": "branch0 / LST",
+    "tunnel-send": "DATA_MID",
+    "tunnel-receive": "DATA_MID",
+    "probe-mid": "branch1",
+    "probe-mst": "branch2 / MST",
+    "join-word": "重组三位总线",
+    "probe-word": "重组输出",
+  });
+  expect(Object.values(headings).join(" ")).not.toMatch(
+    /1T0|=\s*(?:0|T|1)(?:\s|$)/,
+  );
 
   await page.getByLabel("源字值").fill("1T0");
   await page.getByRole("button", { name: "应用属性" }).click();
@@ -100,8 +126,10 @@ test("desktop loads the editable lesson without node or page overlap", async ({
     "1T0",
   );
 
-  const geometry = await page.locator(".react-flow__node").evaluateAll((elements) => {
-    const rectangles = elements.map((element) => {
+  const geometry = await page.locator(".react-flow").evaluate((flow) => {
+    const rectangles = Array.from(
+      flow.querySelectorAll<HTMLElement>(".react-flow__node"),
+    ).map((element) => {
       const rect = element.getBoundingClientRect();
       return {
         id: element.getAttribute("data-id"),
@@ -111,21 +139,64 @@ test("desktop loads the editable lesson without node or page overlap", async ({
         bottom: rect.bottom,
       };
     });
-    const overlaps: string[] = [];
+    const labels = Array.from(
+      flow.querySelectorAll<HTMLElement>(".wire-label"),
+    ).map((element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        id: element.getAttribute("data-testid"),
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+      };
+    });
+    const collides = (
+      left: (typeof rectangles)[number],
+      right: (typeof rectangles)[number],
+      margin: number,
+    ) =>
+      left.left - margin < right.right &&
+      left.right + margin > right.left &&
+      left.top - margin < right.bottom &&
+      left.bottom + margin > right.top;
+    const nodeOverlaps: string[] = [];
     for (let left = 0; left < rectangles.length; left += 1) {
       for (let right = left + 1; right < rectangles.length; right += 1) {
         const a = rectangles[left];
         const b = rectangles[right];
-        const overlapWidth = Math.min(a.right, b.right) - Math.max(a.left, b.left);
-        const overlapHeight = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
-        if (overlapWidth > 1 && overlapHeight > 1) {
-          overlaps.push(`${a.id}/${b.id}`);
+        if (collides(a, b, 1)) nodeOverlaps.push(`${a.id}/${b.id}`);
+      }
+    }
+    const labelNodeCollisions = labels.flatMap((label) =>
+      rectangles
+        .filter((rectangle) => collides(label, rectangle, 3))
+        .map((rectangle) => `${label.id}/${rectangle.id}`),
+    );
+    const labelCollisions: string[] = [];
+    for (let left = 0; left < labels.length; left += 1) {
+      for (let right = left + 1; right < labels.length; right += 1) {
+        if (collides(labels[left], labels[right], 3)) {
+          labelCollisions.push(`${labels[left].id}/${labels[right].id}`);
         }
       }
     }
+    const viewport = flow.querySelector<HTMLElement>(".react-flow__viewport");
+    const scale = viewport
+      ? new DOMMatrixReadOnly(getComputedStyle(viewport).transform).a
+      : 0;
     return {
-      overlaps,
+      nodeOverlaps,
+      labelNodeCollisions,
+      labelCollisions,
       count: rectangles.length,
+      labelCount: labels.length,
+      minimumReadableNodeWidth: Math.min(
+        ...rectangles
+          .filter((rectangle) => rectangle.id !== "lst-junction")
+          .map((rectangle) => rectangle.right - rectangle.left),
+      ),
+      scale,
       pageClientWidth: document.documentElement.clientWidth,
       pageScrollWidth: document.documentElement.scrollWidth,
       pageClientHeight: document.documentElement.clientHeight,
@@ -134,7 +205,12 @@ test("desktop loads the editable lesson without node or page overlap", async ({
   });
 
   expect(geometry.count).toBe(10);
-  expect(geometry.overlaps).toEqual([]);
+  expect(geometry.labelCount).toBe(10);
+  expect(geometry.nodeOverlaps).toEqual([]);
+  expect(geometry.labelNodeCollisions).toEqual([]);
+  expect(geometry.labelCollisions).toEqual([]);
+  expect(geometry.minimumReadableNodeWidth).toBeGreaterThanOrEqual(56);
+  expect(geometry.scale).toBeGreaterThanOrEqual(0.55);
   expect(geometry.pageScrollWidth).toBeLessThanOrEqual(geometry.pageClientWidth);
   expect(geometry.pageScrollHeight).toBeLessThanOrEqual(geometry.pageClientHeight);
   await page.screenshot({

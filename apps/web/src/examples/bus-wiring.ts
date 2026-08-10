@@ -35,49 +35,49 @@ const main: ProjectCircuitV3 = {
   name: "3-trit Bus and Local Tunnel",
   kind: "main",
   components: [
-    component("word-input", "source.trit_input", 20, 280, {
-      label: "输入字 1T0",
+    component("word-input", "source.trit_input", 0, 280, {
+      label: "三位输入",
       value: "1T0",
       width: 3,
     }),
-    component("split-word", "wiring.splitter", 210, 250, {
-      label: "拆分 1T0",
+    component("split-word", "wiring.splitter", 250, 250, {
+      label: "拆分总线",
       width: 3,
       branchCount: 3,
       mapping: [0, 1, 2],
     }),
-    component("lst-junction", "wiring.junction", 400, 75, {
+    component("lst-junction", "wiring.junction", 460, 75, {
       label: "LST 扇出",
       width: 1,
     }),
-    component("probe-lst", "sink.probe", 590, 40, {
-      label: "branch0 / LST = 0",
+    component("probe-lst", "sink.probe", 670, 35, {
+      label: "branch0 / LST",
       width: 1,
     }),
-    component("tunnel-send", "wiring.tunnel", 395, 400, {
+    component("tunnel-send", "wiring.tunnel", 550, 500, {
       label: "DATA_MID",
       width: 1,
     }),
-    component("tunnel-receive", "wiring.tunnel", 595, 370, {
+    component("tunnel-receive", "wiring.tunnel", 520, 170, {
       label: "DATA_MID",
       width: 1,
     }),
-    component("probe-mid", "sink.probe", 770, 470, {
-      label: "branch1 = T",
+    component("probe-mid", "sink.probe", 730, 505, {
+      label: "branch1",
       width: 1,
     }),
-    component("probe-mst", "sink.probe", 565, 590, {
-      label: "branch2 / MST = 1",
+    component("probe-mst", "sink.probe", 590, 650, {
+      label: "branch2 / MST",
       width: 1,
     }),
-    component("join-word", "wiring.splitter", 825, 255, {
-      label: "重组 1T0",
+    component("join-word", "wiring.splitter", 830, 255, {
+      label: "重组三位总线",
       width: 3,
       branchCount: 3,
       mapping: [0, 1, 2],
     }),
-    component("probe-word", "sink.probe", 1050, 285, {
-      label: "重组结果 1T0",
+    component("probe-word", "sink.probe", 1060, 95, {
+      label: "重组输出",
       width: 3,
     }),
   ],
