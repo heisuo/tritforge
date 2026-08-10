@@ -219,24 +219,24 @@ Commit `feat: lower v3 buses into scalar networks`.
 - Modify: `apps/web/src/project/project-catalog.ts`
 - Test: `apps/web/tests/hierarchy-runtime.test.ts`
 
-- [ ] **Step 1: Write failing real-WASM API tests**
+- [x] **Step 1: Write failing real-WASM API tests**
 
 Require API version 3, v3 load, dynamic resolved ports, word-valued projections, and structured width errors.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run `wasm-pack test --node crates/sim-wasm` and the focused Web runtime test.
 
-- [ ] **Step 3: Add narrow bindings**
+- [x] **Step 3: Add narrow bindings**
 
 Expose `resolve_project_ports(type_id, properties)`, v3 project load/update, and reassembled string word values.
 Do not expose Rust union-find or scalar lowered IDs as public Web semantics.
 
-- [ ] **Step 4: Run GREEN and build**
+- [x] **Step 4: Run GREEN and build**
 
 Run real-WASM tests, focused Vitest, and `npm --prefix apps/web run build`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit `feat: expose project v3 signal shapes through wasm`.
 
