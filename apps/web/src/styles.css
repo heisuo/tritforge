@@ -509,7 +509,50 @@ button {
 
 .react-flow__edge.selected .react-flow__edge-path {
   filter: drop-shadow(0 0 2px rgb(22 70 76 / 42%));
-  stroke-width: 3.2;
+}
+
+.wire-label {
+  position: absolute;
+  z-index: 2;
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  height: 20px;
+  max-width: 150px;
+  padding: 0 5px;
+  border: 1px solid #c4d0d3;
+  border-radius: 3px;
+  color: #526168;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 1px 2px rgb(28 45 51 / 8%);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.wire-label.is-bus {
+  border-color: #86a3a6;
+  background: #f6fbfa;
+}
+
+.wire-label strong {
+  overflow: hidden;
+  color: #234f56;
+  font-size: 10px;
+  text-overflow: ellipsis;
+}
+
+.wire-name {
+  overflow: hidden;
+  max-width: 54px;
+  color: #315f66;
+  font-weight: 800;
+  text-overflow: ellipsis;
+}
+
+.wire-width {
+  color: #718086;
 }
 
 .react-flow__selection {
@@ -615,6 +658,11 @@ button {
   font-size: 9px;
 }
 
+.port-row small {
+  color: #89969b;
+  font-size: 7px;
+}
+
 .react-flow__handle {
   width: 10px;
   height: 10px;
@@ -629,6 +677,196 @@ button {
 
 .port-row-output .react-flow__handle {
   right: -10px;
+}
+
+.react-flow__node.wiring-node-shell {
+  width: auto;
+}
+
+.wiring-junction,
+.wiring-tunnel,
+.wiring-splitter {
+  position: relative;
+  color: #2f3e44;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+
+.wiring-junction {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+}
+
+.wiring-junction .react-flow__handle {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.junction-dot {
+  width: 12px;
+  height: 12px;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  background: var(--signal-color);
+  box-shadow: 0 0 0 2px #53666c;
+}
+
+.wiring-junction.is-selected .junction-dot {
+  box-shadow: 0 0 0 3px #237066;
+}
+
+.wiring-width {
+  position: absolute;
+  top: 25px;
+  padding: 1px 3px;
+  border-radius: 2px;
+  color: #526168;
+  background: rgb(255 255 255 / 90%);
+  font-size: 7px;
+}
+
+.wiring-tunnel {
+  display: grid;
+  grid-template-columns: 16px minmax(42px, auto) auto auto;
+  gap: 5px;
+  align-items: center;
+  min-width: 116px;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid #81979c;
+  border-left: 4px solid var(--signal-color);
+  border-radius: 4px;
+  background: #ffffff;
+  box-shadow: 0 2px 5px rgb(30 49 57 / 9%);
+}
+
+.wiring-tunnel.is-selected,
+.wiring-splitter.is-selected {
+  outline: 2px solid #237066;
+  outline-offset: 2px;
+}
+
+.wiring-tunnel > svg {
+  width: 14px;
+  height: 14px;
+  color: #426a70;
+}
+
+.wiring-tunnel strong {
+  overflow: hidden;
+  max-width: 74px;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wiring-tunnel > span,
+.wiring-tunnel > b {
+  font-size: 8px;
+}
+
+.wiring-tunnel > b {
+  color: var(--signal-color);
+}
+
+.wiring-tunnel .react-flow__handle {
+  top: 50%;
+  left: -8px;
+}
+
+.wiring-splitter {
+  width: 178px;
+  height: 126px;
+  padding: 8px 11px;
+  border: 1px solid #879ba0;
+  border-radius: 5px;
+  background: #ffffff;
+  box-shadow: 0 2px 7px rgb(30 49 57 / 10%);
+}
+
+.splitter-title {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  color: #315f66;
+  font-size: 10px;
+}
+
+.splitter-title svg {
+  width: 13px;
+  height: 13px;
+}
+
+.splitter-trunk,
+.splitter-branch {
+  position: absolute;
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  height: 18px;
+  font-size: 7px;
+  transform: translateY(-50%);
+}
+
+.splitter-trunk {
+  top: 55%;
+  left: 7px;
+  flex-direction: row-reverse;
+}
+
+.splitter-branch {
+  right: 7px;
+}
+
+.splitter-trunk b,
+.splitter-branch b {
+  max-width: 34px;
+  overflow: hidden;
+  color: #315f66;
+  font-size: 8px;
+  text-overflow: ellipsis;
+}
+
+.splitter-trunk small,
+.splitter-branch small {
+  color: #7c898e;
+  font-size: 7px;
+}
+
+.splitter-trunk .react-flow__handle {
+  top: 50%;
+  left: -15px;
+}
+
+.splitter-branch .react-flow__handle {
+  top: 50%;
+  right: -15px;
+}
+
+.splitter-bar {
+  position: absolute;
+  top: 32px;
+  bottom: 18px;
+  left: 50%;
+  width: 7px;
+  border-radius: 2px;
+  background: #426a70;
+  transform: translateX(-50%);
+}
+
+.wiring-splitter > code {
+  position: absolute;
+  right: 7px;
+  bottom: 5px;
+  left: 7px;
+  overflow: hidden;
+  color: #7b888d;
+  font-size: 7px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .empty-canvas {
@@ -839,6 +1077,134 @@ button {
 .signal-row strong {
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 15px;
+}
+
+.property-editor form {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.property-field {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.property-field > span {
+  color: #68757b;
+  font-size: 10px;
+}
+
+.property-field input {
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid #c4d0d3;
+  border-radius: 3px;
+  color: #25343a;
+  background: #ffffff;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+}
+
+.property-field input:focus-visible,
+.splitter-mapping-grid select:focus-visible,
+.width-presets button:focus-visible,
+.property-apply:focus-visible {
+  outline: 2px solid #237066;
+  outline-offset: 1px;
+}
+
+.width-presets {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 3px;
+}
+
+.width-presets button {
+  height: 26px;
+  padding: 0;
+  border: 1px solid #cbd5d8;
+  border-radius: 3px;
+  background: #f7f9f9;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.width-presets button:hover,
+.width-presets button.is-active {
+  border-color: #52877f;
+  color: #1f5f57;
+  background: #edf7f4;
+}
+
+.splitter-mapping-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.splitter-mapping-grid label {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  min-width: 0;
+  height: 28px;
+  padding-left: 5px;
+  border: 1px solid #d7dfe2;
+  border-radius: 3px;
+  color: #68757b;
+  background: #f7f9f9;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+}
+
+.splitter-mapping-grid select {
+  width: 100%;
+  height: 26px;
+  border: 0;
+  border-left: 1px solid #d7dfe2;
+  color: #25343a;
+  background: #ffffff;
+  font-family: inherit;
+  font-size: 9px;
+}
+
+.property-error {
+  margin: 0;
+  padding: 7px 8px;
+  border-left: 3px solid #c32231;
+  color: #8d2430;
+  background: #fff1f2;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.property-apply {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  height: 31px;
+  border: 1px solid #2c776c;
+  border-radius: 4px;
+  color: #ffffff;
+  background: #2c776c;
+  font-size: 10px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.property-apply:hover {
+  background: #205f56;
+}
+
+.property-apply svg {
+  width: 13px;
+  height: 13px;
 }
 
 .muted {

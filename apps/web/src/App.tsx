@@ -16,10 +16,12 @@ import {
 import {
   Activity,
   Box,
+  Cable,
   CircleDot,
   Clock3,
   Download,
   Gauge,
+  GitFork,
   Library,
   Maximize2,
   Menu,
@@ -53,6 +55,7 @@ import { CircuitNode, SIGNAL_COLORS } from "./CircuitNode";
 import { COMPONENT_HELP } from "./component-help";
 import { HierarchyBreadcrumbs } from "./components/HierarchyBreadcrumbs";
 import { ModuleManager } from "./components/ModuleManager";
+import { PropertyEditor } from "./components/PropertyEditor";
 import { ExampleLibrary } from "./ExampleLibrary";
 import { LogicWireEdge } from "./LogicWireEdge";
 import {
@@ -141,7 +144,28 @@ const DISPLAY_NAMES: Record<string, string> = {
   "project.module_input": "Module Input",
   "project.module_output": "Module Output",
   "project.module_instance": "Module Instance",
+  "wiring.junction": "连接点",
+  "wiring.tunnel": "隧道",
+  "wiring.splitter": "分线器",
 };
+
+const WIRING_HELPERS = [
+  {
+    typeId: "wiring.junction",
+    displayName: "连接点",
+    properties: { width: 1 },
+  },
+  {
+    typeId: "wiring.tunnel",
+    displayName: "隧道",
+    properties: { width: 1, label: "net" },
+  },
+  {
+    typeId: "wiring.splitter",
+    displayName: "分线器",
+    properties: { width: 3, branchCount: 3, mapping: [0, 1, 2] },
+  },
+] as const;
 
 const BOUNDARY_CATALOG: ProjectCatalogComponent[] = [
   {
@@ -185,6 +209,8 @@ function circuitDocument(circuit: ProjectCircuitV3): CircuitDocument {
 }
 
 function descriptorIcon(descriptor: CatalogComponent) {
+  if (descriptor.type_id === "wiring.splitter") return GitFork;
+  if (descriptor.type_id === "wiring.tunnel") return Cable;
   if (descriptor.type_id === "source.trit_input") return Radio;
   if (descriptor.type_id === "source.constant") return Box;
   if (descriptor.type_id === "source.clock") return Clock3;
@@ -195,6 +221,19 @@ function descriptorIcon(descriptor: CatalogComponent) {
     return Workflow;
   }
   return CircleDot;
+}
+
+function defaultComponentProperties(
+  typeId: string,
+  label: string,
+): Record<string, unknown> {
+  const helper = WIRING_HELPERS.find((item) => item.typeId === typeId);
+  if (helper) return { ...structuredClone(helper.properties), label };
+  if (typeId === "source.trit_input" || typeId === "source.constant") {
+    return { width: 1, value: "0", label };
+  }
+  if (typeId === "sink.probe") return { width: 1, label };
+  return { label };
 }
 
 function instanceId(moduleId: string, nodes: EditorNode[]): string {
@@ -213,9 +252,28 @@ function nextId(stem: string, used: string[]): string {
 }
 
 function wordColor(value: TernaryWord): string {
-  return value.length === 1 && value in SIGNAL_COLORS
-    ? SIGNAL_COLORS[value as TritSymbol]
-    : SIGNAL_COLORS.X;
+  if (value.length === 1 && value in SIGNAL_COLORS) {
+    return SIGNAL_COLORS[value as TritSymbol];
+  }
+  if (value.includes("E")) return SIGNAL_COLORS.E;
+  if (value.includes("X")) return SIGNAL_COLORS.X;
+  if (value.includes("Z")) return SIGNAL_COLORS.Z;
+  return "#315f66";
+}
+
+function propertyEditMessage(error: unknown): string {
+  const code =
+    error instanceof ProjectEditError || error instanceof HierarchyRuntimeError
+      ? error.code
+      : "PROPERTY_UPDATE_FAILED";
+  const chinese: Record<string, string> = {
+    INVALID_SIGNAL_WIDTH: "宽度必须是 1 到 27 trit",
+    INVALID_SPLITTER_MAP: "分线器位映射无效",
+    INVALID_WORD: "源字值必须与宽度一致且只包含 T、0、1",
+    WIDTH_MISMATCH: "属性更新会造成连接线宽度不匹配",
+    INVALID_PROPERTY: "属性值无效",
+  };
+  return `${chinese[code] ?? wasmErrorMessage(error)} [${code}]`;
 }
 
 function readTextFile(file: File): Promise<string> {
@@ -422,12 +480,24 @@ function Workbench() {
         wasmRef.current = wasm;
         const runtime = new HierarchyRuntime(wasm.projectSimulator);
         runtimeRef.current = runtime;
-        baseCatalogRef.current = wasm.catalog;
+        const wiringCatalog: CatalogComponent[] = WIRING_HELPERS.map((helper) => ({
+          type_id: helper.typeId,
+          display_name: helper.displayName,
+          category: "wiring",
+          kind: "wiring",
+          ports: wasm.resolveProjectPorts(
+            helper.typeId,
+            structuredClone(helper.properties),
+          ),
+          truth_table: [],
+        }));
+        const completeCatalog = [...wasm.catalog, ...wiringCatalog];
+        baseCatalogRef.current = completeCatalog;
         store.getState().setPortResolver({
           resolvePorts: wasm.resolveProjectPorts,
           resolveModuleInterfaces: wasm.resolveProjectModuleInterfaces,
         });
-        setBaseCatalog(wasm.catalog);
+        setBaseCatalog(completeCatalog);
         setWasmVersion(wasm.apiVersion);
         try {
           const state = store.getState();
@@ -549,6 +619,8 @@ function Workbench() {
             ports: node.data.ports ?? descriptor?.ports ?? [],
             inputSignals: snapshot?.inputNets[node.id] ?? {},
             outputSignals: snapshot?.componentOutputs[node.id] ?? {},
+            inputWords: snapshot?.inputNetWords[node.id] ?? {},
+            outputWords: snapshot?.componentOutputWords[node.id] ?? {},
           },
         };
       }),
@@ -575,16 +647,37 @@ function Workbench() {
       edges.map((edge) => {
         const signal = edgeNetValue(edge, snapshot);
         const color = wordColor(signal);
+        const sourceNode = nodes.find((node) => node.id === edge.source);
+        const targetNode = nodes.find((node) => node.id === edge.target);
+        const sourcePortId = edge.data?.semanticSourcePortId ?? edge.sourceHandle;
+        const targetPortId = edge.data?.semanticTargetPortId ?? edge.targetHandle;
+        const width =
+          sourceNode?.data.ports?.find((port) => port.id === sourcePortId)?.width ??
+          targetNode?.data.ports?.find((port) => port.id === targetPortId)?.width ??
+          signal.length;
+        const tunnelNode = [sourceNode, targetNode].find(
+          (node) => node?.data.typeId === "wiring.tunnel",
+        );
+        const localName =
+          typeof tunnelNode?.data.properties?.label === "string"
+            ? tunnelNode.data.properties.label
+            : tunnelNode?.data.typeId === "wiring.tunnel"
+              ? tunnelNode.data.label
+              : undefined;
         return {
           ...edge,
           type: "logic" as const,
-          data: { ...edge.data, ...wireLanes[edge.id] },
-          label: signal,
-          labelStyle: { fill: color, fontSize: 12, fontWeight: 800 },
-          labelBgStyle: { fill: "#ffffff", fillOpacity: 0.92 },
-          labelBgPadding: [4, 3] as [number, number],
-          labelBgBorderRadius: 2,
-          style: { stroke: color, strokeWidth: 2.2 },
+          data: {
+            ...edge.data,
+            ...wireLanes[edge.id],
+            semanticWidth: width,
+            currentWord: signal,
+            ...(localName ? { localName } : {}),
+          },
+          style: {
+            stroke: width > 1 ? "#426a70" : color,
+            strokeWidth: width > 1 ? 6 : 2,
+          },
         };
       }),
     [edges, nodes, snapshot, wireLanes],
@@ -669,33 +762,37 @@ function Workbench() {
             : { x: 420, y: 280 };
       }
       const id = makeComponentId(typeId, nodes);
-      const sourceValue =
-        typeId === "source.trit_input" || typeId === "source.constant"
-          ? "0"
+      const label = DISPLAY_NAMES[typeId] ?? descriptor.display_name;
+      try {
+        store.getState().addComponent(activeCircuitId, {
+          id,
+          typeId,
+          position: nextPosition,
+          properties: defaultComponentProperties(typeId, label),
+        });
+        store.getState().setSelection(activeCircuitId, [id], []);
+        const state = store.getState();
+        const circuit = state.project.circuits.find(
+          (item) => item.id === activeCircuitId,
+        );
+        const projected = circuit
+          ? projectToEditor(circuit, (componentId) =>
+              state.resolveComponentPorts(activeCircuitId, componentId),
+            ).nodes.find((node) => node.id === id)
           : undefined;
-      if (
-        applyEditorDocument({
-          nodes: [
-            ...nodes,
-            {
-              id,
-              type: "component",
-              position: nextPosition,
-              data: {
-                typeId,
-                label: DISPLAY_NAMES[typeId] ?? descriptor.display_name,
-                ports: descriptor.ports,
-                ...(sourceValue ? { sourceValue } : {}),
-              },
-            },
-          ],
-          edges,
-        })
-      ) {
+        if (!projected) throw new Error(`无法投影新元件 '${id}'`);
+        setNodes((current) => [
+          ...current.map((node) => ({ ...node, selected: false })),
+          { ...projected, selected: true },
+        ]);
         setSelectedNodeId(id);
+        setSelectedEdgeIds([]);
+        setStatusMessage(`已添加${label}`);
+      } catch (error) {
+        editFailure("元件添加失败", error);
       }
     },
-    [applyEditorDocument, baseByType, edges, nodes],
+    [activeCircuitId, baseByType, editFailure, nodes, store],
   );
 
   const placeModule = useCallback(
@@ -781,8 +878,8 @@ function Workbench() {
           position: { x: direction === "input" ? 80 : 650, y: 100 + count * 150 },
           properties:
             direction === "input"
-              ? { portId, label: `Input ${count + 1}`, previewValue: "0" }
-              : { portId, label: `Output ${count + 1}` },
+              ? { portId, label: `Input ${count + 1}`, width: 1, previewValue: "0" }
+              : { portId, label: `Output ${count + 1}`, width: 1 },
         });
         restoreActiveCircuit();
       } catch (error) {
@@ -1113,6 +1210,33 @@ function Workbench() {
   }));
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? null;
   const selectedDescriptor = selectedNode ? descriptorForNode(selectedNode) ?? null : null;
+  const selectedComponent = selectedNode
+    ? activeCircuit.components.find(
+        (component) => component.id === selectedNode.id,
+      ) ?? null
+    : null;
+
+  const commitSelectedProperties = useCallback(
+    (properties: Record<string, unknown>): string | undefined => {
+      if (!selectedNodeId) return "没有选中的元件 [UNKNOWN_COMPONENT]";
+      try {
+        store
+          .getState()
+          .setComponentProperties(activeCircuitId, selectedNodeId, properties);
+        restoreActiveCircuit();
+        setStatusMessage("属性已更新");
+        return undefined;
+      } catch (error) {
+        if (error instanceof HierarchyRuntimeError) {
+          setDiagnostics(error.diagnostics);
+        }
+        const message = propertyEditMessage(error);
+        setStatusMessage(`属性更新失败: ${message}`);
+        return message;
+      }
+    },
+    [activeCircuitId, restoreActiveCircuit, selectedNodeId, store],
+  );
 
   const navigateDiagnostic = useCallback(
     (diagnostic: ProjectSimulationDiagnostic) => {
@@ -1292,14 +1416,15 @@ function Workbench() {
             onAddInput={() => addBoundary("input")}
             onAddOutput={() => addBoundary("output")}
           />
-          {["source", "gate", "module", "sequential", "sink"].map((category) => (
+          {["source", "wiring", "gate", "module", "sequential", "sink"].map((category) => (
             <section className="palette-group" key={category}>
-              <h2>{category === "source" ? "输入与常量" : category === "sink" ? "观测" : category === "module" ? "算术模块" : category === "sequential" ? "时序" : "逻辑门"}</h2>
+              <h2>{category === "source" ? "输入与常量" : category === "sink" ? "观测" : category === "wiring" ? "布线" : category === "module" ? "算术模块" : category === "sequential" ? "时序" : "逻辑门"}</h2>
               {baseCatalog.filter((item) => item.category === category).map((descriptor) => {
                 const Icon = descriptorIcon(descriptor);
+                const name = DISPLAY_NAMES[descriptor.type_id] ?? descriptor.display_name;
                 return (
-                  <button type="button" className="palette-item" key={descriptor.type_id} draggable onDragStart={(event) => { event.dataTransfer.setData("application/logsim-component", descriptor.type_id); event.dataTransfer.effectAllowed = "copy"; }} onClick={() => addBuiltin(descriptor.type_id)}>
-                    <Icon aria-hidden="true" /><span><strong>{DISPLAY_NAMES[descriptor.type_id] ?? descriptor.display_name}</strong><small>{descriptor.ports.length} PORTS</small></span><Plus aria-hidden="true" />
+                  <button type="button" className="palette-item" key={descriptor.type_id} aria-label={`添加${name}`} title={`添加${name}`} draggable onDragStart={(event) => { event.dataTransfer.setData("application/logsim-component", descriptor.type_id); event.dataTransfer.effectAllowed = "copy"; }} onClick={() => addBuiltin(descriptor.type_id)}>
+                    <Icon aria-hidden="true" /><span><strong>{name}</strong><small>{descriptor.ports.length} PORTS</small></span><Plus aria-hidden="true" />
                   </button>
                 );
               })}
@@ -1307,7 +1432,7 @@ function Workbench() {
           ))}
         </aside>
 
-        <section className="canvas" aria-label="电路画布" data-wire-state={JSON.stringify(renderedEdges.map((edge) => ({ id: edge.id, source: edge.source, sourcePort: edge.data?.semanticSourcePortId ?? edge.sourceHandle, target: edge.target, targetPort: edge.data?.semanticTargetPortId ?? edge.targetHandle, signal: edge.label })))} ref={flowRef} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }} onDrop={(event: DragEvent<HTMLDivElement>) => { event.preventDefault(); const typeId = event.dataTransfer.getData("application/logsim-component"); if (typeId && instanceRef.current) addBuiltin(typeId, instanceRef.current.screenToFlowPosition({ x: event.clientX, y: event.clientY })); }}>
+        <section className="canvas" aria-label="电路画布" data-wire-state={JSON.stringify(renderedEdges.map((edge) => ({ id: edge.id, source: edge.source, sourcePort: edge.data?.semanticSourcePortId ?? edge.sourceHandle, target: edge.target, targetPort: edge.data?.semanticTargetPortId ?? edge.targetHandle, signal: edge.data?.currentWord, width: edge.data?.semanticWidth, name: edge.data?.localName })))} ref={flowRef} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }} onDrop={(event: DragEvent<HTMLDivElement>) => { event.preventDefault(); const typeId = event.dataTransfer.getData("application/logsim-component"); if (typeId && instanceRef.current) addBuiltin(typeId, instanceRef.current.screenToFlowPosition({ x: event.clientX, y: event.clientY })); }}>
           {wasmState !== "loading" ? (
             <ReactFlow<EditorNode, EditorEdge>
               key={`${activeCircuitId}-${reloadRevision}`}
@@ -1341,7 +1466,7 @@ function Workbench() {
 
         <aside id="component-inspector" className={`inspector ${inspectorOpen ? "is-open" : ""}`} aria-label="检查器" inert={compactLayout && !inspectorOpen ? true : undefined}>
           <div className="panel-title"><Activity aria-hidden="true" /><div><strong>检查器</strong><span>PROJECT SNAPSHOT</span></div></div>
-          {selectedNode && selectedDescriptor ? <NodeInspector node={selectedNode} descriptor={selectedDescriptor} snapshot={snapshot} /> : <ExampleHelp example={EXAMPLES.find((item) => item.id === activeExampleId) ?? EXAMPLES[0]} />}
+          {selectedNode && selectedDescriptor ? <><NodeInspector node={selectedNode} descriptor={selectedDescriptor} snapshot={snapshot} />{selectedComponent && <PropertyEditor key={`${activeCircuitId}/${selectedComponent.id}`} typeId={selectedComponent.typeId} properties={selectedComponent.properties} onCommit={commitSelectedProperties} />}</> : <ExampleHelp example={EXAMPLES.find((item) => item.id === activeExampleId) ?? EXAMPLES[0]} />}
           <Diagnostics diagnostics={diagnostics} onNavigate={navigateDiagnostic} />
         </aside>
       </div>
@@ -1358,15 +1483,16 @@ function ExampleHelp({ example }: { example: TernaryExample }) {
   );
 }
 
-function SignalRows({ title, values }: { title: string; values: Record<string, TritSymbol> }) {
-  return <div className="signal-group"><h3>{title}</h3>{Object.keys(values).length === 0 ? <span className="muted">无端口</span> : Object.entries(values).map(([port, value]) => <div className="signal-row" key={port}><code>{port}</code><strong className={`signal-${value}`} style={{ color: SIGNAL_COLORS[value] }}>{value}</strong></div>)}</div>;
+function SignalRows({ title, values }: { title: string; values: Record<string, TernaryWord> }) {
+  return <div className="signal-group"><h3>{title}</h3>{Object.keys(values).length === 0 ? <span className="muted">无端口</span> : Object.entries(values).map(([port, value]) => <div className="signal-row" key={port}><code>{port}</code><strong style={{ color: wordColor(value) }}>{value}</strong></div>)}</div>;
 }
 
 function NodeInspector({ node, descriptor, snapshot }: { node: EditorNode; descriptor: CatalogComponent; snapshot: ProjectSimulationSnapshot | null }) {
-  const inputValues = snapshot?.inputNets[node.id] ?? {};
-  const outputValues = snapshot?.componentOutputs[node.id] ?? {};
-  const inputPorts = descriptor.ports.filter((port) => port.direction === "input");
-  const outputPorts = descriptor.ports.filter((port) => port.direction === "output");
+  const inputValues = { ...(snapshot?.inputNets[node.id] ?? {}), ...(snapshot?.inputNetWords[node.id] ?? {}) };
+  const outputValues = { ...(snapshot?.componentOutputs[node.id] ?? {}), ...(snapshot?.componentOutputWords[node.id] ?? {}) };
+  const resolvedPorts = node.data.ports ?? descriptor.ports;
+  const inputPorts = resolvedPorts.filter((port) => port.direction !== "output");
+  const outputPorts = resolvedPorts.filter((port) => port.direction !== "input");
   const help = COMPONENT_HELP[descriptor.type_id];
   return <><section className="inspector-section selected-component"><span className="type-chip">{descriptor.category.toUpperCase()}</span><h2>{node.data.label}</h2><dl className="metadata"><div><dt>稳定 ID</dt><dd>{node.id}</dd></div><div><dt>类型</dt><dd>{descriptor.type_id}</dd></div></dl><div className="signal-columns"><SignalRows title="输入" values={inputValues} /><SignalRows title="输出" values={outputValues} /></div></section>{help && <section className="inspector-section component-help"><h2>中文说明</h2><p>{help.summary}</p><p>{help.details}</p></section>}{["gate", "module"].includes(descriptor.category) && descriptor.truth_table.length > 0 && <section className="inspector-section truth-table-section"><h2>真值表</h2><div className="truth-table-wrap"><table><thead><tr>{inputPorts.map((port) => <th key={port.id}>{port.id}</th>)}{outputPorts.map((port) => <th className="output-column" key={port.id}>{port.id}</th>)}</tr></thead><tbody>{descriptor.truth_table.map((row, rowIndex) => <tr key={rowIndex}>{[...row.inputs, ...row.outputs].map((value, index) => <td className={`signal-${value}`} key={`${rowIndex}-${index}`} style={{ color: SIGNAL_COLORS[value] }}>{value}</td>)}</tr>)}</tbody></table></div></section>}</>;
 }

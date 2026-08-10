@@ -11,6 +11,7 @@ export default defineConfig({
       "tests/hierarchy.spec.ts",
       "tests/sequential.spec.ts",
       "tests/register3.spec.ts",
+      "tests/bus-wiring.spec.ts",
       "node_modules/**",
       "dist/**",
     ],

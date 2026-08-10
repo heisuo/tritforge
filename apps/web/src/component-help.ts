@@ -20,6 +20,18 @@ export const COMPONENT_HELP: Record<string, ComponentHelp> = {
     summary: "观察输入网络当前状态的探针，不会驱动或改变电路。",
     details: "Probe 可以显示 T、0、1，也会直接显示未知 X、高阻 Z 和冲突 E。",
   },
+  "wiring.junction": {
+    summary: "把多段同宽导线明确汇接为一个网络。",
+    details: "连接点只描述电气连通关系，不参与逻辑求值。",
+  },
+  "wiring.tunnel": {
+    summary: "用名称连接当前电路中相隔较远的同宽网络。",
+    details: "名称严格相同的隧道相连，名称不会跨越模块边界。",
+  },
+  "wiring.splitter": {
+    summary: "按位映射拆分或合并多 trit 总线。",
+    details: "trunk 是主干，branch0、branch1 等分支宽度由 Rust 根据位映射解析。",
+  },
   "gate.buf": {
     summary: "三进制缓冲门，已知输入值原样传递到输出。",
     details: "BUF 常用于整理连线或增加观察点；高阻 Z 进入逻辑门后按未知 X 处理。",

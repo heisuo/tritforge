@@ -7,6 +7,7 @@ export default defineConfig({
     "hierarchy.spec.ts",
     "sequential.spec.ts",
     "register3.spec.ts",
+    "bus-wiring.spec.ts",
   ],
   fullyParallel: false,
   workers: 1,

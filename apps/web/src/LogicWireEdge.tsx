@@ -1,4 +1,4 @@
-import { BaseEdge, type EdgeProps } from "@xyflow/react";
+import { BaseEdge, EdgeLabelRenderer, type EdgeProps } from "@xyflow/react";
 import type { EditorEdge } from "./editor-model";
 import { createLogicWirePath } from "./wire-routing";
 
@@ -9,12 +9,6 @@ export function LogicWireEdge({
   targetX,
   targetY,
   data,
-  label,
-  labelStyle,
-  labelShowBg,
-  labelBgStyle,
-  labelBgPadding,
-  labelBgBorderRadius,
   style,
   markerStart,
   markerEnd,
@@ -32,21 +26,28 @@ export function LogicWireEdge({
   });
 
   return (
-    <BaseEdge
-      id={id}
-      path={route.path}
-      labelX={route.labelX}
-      labelY={route.labelY}
-      label={label}
-      labelStyle={labelStyle}
-      labelShowBg={labelShowBg}
-      labelBgStyle={labelBgStyle}
-      labelBgPadding={labelBgPadding}
-      labelBgBorderRadius={labelBgBorderRadius}
-      style={style}
-      markerStart={markerStart}
-      markerEnd={markerEnd}
-      interactionWidth={interactionWidth}
-    />
+    <>
+      <BaseEdge
+        id={id}
+        path={route.path}
+        style={style}
+        markerStart={markerStart}
+        markerEnd={markerEnd}
+        interactionWidth={interactionWidth}
+      />
+      <EdgeLabelRenderer>
+        <div
+          className={`wire-label ${data?.semanticWidth && data.semanticWidth > 1 ? "is-bus" : ""}`}
+          style={{
+            transform: `translate(-50%, -50%) translate(${route.labelX}px, ${route.labelY}px)`,
+          }}
+          data-testid={`wire-label-${id}`}
+        >
+          {data?.localName && <span className="wire-name">{data.localName}</span>}
+          <span className="wire-width">{data?.semanticWidth ?? 1}t</span>
+          <strong>{data?.currentWord ?? "Z"}</strong>
+        </div>
+      </EdgeLabelRenderer>
+    </>
   );
 }

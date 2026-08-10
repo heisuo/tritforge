@@ -83,6 +83,8 @@ export interface ComponentNodeData extends Record<string, unknown> {
   ports?: CatalogPort[];
   inputSignals?: Record<string, TritSymbol>;
   outputSignals?: Record<string, TritSymbol>;
+  inputWords?: Record<string, TernaryWord>;
+  outputWords?: Record<string, TernaryWord>;
 }
 
 export type EditorNode = Node<ComponentNodeData, "component">;
@@ -91,6 +93,9 @@ export interface LogicWireData
     Partial<WireLaneAssignment> {
   semanticSourcePortId?: string;
   semanticTargetPortId?: string;
+  semanticWidth?: number;
+  currentWord?: TernaryWord;
+  localName?: string;
 }
 export type EditorEdge = Edge<LogicWireData, "logic">;
 

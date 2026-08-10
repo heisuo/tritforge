@@ -28,6 +28,9 @@ export function projectToEditor(
   const base = toEditorDocument(document);
   const nodes = base.nodes.map((node) => ({
     ...node,
+    ...(node.data.typeId.startsWith("wiring.")
+      ? { className: "wiring-node-shell" }
+      : {}),
     data: {
       ...node.data,
       ports: portsForComponent(node.id).map((port) => ({ ...port })),

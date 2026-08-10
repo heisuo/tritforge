@@ -92,8 +92,46 @@ vi.mock("../src/wasm-client", () => ({
       if (typeId === "sink.probe" || typeId === "project.module_output") {
         return [{ id: "in", direction: "input", width }];
       }
-      if (typeId === "wiring.tunnel") {
+      if (typeId === "wiring.junction" || typeId === "wiring.tunnel") {
         return [{ id: "net", direction: "inout", width }];
+      }
+      if (typeId === "wiring.splitter") {
+        const branchCount = Number(properties.branchCount);
+        const mapping = properties.mapping;
+        if (
+          !Number.isInteger(branchCount) ||
+          branchCount < 1 ||
+          branchCount > width ||
+          !Array.isArray(mapping) ||
+          mapping.length !== width ||
+          mapping.some(
+            (branch) =>
+              !Number.isInteger(branch) ||
+              Number(branch) < 0 ||
+              Number(branch) >= branchCount,
+          )
+        ) {
+          throw Object.assign(new Error("invalid splitter mapping"), {
+            code: "INVALID_SPLITTER_MAP",
+          });
+        }
+        const branchWidths = Array.from({ length: branchCount }, () => 0);
+        mapping.forEach((branch) => {
+          branchWidths[Number(branch)] += 1;
+        });
+        if (branchWidths.some((branchWidth) => branchWidth === 0)) {
+          throw Object.assign(new Error("empty splitter branch"), {
+            code: "INVALID_SPLITTER_MAP",
+          });
+        }
+        return [
+          { id: "trunk", direction: "inout", width },
+          ...branchWidths.map((branchWidth, index) => ({
+            id: `branch${index}`,
+            direction: "inout" as const,
+            width: branchWidth,
+          })),
+        ];
       }
       return [{ id: "out", direction: "output", width }];
     },
@@ -585,7 +623,7 @@ describe("App", () => {
   it("keeps the Workbench and last valid catalog when project-aware port resolution fails", async () => {
     render(<App />);
     await importProject(referencedProject());
-    expect(screen.getByText("4 COMPONENTS")).toBeInTheDocument();
+    expect(screen.getByText("7 COMPONENTS")).toBeInTheDocument();
     expect(screen.getByText("1 COMPILES")).toBeInTheDocument();
     runtimeMock.resolveProjectModuleInterfaces.mockClear();
     runtimeMock.resolveProjectModulePorts.mockClear();
@@ -618,7 +656,7 @@ describe("App", () => {
     expect(screen.getByRole("main", { name: "Logsim Ternary 编辑器" }))
       .toBeInTheDocument();
     expect(screen.getByRole("application")).toBeInTheDocument();
-    expect(screen.getByText("4 COMPONENTS")).toBeInTheDocument();
+    expect(screen.getByText("7 COMPONENTS")).toBeInTheDocument();
     expect(screen.getByText("1 COMPILES")).toBeInTheDocument();
     expect(runtimeMock.resolveProjectModuleInterfaces).not.toHaveBeenCalled();
     expect(runtimeMock.resolveProjectModulePorts).not.toHaveBeenCalled();
@@ -671,6 +709,7 @@ describe("App", () => {
         target: "a-probe",
         targetPort: "in",
         signal: "T",
+        width: 1,
       });
     };
     await waitFor(() => assertWire("wire-main"));
@@ -776,6 +815,65 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "重做" }));
     await waitFor(() => expect(runtimeMock.updateProject).toHaveBeenCalledTimes(3));
     expect(runtimeMock.setSource).not.toHaveBeenCalled();
+  });
+
+  it("offers wiring helpers and renders Rust-resolved splitter ports", async () => {
+    const { container } = render(<App />);
+    await screen.findByText(/层级模拟器已就绪/);
+
+    expect(screen.getByRole("button", { name: /添加连接点/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /添加隧道/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /添加分线器/ }));
+
+    expect(await screen.findByTestId("handle-splitter-1-output-trunk"))
+      .toBeInTheDocument();
+    expect(screen.getByTestId("handle-splitter-1-output-branch0"))
+      .toBeInTheDocument();
+    expect(screen.getByTestId("handle-splitter-1-output-branch2"))
+      .toBeInTheDocument();
+    expect(
+      container.querySelector('.react-flow__node[data-id="splitter-1"]'),
+    ).toHaveClass("wiring-node-shell");
+  });
+
+  it("edits a selected width-aware source atomically and displays word widths", async () => {
+    render(<App />);
+    await screen.findByText(/层级模拟器已就绪/);
+    fireEvent.click(screen.getByRole("button", { name: "添加Trit Input" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "宽度 3 trit" }));
+    fireEvent.change(screen.getByLabelText("源字值"), {
+      target: { value: "1T0" },
+    });
+    runtimeMock.updateProject.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "应用属性" }));
+
+    await waitFor(() => expect(runtimeMock.updateProject).toHaveBeenCalledTimes(1));
+    expect((await screen.findAllByText("3t")).length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("源字值")).toHaveValue("1T0");
+  });
+
+  it("renders six-state words and semantic bus metadata without scalar IDs", async () => {
+    runtimeMock.loadProject.mockImplementation(() => ({
+      ...runtimeMock.makeSnapshot(),
+      componentOutputWords: { "z-source": { out: "1XZ" } },
+      inputNetWords: { "a-probe": { in: "1XE" } },
+    }));
+    const { container } = render(<App />);
+    await importProject(reversedEndpointProject(3), "six-state-word.json");
+
+    expect(
+      container.querySelector('.react-flow__node[data-id="a-probe"] .node-signal'),
+    ).toHaveTextContent("1XE");
+    const wires = JSON.parse(
+      screen.getByRole("region", { name: "电路画布" }).getAttribute("data-wire-state") ??
+        "[]",
+    ) as Array<Record<string, unknown>>;
+    expect(wires.find((wire) => wire.id === "wire-main")).toMatchObject({
+      signal: "1XE",
+      width: 3,
+    });
+    expect(JSON.stringify(wires)).not.toContain("scalar");
   });
 
 
