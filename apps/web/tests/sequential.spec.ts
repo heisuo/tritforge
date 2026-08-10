@@ -27,7 +27,7 @@ test("desktop DFF demo captures, holds, resets, and reloads through real WASM", 
   await page.setViewportSize({ width: 1440, height: 900 });
   const consoleErrors = watchConsoleErrors(page);
   await page.goto("/");
-  await expect(page.getByText("WASM v2")).toBeVisible();
+  await expect(page.getByText("WASM v3")).toBeVisible();
   await loadDffExample(page);
 
   const q = node(page, "dff-1").locator(".node-signal");

@@ -13,6 +13,8 @@ const runtimeMock = vi.hoisted(() => {
   const snapshot = (): ProjectSimulationSnapshot => ({
     componentOutputs: {},
     inputNets: {},
+    componentOutputWords: {},
+    inputNetWords: {},
     diagnostics: [],
     stable: true,
     tickCount: 0,
@@ -41,7 +43,14 @@ const runtimeMock = vi.hoisted(() => {
 
 vi.mock("../src/wasm-client", () => ({
   createWasmRuntime: vi.fn(async () => ({
-    apiVersion: 2,
+    apiVersion: 3,
+    resolveProjectPorts: (typeId: string, properties: Record<string, unknown>) => [
+      {
+        id: typeId === "project.module_output" ? "in" : "out",
+        direction: typeId === "project.module_output" ? "input" : "output",
+        width: typeof properties.width === "number" ? properties.width : 1,
+      },
+    ],
     catalog: [
       {
         type_id: "source.trit_input",

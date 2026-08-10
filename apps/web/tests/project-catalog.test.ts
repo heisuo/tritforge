@@ -1,7 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { CatalogComponent } from "../src/editor-model";
 import { buildProjectCatalog } from "../src/project/project-catalog";
 import type { ProjectDocumentV2 } from "../src/project/project-document";
+import type { ProjectPortResolver } from "../src/wasm-client";
+
+const resolvePorts = vi.fn(((typeId, properties) => [
+  {
+    id: typeId === "project.module_output" ? "in" : "out",
+    direction: typeId === "project.module_output" ? "input" : "output",
+    width: typeof properties.width === "number" ? properties.width : 1,
+  },
+]) satisfies ProjectPortResolver);
 
 function moduleCircuit(id: string, components: ProjectDocumentV2["circuits"][number]["components"] = []) {
   return { id, name: id.toUpperCase(), kind: "module" as const, components, connections: [] };
@@ -25,7 +34,7 @@ function project(): ProjectDocumentV2 {
           id: "in-high",
           typeId: "project.module_input",
           position: { x: 0, y: 20 },
-          properties: { portId: "a", label: "A", previewValue: "0" },
+          properties: { portId: "a", label: "A", previewValue: "1T0", width: 3 },
         },
         {
           id: "in-low",
@@ -57,7 +66,8 @@ describe("project catalog", () => {
       truth_table: [],
     };
 
-    const catalog = buildProjectCatalog([builtin], project(), "main");
+    resolvePorts.mockClear();
+    const catalog = buildProjectCatalog([builtin], project(), "main", resolvePorts);
     const descriptor = catalog.find(
       (item) => item.category === "project-module" && item.moduleId === "a",
     );
@@ -70,18 +80,22 @@ describe("project catalog", () => {
       kind: "module_instance",
       moduleId: "a",
       ports: [
-        { id: "a", label: "A", direction: "input" },
-        { id: "b", label: "B", direction: "input" },
-        { id: "y", label: "Y", direction: "output" },
+        { id: "a", label: "A", direction: "input", width: 3 },
+        { id: "b", label: "B", direction: "input", width: 1 },
+        { id: "y", label: "Y", direction: "output", width: 1 },
       ],
     });
+    expect(resolvePorts).toHaveBeenCalledWith(
+      "project.module_input",
+      expect.objectContaining({ width: 3 }),
+    );
 
     catalog[0].ports[0].id = "mutated";
     expect(builtin.ports[0].id).toBe("a");
   });
 
   it("excludes self and candidates that would create a dependency cycle", () => {
-    const catalog = buildProjectCatalog([], project(), "b");
+    const catalog = buildProjectCatalog([], project(), "b", resolvePorts);
     const moduleIds = catalog
       .filter((item) => item.category === "project-module")
       .map((item) => item.moduleId);
@@ -107,7 +121,7 @@ describe("project catalog", () => {
       },
     ];
 
-    const descriptor = buildProjectCatalog([], value, "main").find(
+    const descriptor = buildProjectCatalog([], value, "main", resolvePorts).find(
       (item) => item.moduleId === "c",
     )!;
 

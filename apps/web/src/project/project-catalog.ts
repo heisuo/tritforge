@@ -2,7 +2,11 @@ import type {
   CatalogComponent,
   CatalogPort,
 } from "../editor-model";
+import type { ProjectPortResolver } from "../wasm-client";
 import type { ProjectDocumentV2 } from "./project-document";
+import type { ProjectDocumentV3 } from "./project-v3";
+
+type CatalogProjectDocument = ProjectDocumentV2 | ProjectDocumentV3;
 
 export interface ProjectCatalogComponent extends CatalogComponent {
   moduleId?: string;
@@ -11,12 +15,14 @@ export interface ProjectCatalogComponent extends CatalogComponent {
 
 export interface ProjectCatalogPort extends CatalogPort {
   label?: string;
+  width?: number;
 }
 
 export function buildProjectCatalog(
   builtins: CatalogComponent[],
-  project: ProjectDocumentV2,
+  project: CatalogProjectDocument,
   activeCircuitId: string,
+  resolvePorts: ProjectPortResolver,
 ): ProjectCatalogComponent[] {
   const forbidden = cycleCausingCandidates(project, activeCircuitId);
   const dynamic = project.circuits
@@ -31,15 +37,16 @@ export function buildProjectCatalog(
       category: "project-module",
       kind: "module_instance",
       moduleId: circuit.id,
-      ports: orderedBoundaryPorts(circuit.components),
+      ports: orderedBoundaryPorts(circuit.components, resolvePorts),
       truth_table: [],
     }));
   return [...builtins.map(cloneDescriptor), ...dynamic];
 }
 
 function orderedBoundaryPorts(
-  components: ProjectDocumentV2["circuits"][number]["components"],
-): CatalogPort[] {
+  components: CatalogProjectDocument["circuits"][number]["components"],
+  resolvePorts: ProjectPortResolver,
+): ProjectCatalogPort[] {
   return components
     .filter(
       (component) =>
@@ -51,14 +58,21 @@ function orderedBoundaryPorts(
       (left, right) =>
         left.position.y - right.position.y || left.id.localeCompare(right.id),
     )
-    .map((component) => ({
-      id: String(component.properties.portId),
-      label: String(component.properties.label),
-      direction:
-        component.typeId === "project.module_input"
-          ? ("input" as const)
-          : ("output" as const),
-    }));
+    .map((component) => {
+      const [resolved] = resolvePorts(component.typeId, component.properties);
+      if (!resolved) {
+        throw new Error(`No resolved port for module boundary '${component.id}'`);
+      }
+      return {
+        id: String(component.properties.portId),
+        label: String(component.properties.label),
+        direction:
+          component.typeId === "project.module_input"
+            ? ("input" as const)
+            : ("output" as const),
+        width: resolved.width,
+      };
+    });
 }
 
 function cloneDescriptor(descriptor: CatalogComponent): ProjectCatalogComponent {
@@ -73,7 +87,7 @@ function cloneDescriptor(descriptor: CatalogComponent): ProjectCatalogComponent 
 }
 
 function cycleCausingCandidates(
-  project: ProjectDocumentV2,
+  project: CatalogProjectDocument,
   activeCircuitId: string,
 ): Set<string> {
   const reverse = new Map<string, Set<string>>();

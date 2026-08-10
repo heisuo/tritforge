@@ -44,7 +44,7 @@ export interface WasmProjectSimulatorBinding {
   setSource(
     circuitId: string,
     componentId: string,
-    value: KnownTrit,
+    value: string,
   ): ProjectSimulationSnapshot;
   tick(): ProjectSimulationSnapshot;
   snapshot(): ProjectSimulationSnapshot;
@@ -57,9 +57,21 @@ export interface ProjectCompileMetrics {
   projectionEndpoints: number;
 }
 
+export interface ResolvedProjectPort {
+  id: string;
+  direction: "input" | "output" | "inout";
+  width: number;
+}
+
+export type ProjectPortResolver = (
+  typeId: string,
+  properties: Record<string, unknown>,
+) => ResolvedProjectPort[];
+
 export interface WasmRuntime {
   apiVersion: number;
   catalog: CatalogComponent[];
+  resolveProjectPorts: ProjectPortResolver;
   simulator: WasmSimulatorBinding;
   projectSimulator: WasmProjectSimulatorBinding;
 }
@@ -84,6 +96,7 @@ export async function createWasmRuntime(): Promise<WasmRuntime> {
   return {
     apiVersion: wasm.apiVersion(),
     catalog: wasm.componentCatalog() as CatalogComponent[],
+    resolveProjectPorts: wasm.resolveProjectPorts as ProjectPortResolver,
     simulator: new wasm.WasmSimulator() as WasmSimulatorBinding,
     projectSimulator:
       new wasm.WasmProjectSimulator() as WasmProjectSimulatorBinding,

@@ -9,7 +9,7 @@ import type { ProjectSimulationSnapshot } from "../src/editor-model";
 
 const wasmMock = vi.hoisted(() => {
   const flatSnapshot = {
-    api_version: 2,
+    api_version: 3,
     stable: true,
     component_outputs: { dff: { q: "1" } },
     input_nets: { dff: { clk: "0" } },
@@ -20,6 +20,8 @@ const wasmMock = vi.hoisted(() => {
   const projectSnapshot = {
     componentOutputs: { dff: { q: "1" } },
     inputNets: { dff: { clk: "0" } },
+    componentOutputWords: { dff: { q: "1" } },
+    inputNetWords: { dff: { clk: "0" } },
     diagnostics: [],
     stable: true,
     tickCount: 1,
@@ -47,8 +49,11 @@ const wasmMock = vi.hoisted(() => {
 
 vi.mock("../src/wasm/pkg/sim_wasm", () => ({
   default: wasmMock.initialize,
-  apiVersion: () => 2,
+  apiVersion: () => 3,
   componentCatalog: () => [],
+  resolveProjectPorts: (_typeId: string, properties: unknown) => [
+    { id: "out", direction: "output", width: (properties as { width?: number }).width ?? 1 },
+  ],
   WasmSimulator: wasmMock.WasmSimulator,
   WasmProjectSimulator: wasmMock.WasmProjectSimulator,
 }));
@@ -67,8 +72,8 @@ describe("WASM runtime initialization", () => {
     ]);
 
     expect(wasmMock.initialize).toHaveBeenCalledTimes(1);
-    expect(first.apiVersion).toBe(2);
-    expect(second.apiVersion).toBe(2);
+    expect(first.apiVersion).toBe(3);
+    expect(second.apiVersion).toBe(3);
     expect(first.simulator).toBeInstanceOf(wasmMock.WasmSimulator);
     expect(second.simulator).toBeInstanceOf(wasmMock.WasmSimulator);
     expect(first.projectSimulator).toBeInstanceOf(
@@ -76,7 +81,7 @@ describe("WASM runtime initialization", () => {
     );
   });
 
-  it("exposes API v2 tick snapshots with boundary-specific field names", async () => {
+  it("exposes API v3 words and a synchronous dynamic-port resolver", async () => {
     const { createWasmRuntime } = await import("../src/wasm-client");
     const runtime = await createWasmRuntime();
 
@@ -87,6 +92,10 @@ describe("WASM runtime initialization", () => {
     expect(flat.tick_count).toBe(1);
     expect(project).toEqual(wasmMock.projectSnapshot);
     expect(project.tickCount).toBe(1);
+    expect(project.componentOutputWords.dff.q).toBe("1");
+    expect(runtime.resolveProjectPorts("source.constant", { width: 3 })).toEqual([
+      { id: "out", direction: "output", width: 3 },
+    ]);
     expectTypeOf(flat).toEqualTypeOf<SimulationSnapshot>();
     expectTypeOf(project).toEqualTypeOf<ProjectSimulationSnapshot>();
     expectTypeOf(runtime.simulator).toMatchTypeOf<WasmSimulatorBinding>();

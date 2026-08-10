@@ -8,12 +8,15 @@ import {
   toRuntimeProject,
 } from "../src/project/hierarchy-runtime";
 import type { ProjectDocumentV2 } from "../src/project/project-document";
+import type { ProjectDocumentV3 } from "../src/project/project-v3";
 import type { WasmProjectSimulatorBinding } from "../src/wasm-client";
 
 function snapshot(compileCount: number): ProjectSimulationSnapshot {
   return {
     componentOutputs: {},
     inputNets: {},
+    componentOutputWords: {},
+    inputNetWords: {},
     diagnostics: [],
     stable: true,
     tickCount: 0,
@@ -89,9 +92,9 @@ function project(): ProjectDocumentV2 {
 function binding() {
   let count = 0;
   return {
-    loadProject: vi.fn(() => snapshot(++count)),
-    updateProject: vi.fn(() => snapshot(++count)),
-    switchActive: vi.fn(() => snapshot(++count)),
+    loadProject: vi.fn((_project: unknown, _activeCircuitId: string) => snapshot(++count)),
+    updateProject: vi.fn((_project: unknown) => snapshot(++count)),
+    switchActive: vi.fn((_activeCircuitId: string) => snapshot(++count)),
     setSource: vi.fn(
       (_circuitId: string, _componentId: string, _value: KnownTrit) =>
         snapshot(count),
@@ -118,6 +121,13 @@ describe("hierarchy runtime", () => {
     runtime.switchActive("half-adder");
 
     expect(wasm.loadProject).toHaveBeenCalledTimes(1);
+    expect(wasm.loadProject.mock.calls[0][0]).toMatchObject({
+      format: "logsim-ternary",
+      version: 3,
+    });
+    expect(wasm.loadProject.mock.calls[0][0]).not.toHaveProperty(
+      "circuits.0.connections",
+    );
     expect(wasm.setSource).toHaveBeenCalledWith(
       "half-adder",
       "ordinary",
@@ -140,7 +150,7 @@ describe("hierarchy runtime", () => {
     expect(runtime.snapshot()?.tickCount).toBe(3);
   });
 
-  it("defers a zero-copy source until its module is about to become active", () => {
+  it("validates and synchronizes a zero-copy source through Rust immediately", () => {
     const wasm = binding();
     const runtime = new HierarchyRuntime(wasm);
     runtime.load(project(), "main");
@@ -148,22 +158,93 @@ describe("hierarchy runtime", () => {
 
     runtime.setSource("spare", "constant-1", "T");
 
-    expect(wasm.setSource).not.toHaveBeenCalled();
+    expect(wasm.setSource).toHaveBeenCalledWith("spare", "constant-1", "T");
     expect(wasm.updateProject).not.toHaveBeenCalled();
     expect(wasm.switchActive).not.toHaveBeenCalled();
 
     runtime.switchActive("spare");
-    expect(wasm.updateProject).toHaveBeenCalledTimes(1);
+    expect(wasm.updateProject).not.toHaveBeenCalled();
     expect(wasm.switchActive).toHaveBeenCalledWith("spare");
   });
 
-  it("sorts boundary ports for Rust and strips editor-only presentation", () => {
+  it("sends an existing v3 document directly with undirected wires intact", () => {
+    const wasm = binding();
+    const runtime = new HierarchyRuntime(wasm);
+    const value: ProjectDocumentV3 = {
+      format: "logsim-ternary",
+      version: 3,
+      rootCircuitId: "main",
+      circuits: [
+        {
+          id: "main",
+          name: "Main",
+          kind: "main",
+          components: [
+            {
+              id: "word",
+              typeId: "source.trit_input",
+              position: { x: 0, y: 0 },
+              properties: { width: 3, value: "1T0" },
+            },
+            {
+              id: "probe",
+              typeId: "sink.probe",
+              position: { x: 100, y: 0 },
+              properties: { width: 3 },
+            },
+            {
+              id: "tunnel",
+              typeId: "wiring.tunnel",
+              position: { x: 50, y: 80 },
+              properties: { width: 3, label: "DATA" },
+            },
+          ],
+          wires: [
+            {
+              id: "data",
+              endpointA: { componentId: "probe", portId: "in" },
+              endpointB: { componentId: "word", portId: "out" },
+            },
+          ],
+        },
+      ],
+    };
+
+    runtime.load(value, "main");
+    runtime.setSource("main", "word", "T01");
+
+    expect(wasm.loadProject.mock.calls[0][0]).toMatchObject({
+      version: 3,
+      circuits: [
+        {
+          wires: [
+            {
+              id: "data",
+              endpointA: { componentId: "probe", portId: "in" },
+              endpointB: { componentId: "word", portId: "out" },
+            },
+          ],
+        },
+      ],
+    });
+    expect(wasm.setSource).toHaveBeenCalledWith("main", "word", "T01");
+    expect(
+      (wasm.loadProject.mock.calls[0][0] as {
+        circuits: Array<{ components: Array<{ id: string; properties: Record<string, unknown> }> }>;
+      }).circuits[0].components.find((component) => component.id === "tunnel")?.properties,
+    ).toEqual({ width: 3, label: "DATA" });
+  });
+
+  it("sorts boundary ports for Rust while preserving v3 component properties", () => {
     const runtimeProject = toRuntimeProject(project());
     const halfAdder = runtimeProject.circuits.find(
       (circuit) => circuit.id === "half-adder",
     )!;
 
     expect(halfAdder).not.toHaveProperty("viewport");
+    expect(runtimeProject.version).toBe(3);
+    expect(halfAdder).toHaveProperty("wires");
+    expect(halfAdder).not.toHaveProperty("connections");
     expect(halfAdder.components.map((component) => component.id)).toEqual([
       "input-a",
       "input-b",
@@ -173,7 +254,7 @@ describe("hierarchy runtime", () => {
       true,
     );
     expect(halfAdder.components[0].properties.label).toBe("A");
-    expect(halfAdder.components[2].properties).not.toHaveProperty("label");
+    expect(halfAdder.components[2].properties.label).toBe("Editor label");
   });
 
   it("contains no TypeScript gate equations or hierarchy flattener", () => {

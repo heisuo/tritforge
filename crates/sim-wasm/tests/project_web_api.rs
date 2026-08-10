@@ -1,11 +1,11 @@
 use serde::Deserialize;
 use sim_core::project::{
-    ProjectCircuit, ProjectCircuitKind, ProjectComponent, ProjectConnection, ProjectDiagnostic,
-    ProjectDocument,
+    ProjectCircuitKind, ProjectCircuitV3, ProjectComponent, ProjectDiagnostic, ProjectDocumentV3,
+    ProjectWire, WireEndpoint,
 };
 use sim_core::project_simulator::{ProjectCompileMetrics, ProjectSnapshot};
 use sim_core::trit::Trit;
-use sim_wasm::WasmProjectSimulator;
+use sim_wasm::{WasmProjectSimulator, resolve_project_ports};
 use wasm_bindgen_test::wasm_bindgen_test;
 
 fn component(id: &str, type_id: &str, properties: serde_json::Value) -> ProjectComponent {
@@ -24,14 +24,14 @@ fn circuit(
     id: impl Into<String>,
     kind: ProjectCircuitKind,
     components: Vec<ProjectComponent>,
-) -> ProjectCircuit {
+) -> ProjectCircuitV3 {
     let id = id.into();
-    ProjectCircuit {
+    ProjectCircuitV3 {
         name: id.clone(),
         id,
         kind,
         components,
-        connections: vec![],
+        wires: vec![],
     }
 }
 
@@ -39,48 +39,52 @@ fn connected_circuit(
     id: impl Into<String>,
     kind: ProjectCircuitKind,
     components: Vec<ProjectComponent>,
-    connections: Vec<ProjectConnection>,
-) -> ProjectCircuit {
+    wires: Vec<ProjectWire>,
+) -> ProjectCircuitV3 {
     let id = id.into();
-    ProjectCircuit {
+    ProjectCircuitV3 {
         name: id.clone(),
         id,
         kind,
         components,
-        connections,
+        wires,
     }
 }
 
-fn connection(
+fn wire(
     id: &str,
     source_component_id: &str,
     source_port_id: &str,
     target_component_id: &str,
     target_port_id: &str,
-) -> ProjectConnection {
-    ProjectConnection {
+) -> ProjectWire {
+    ProjectWire {
         id: id.into(),
-        source_component_id: source_component_id.into(),
-        source_port_id: source_port_id.into(),
-        target_component_id: target_component_id.into(),
-        target_port_id: target_port_id.into(),
+        endpoint_a: WireEndpoint {
+            component_id: source_component_id.into(),
+            port_id: source_port_id.into(),
+        },
+        endpoint_b: WireEndpoint {
+            component_id: target_component_id.into(),
+            port_id: target_port_id.into(),
+        },
     }
 }
 
-fn project(circuits: Vec<ProjectCircuit>) -> ProjectDocument {
-    ProjectDocument {
+fn project(circuits: Vec<ProjectCircuitV3>) -> ProjectDocumentV3 {
+    ProjectDocumentV3 {
         format: "logsim-ternary".into(),
-        version: 2,
+        version: 3,
         root_circuit_id: "main".into(),
         circuits,
     }
 }
 
-fn js_project(project: &ProjectDocument) -> wasm_bindgen::JsValue {
+fn js_project(project: &ProjectDocumentV3) -> wasm_bindgen::JsValue {
     serde_wasm_bindgen::to_value(project).expect("serialize project")
 }
 
-fn sequential_project() -> ProjectDocument {
+fn sequential_project() -> ProjectDocumentV3 {
     let main = connected_circuit(
         "main",
         ProjectCircuitKind::Main,
@@ -100,10 +104,10 @@ fn sequential_project() -> ProjectDocument {
             component("dff", "sequential.dff", serde_json::json!({})),
         ],
         vec![
-            connection("data-dff", "data", "out", "dff", "d"),
-            connection("enable-dff", "enable", "out", "dff", "en"),
-            connection("reset-dff", "reset", "out", "dff", "rst"),
-            connection("clock-dff", "clock", "out", "dff", "clk"),
+            wire("data-dff", "data", "out", "dff", "d"),
+            wire("enable-dff", "enable", "out", "dff", "en"),
+            wire("reset-dff", "reset", "out", "dff", "rst"),
+            wire("clock-dff", "clock", "out", "dff", "clk"),
         ],
     );
     project(vec![main])
@@ -166,9 +170,252 @@ fn project_handle_ticks_and_projects_dff_state() {
             .expect("deserialize project snapshot");
 
     assert_eq!(snapshot.component_outputs["dff"]["q"], Trit::Pos);
+    assert_eq!(snapshot.component_output_words["dff"]["q"].to_string(), "1");
     assert_eq!(snapshot.component_outputs["clock"]["out"], Trit::Zero);
     assert_eq!(snapshot.input_nets["dff"]["clk"], Trit::Zero);
+    assert_eq!(snapshot.input_net_words["dff"]["clk"].to_string(), "0");
     assert_eq!(snapshot.tick_count, 1);
+}
+
+#[wasm_bindgen_test]
+fn v3_words_load_and_update_most_significant_first() {
+    let project = project(vec![connected_circuit(
+        "main",
+        ProjectCircuitKind::Main,
+        vec![
+            component(
+                "source",
+                "source.trit_input",
+                serde_json::json!({"width": 3, "value": "1T0"}),
+            ),
+            component("probe", "sink.probe", serde_json::json!({"width": 3})),
+        ],
+        vec![wire("word", "probe", "in", "source", "out")],
+    )]);
+    let mut simulator = WasmProjectSimulator::new();
+
+    let loaded: ProjectSnapshot = serde_wasm_bindgen::from_value(
+        simulator
+            .load_project(js_project(&project), "main")
+            .expect("load v3 project"),
+    )
+    .expect("deserialize word snapshot");
+    let updated: ProjectSnapshot = serde_wasm_bindgen::from_value(
+        simulator
+            .set_source("main", "source", "T01")
+            .expect("set width-three source"),
+    )
+    .expect("deserialize updated word snapshot");
+
+    assert_eq!(
+        loaded.component_output_words["source"]["out"].to_string(),
+        "1T0"
+    );
+    assert_eq!(loaded.input_net_words["probe"]["in"].to_string(), "1T0");
+    assert_eq!(
+        updated.component_output_words["source"]["out"].to_string(),
+        "T01"
+    );
+    assert_eq!(updated.input_net_words["probe"]["in"].to_string(), "T01");
+    assert!(!updated.component_outputs.contains_key("source"));
+    assert!(!updated.input_nets.contains_key("probe"));
+}
+
+#[wasm_bindgen_test]
+fn update_project_accepts_v3_wires_and_recompiles_word_values() {
+    let mut project = project(vec![connected_circuit(
+        "main",
+        ProjectCircuitKind::Main,
+        vec![
+            component(
+                "source",
+                "source.constant",
+                serde_json::json!({"width": 3, "value": "000"}),
+            ),
+            component("probe", "sink.probe", serde_json::json!({"width": 3})),
+        ],
+        vec![wire("word", "source", "out", "probe", "in")],
+    )]);
+    let mut simulator = WasmProjectSimulator::new();
+    simulator
+        .load_project(js_project(&project), "main")
+        .expect("load initial v3 project");
+    project.circuits[0].components[0]
+        .properties
+        .set_known_word("value", "01T");
+
+    let snapshot: ProjectSnapshot = serde_wasm_bindgen::from_value(
+        simulator
+            .update_project(js_project(&project))
+            .expect("update v3 project"),
+    )
+    .unwrap();
+
+    assert_eq!(snapshot.input_net_words["probe"]["in"].to_string(), "01T");
+    assert_eq!(snapshot.compile_count, 2);
+}
+
+#[wasm_bindgen_test]
+fn word_source_updates_every_flattened_module_copy() {
+    let child = connected_circuit(
+        "child",
+        ProjectCircuitKind::Module,
+        vec![
+            component(
+                "shared",
+                "source.constant",
+                serde_json::json!({"width": 3, "value": "000"}),
+            ),
+            component(
+                "output",
+                "project.module_output",
+                serde_json::json!({"portId": "word", "label": "Word", "width": 3}),
+            ),
+        ],
+        vec![wire("child-word", "shared", "out", "output", "in")],
+    );
+    let main = connected_circuit(
+        "main",
+        ProjectCircuitKind::Main,
+        vec![
+            module_instance("left", "child"),
+            module_instance("right", "child"),
+            component("left-probe", "sink.probe", serde_json::json!({"width": 3})),
+            component("right-probe", "sink.probe", serde_json::json!({"width": 3})),
+        ],
+        vec![
+            wire("left-word", "left", "word", "left-probe", "in"),
+            wire("right-word", "right", "word", "right-probe", "in"),
+        ],
+    );
+    let project = project(vec![main, child]);
+    let mut simulator = WasmProjectSimulator::new();
+    simulator
+        .load_project(js_project(&project), "main")
+        .expect("load repeated module project");
+
+    let snapshot: ProjectSnapshot = serde_wasm_bindgen::from_value(
+        simulator
+            .set_source("child", "shared", "1T0")
+            .expect("update all repeated source copies"),
+    )
+    .unwrap();
+
+    assert_eq!(
+        snapshot.component_output_words["left"]["word"].to_string(),
+        "1T0"
+    );
+    assert_eq!(
+        snapshot.component_output_words["right"]["word"].to_string(),
+        "1T0"
+    );
+    assert_eq!(
+        snapshot.input_net_words["left-probe"]["in"].to_string(),
+        "1T0"
+    );
+    assert_eq!(
+        snapshot.input_net_words["right-probe"]["in"].to_string(),
+        "1T0"
+    );
+}
+
+#[wasm_bindgen_test]
+fn set_source_validates_width_and_updates_module_input_preview() {
+    let preview = connected_circuit(
+        "preview",
+        ProjectCircuitKind::Module,
+        vec![
+            component(
+                "input",
+                "project.module_input",
+                serde_json::json!({
+                    "portId": "data",
+                    "label": "Data",
+                    "width": 3,
+                    "previewValue": "000"
+                }),
+            ),
+            component("probe", "sink.probe", serde_json::json!({"width": 3})),
+        ],
+        vec![wire("preview", "input", "out", "probe", "in")],
+    );
+    let project = project(vec![
+        circuit("main", ProjectCircuitKind::Main, vec![]),
+        preview,
+    ]);
+    let mut simulator = WasmProjectSimulator::new();
+    simulator
+        .load_project(js_project(&project), "preview")
+        .expect("load module preview root");
+
+    let error = simulator
+        .set_source("preview", "input", "10")
+        .expect_err("wrong width must fail");
+    let error: ProjectBoundaryErrorView =
+        serde_wasm_bindgen::from_value(error).expect("deserialize width error");
+    let snapshot: ProjectSnapshot = serde_wasm_bindgen::from_value(
+        simulator
+            .set_source("preview", "input", "10T")
+            .expect("update module preview"),
+    )
+    .expect("deserialize preview snapshot");
+
+    assert_eq!(error.code, "INVALID_SIGNAL_WIDTH");
+    assert_eq!(
+        snapshot.component_output_words["input"]["out"].to_string(),
+        "10T"
+    );
+    assert_eq!(snapshot.input_net_words["probe"]["in"].to_string(), "10T");
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResolvedPortView {
+    id: String,
+    direction: String,
+    width: u8,
+}
+
+#[wasm_bindgen_test]
+fn resolves_dynamic_ports_and_returns_structured_property_errors() {
+    let properties = serde_wasm_bindgen::to_value(&serde_json::json!({
+        "width": 3,
+        "branchCount": 2,
+        "mapping": [1, 0, 1]
+    }))
+    .unwrap();
+    let ports: Vec<ResolvedPortView> = serde_wasm_bindgen::from_value(
+        resolve_project_ports("wiring.splitter", properties).expect("resolve splitter"),
+    )
+    .unwrap();
+
+    assert_eq!(
+        ports
+            .iter()
+            .map(|port| (port.id.as_str(), port.direction.as_str(), port.width))
+            .collect::<Vec<_>>(),
+        vec![
+            ("trunk", "inout", 3),
+            ("branch0", "inout", 1),
+            ("branch1", "inout", 2),
+        ]
+    );
+
+    for (properties, expected) in [
+        (serde_json::json!({"width": 0}), "INVALID_SIGNAL_WIDTH"),
+        (
+            serde_json::json!({"width": 3, "branchCount": 2, "mapping": [0, 2, 1]}),
+            "INVALID_SPLITTER_MAP",
+        ),
+    ] {
+        let error = resolve_project_ports(
+            "wiring.splitter",
+            serde_wasm_bindgen::to_value(&properties).unwrap(),
+        )
+        .expect_err("invalid dynamic property must fail");
+        let error: ProjectBoundaryErrorView = serde_wasm_bindgen::from_value(error).unwrap();
+        assert_eq!(error.code, expected);
+    }
 }
 
 #[derive(Deserialize)]
@@ -191,7 +438,7 @@ fn tick_before_project_load_returns_a_structured_not_loaded_error() {
 }
 
 #[wasm_bindgen_test]
-fn tick_after_project_invalidation_returns_project_not_ready() {
+fn invalid_v3_update_is_transactional_and_keeps_the_previous_runtime() {
     let project = sequential_project();
     let mut simulator = WasmProjectSimulator::new();
     simulator
@@ -207,14 +454,15 @@ fn tick_after_project_invalidation_returns_project_not_ready() {
         .update_project(js_project(&invalid))
         .expect_err("invalid project update must fail");
 
-    let error = simulator
-        .tick()
-        .expect_err("invalid project tick must fail");
-    let error: ProjectBoundaryErrorView =
-        serde_wasm_bindgen::from_value(error).expect("deserialize project boundary error");
+    let snapshot: ProjectSnapshot = serde_wasm_bindgen::from_value(
+        simulator
+            .tick()
+            .expect("previous valid project remains operational"),
+    )
+    .expect("deserialize retained project snapshot");
 
-    assert_eq!(error.code, "PROJECT_NOT_READY");
-    assert_eq!(error.diagnostics[0].code, "PROJECT_NOT_READY");
+    assert_eq!(snapshot.tick_count, 1);
+    assert_eq!(snapshot.compile_count, 1);
 }
 
 #[wasm_bindgen_test]

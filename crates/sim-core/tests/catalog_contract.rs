@@ -228,8 +228,8 @@ fn catalog_has_exact_categories_ports_and_truth_table_sizes() {
 }
 
 #[test]
-fn sequential_foundation_bumps_the_core_api_version() {
-    assert_eq!(sim_core::api_version(), 2);
+fn project_v3_foundation_bumps_the_core_api_version() {
+    assert_eq!(sim_core::api_version(), 3);
 }
 
 #[test]

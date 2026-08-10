@@ -185,6 +185,10 @@ impl ProjectProperties {
         self.0.insert(key.to_owned(), Value::String(symbol.into()));
     }
 
+    pub fn set_known_word(&mut self, key: &str, value: &str) {
+        self.0.insert(key.to_owned(), Value::String(value.into()));
+    }
+
     fn string(&self, key: &str) -> Option<&str> {
         self.get(key).and_then(Value::as_str)
     }

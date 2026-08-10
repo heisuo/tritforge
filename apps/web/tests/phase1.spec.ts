@@ -11,7 +11,7 @@ function watchConsoleErrors(page: Page): string[] {
 
 async function waitForSimulator(page: Page) {
   await page.goto("/");
-  await expect(page.getByText("WASM v2")).toBeVisible();
+  await expect(page.getByText("WASM v3")).toBeVisible();
 }
 
 function node(page: Page, id: string) {

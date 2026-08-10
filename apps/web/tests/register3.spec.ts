@@ -25,7 +25,7 @@ test("desktop Register3 captures, holds, resets, and opens its three DFF lanes",
   await page.setViewportSize({ width: 1440, height: 900 });
   const consoleErrors = watchConsoleErrors(page);
   await page.goto("/");
-  await expect(page.getByText("WASM v2")).toBeVisible();
+  await expect(page.getByText("WASM v3")).toBeVisible();
 
   await page.getByRole("button", { name: "示例库" }).click();
   await page

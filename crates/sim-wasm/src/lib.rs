@@ -1,8 +1,10 @@
 use serde::Serialize;
+use sim_core::catalog::PortDirection;
 use sim_core::circuit::CircuitDefinition;
 use sim_core::diagnostic::Diagnostic;
-use sim_core::project::{ProjectDiagnostic, ProjectDocument};
+use sim_core::project::{ProjectDiagnostic, ProjectDocumentV3, ProjectProperties};
 use sim_core::project_simulator::ProjectSimulator;
+use sim_core::project_validation::resolve_project_ports as resolve_core_project_ports;
 use sim_core::simulator::Simulator;
 use sim_core::trit::Trit;
 use wasm_bindgen::prelude::*;
@@ -20,6 +22,45 @@ pub fn component_catalog() -> Result<JsValue, JsValue> {
 pub fn component_catalog_json() -> String {
     serde_json::to_string(&sim_core::catalog::component_catalog())
         .expect("component catalog must be serializable")
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResolvedProjectPortView {
+    id: String,
+    direction: &'static str,
+    width: u8,
+}
+
+#[wasm_bindgen(js_name = resolveProjectPorts)]
+pub fn resolve_project_ports(type_id: &str, properties: JsValue) -> Result<JsValue, JsValue> {
+    let properties: ProjectProperties =
+        serde_wasm_bindgen::from_value(properties).map_err(|error| {
+            BoundaryError::<ProjectDiagnostic>::new(
+                "INVALID_PROPERTY",
+                format!("could not deserialize component properties: {error}"),
+                Vec::new(),
+            )
+            .into_js()
+        })?;
+    let ports = resolve_core_project_ports(type_id, &properties).map_err(|error| {
+        BoundaryError::<ProjectDiagnostic>::new(error.code(), error.to_string(), Vec::new())
+            .into_js()
+    })?;
+    to_js_value(
+        &ports
+            .into_iter()
+            .map(|port| ResolvedProjectPortView {
+                id: port.id,
+                direction: match port.direction {
+                    PortDirection::Input => "input",
+                    PortDirection::Output => "output",
+                    PortDirection::InOut => "inout",
+                },
+                width: port.shape.width(),
+            })
+            .collect::<Vec<_>>(),
+    )
 }
 
 #[wasm_bindgen]
@@ -115,7 +156,7 @@ impl WasmProjectSimulator {
         active_circuit_id: &str,
     ) -> Result<JsValue, JsValue> {
         let project = parse_project(project)?;
-        let simulator = ProjectSimulator::load(project, active_circuit_id)
+        let simulator = ProjectSimulator::load_v3(project, active_circuit_id)
             .map_err(project_diagnostics_error)?;
         let snapshot = simulator
             .snapshot()
@@ -129,7 +170,7 @@ impl WasmProjectSimulator {
         let project = parse_project(project)?;
         let snapshot = self
             .simulator_mut()?
-            .update_project(project)
+            .update_project_v3(project)
             .map_err(project_diagnostics_error)?;
         to_js_value(&snapshot)
     }
@@ -150,17 +191,9 @@ impl WasmProjectSimulator {
         component_id: &str,
         value: &str,
     ) -> Result<JsValue, JsValue> {
-        let value = parse_trit_symbol(value).map_err(|code| {
-            BoundaryError::<ProjectDiagnostic>::new(
-                code,
-                format!("'{value}' is not a known ternary source symbol"),
-                Vec::new(),
-            )
-            .into_js()
-        })?;
         let snapshot = self
             .simulator_mut()?
-            .set_source(circuit_id, component_id, value)
+            .set_source_word(circuit_id, component_id, value)
             .map_err(project_boundary_diagnostic)?;
         to_js_value(&snapshot)
     }
@@ -222,7 +255,7 @@ impl WasmProjectSimulator {
     }
 }
 
-fn parse_project(project: JsValue) -> Result<ProjectDocument, JsValue> {
+fn parse_project(project: JsValue) -> Result<ProjectDocumentV3, JsValue> {
     serde_wasm_bindgen::from_value(project).map_err(|error| {
         BoundaryError::<ProjectDiagnostic>::new(
             "INVALID_PROJECT",

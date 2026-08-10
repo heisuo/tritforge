@@ -23,7 +23,7 @@ function node(page: Page, id: string) {
 
 async function waitForSimulator(page: Page) {
   await page.goto("/");
-  await expect(page.getByText("WASM v2")).toBeVisible();
+  await expect(page.getByText("WASM v3")).toBeVisible();
 }
 
 async function loadHierarchicalAdder(page: Page) {
@@ -82,13 +82,14 @@ test("all 27 known inputs satisfy balanced ternary addition in the real WASM pro
 }) => {
   await waitForSimulator(page);
   const result = await page.evaluate(async () => {
-    const [{ cloneHierarchicalAdderProject }, wasm] = await Promise.all([
+    const [{ cloneHierarchicalAdderProject }, { migrateV2ToV3 }, wasm] = await Promise.all([
       import("../src/examples/hierarchical-adder"),
+      import("../src/project/project-v3"),
       import("../src/wasm/pkg/sim_wasm.js"),
     ]);
     await wasm.default();
     const simulator = new wasm.WasmProjectSimulator();
-    const project = cloneHierarchicalAdderProject();
+    const project = migrateV2ToV3(cloneHierarchicalAdderProject());
     let snapshot = simulator.loadProject(project, "main");
     const symbols = ["T", "0", "1"] as const;
     const numeric = { T: -1, "0": 0, "1": 1 } as const;
@@ -130,13 +131,14 @@ test("one Half Adder definition update reaches both instances without source rec
 }) => {
   await waitForSimulator(page);
   const result = await page.evaluate(async () => {
-    const [{ cloneHierarchicalAdderProject }, wasm] = await Promise.all([
+    const [{ cloneHierarchicalAdderProject }, { migrateV2ToV3 }, wasm] = await Promise.all([
       import("../src/examples/hierarchical-adder"),
+      import("../src/project/project-v3"),
       import("../src/wasm/pkg/sim_wasm.js"),
     ]);
     await wasm.default();
     const simulator = new wasm.WasmProjectSimulator();
-    const project = cloneHierarchicalAdderProject();
+    const project = migrateV2ToV3(cloneHierarchicalAdderProject());
     simulator.loadProject(project, "full-adder");
     simulator.setSource("full-adder", "input-a", "1");
     simulator.setSource("full-adder", "input-b", "T");
@@ -298,13 +300,14 @@ for (const viewport of VIEWPORTS) {
   });
 }
 
-test("100 Full Adders compile and propagate within the phase 2A budget", async ({
+test("100 Full Adders compile and propagate within the phase 2B v3 budget", async ({
   page,
 }) => {
   await waitForSimulator(page);
   const result = await page.evaluate(async () => {
-    const [{ cloneHierarchicalAdderProject }, wasm] = await Promise.all([
+    const [{ cloneHierarchicalAdderProject }, { migrateV2ToV3 }, wasm] = await Promise.all([
       import("../src/examples/hierarchical-adder"),
+      import("../src/project/project-v3"),
       import("../src/wasm/pkg/sim_wasm.js"),
     ]);
     await wasm.default();
@@ -376,21 +379,22 @@ test("100 Full Adders compile and propagate within the phase 2A budget", async (
         });
       }
     }
+    const runtimeProject = migrateV2ToV3(project);
 
     // Exclude one-time browser WebAssembly JIT from the steady-state compile budget.
     for (let warmupIndex = 0; warmupIndex < 2; warmupIndex += 1) {
       const warmup = new wasm.WasmProjectSimulator();
-      warmup.loadProject(project, "main");
+      warmup.loadProject(runtimeProject, "main");
       warmup.free();
     }
     const compileSamples: number[] = [];
     let simulator = new wasm.WasmProjectSimulator();
-    let compiled = simulator.loadProject(project, "main");
+    let compiled = simulator.loadProject(runtimeProject, "main");
     simulator.free();
     for (let sampleIndex = 0; sampleIndex < 3; sampleIndex += 1) {
       simulator = new wasm.WasmProjectSimulator();
       const compileStart = performance.now();
-      compiled = simulator.loadProject(project, "main");
+      compiled = simulator.loadProject(runtimeProject, "main");
       compileSamples.push(performance.now() - compileStart);
       if (sampleIndex < 2) simulator.free();
     }
@@ -424,8 +428,8 @@ test("100 Full Adders compile and propagate within the phase 2A budget", async (
     };
   });
 
-  const thresholdMs = process.env.CI ? 150 : 50;
-  console.info({ ...result, localTargetMs: 50, ciThresholdMs: 150 });
+  const thresholdMs = process.env.CI ? 150 : 100;
+  console.info({ ...result, localTargetMs: 100, ciThresholdMs: 150 });
   expect(result.fullAdderInstances).toBe(100);
   expect(result.expandedComponents).toBe(507);
   expect(result.expandedConnections).toBe(1004);

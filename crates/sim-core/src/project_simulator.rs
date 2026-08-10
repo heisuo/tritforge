@@ -3,13 +3,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use crate::catalog::PortDirection;
+use crate::connectivity::{CompiledProjectV3, compile_project_v3};
 use crate::diagnostic::{Diagnostic, Severity};
 use crate::hierarchy::{CompiledProject, FlatPortRef, compile_project};
 use crate::project::{
-    ProjectCircuit, ProjectDiagnostic, ProjectDiagnosticSet, ProjectDocument, ProjectLocation,
-    QualifiedComponentRef, QualifiedConnectionRef, QualifiedPortRef,
+    ProjectCircuit, ProjectDiagnostic, ProjectDiagnosticSet, ProjectDocument, ProjectDocumentV3,
+    ProjectLocation, QualifiedComponentRef, QualifiedConnectionRef, QualifiedPortRef,
 };
-use crate::project_validation::{ValidatedProject, validate_project};
+use crate::project_validation::{ValidatedProject, resolve_project_ports, validate_project};
+use crate::signal::{KnownWord, SignalError, SignalShape, WordValue};
 use crate::simulator::{SimulationSnapshot, Simulator};
 use crate::trit::{Trit, resolve_drivers};
 
@@ -20,6 +22,10 @@ const MODULE_INPUT: &str = "project.module_input";
 pub struct ProjectSnapshot {
     pub component_outputs: BTreeMap<String, BTreeMap<String, Trit>>,
     pub input_nets: BTreeMap<String, BTreeMap<String, Trit>>,
+    /// Width-aware values serialized as MS-first `T/0/1/X/Z/E` strings.
+    pub component_output_words: BTreeMap<String, BTreeMap<String, WordValue>>,
+    /// Width-aware input-net values serialized as MS-first `T/0/1/X/Z/E` strings.
+    pub input_net_words: BTreeMap<String, BTreeMap<String, WordValue>>,
     pub diagnostics: Vec<ProjectDiagnostic>,
     pub stable: bool,
     pub tick_count: u64,
@@ -36,9 +42,11 @@ pub struct ProjectCompileMetrics {
 
 pub struct ProjectSimulator {
     project: ProjectDocument,
+    project_v3: Option<ProjectDocumentV3>,
     active_circuit_id: String,
     validated: Option<ValidatedProject>,
     compiled: Option<CompiledProject>,
+    compiled_v3: Option<CompiledProjectV3>,
     simulator: Option<Simulator>,
     snapshot: Option<ProjectSnapshot>,
     compile_count: u64,
@@ -51,14 +59,50 @@ impl ProjectSimulator {
     ) -> Result<Self, Vec<ProjectDiagnostic>> {
         let mut project_simulator = Self {
             project,
+            project_v3: None,
             active_circuit_id: active_circuit_id.to_owned(),
             validated: None,
             compiled: None,
+            compiled_v3: None,
             simulator: None,
             snapshot: None,
             compile_count: 0,
         };
         project_simulator.rebuild()?;
+        Ok(project_simulator)
+    }
+
+    pub fn load_v3(
+        project: ProjectDocumentV3,
+        active_circuit_id: &str,
+    ) -> Result<Self, Vec<ProjectDiagnostic>> {
+        let compiled_v3 = compile_project_v3(project.clone(), active_circuit_id)?;
+        let compiled = compiled_v3.compiled.clone();
+        let network_index = FlatNetworkIndex::new(&compiled);
+        let simulator = Simulator::load(compiled.circuit.clone()).map_err(|diagnostics| {
+            diagnostics
+                .iter()
+                .map(|diagnostic| {
+                    remap_v3_diagnostic(
+                        project_flat_diagnostic(diagnostic, &compiled, &network_index),
+                        &compiled_v3,
+                    )
+                })
+                .collect::<Vec<_>>()
+        })?;
+        let flat = simulator.snapshot();
+        let mut project_simulator = Self {
+            project: compiled_v3.lowered.project.clone(),
+            project_v3: Some(project),
+            active_circuit_id: active_circuit_id.to_owned(),
+            validated: None,
+            compiled: Some(compiled),
+            compiled_v3: Some(compiled_v3),
+            simulator: Some(simulator),
+            snapshot: None,
+            compile_count: 1,
+        };
+        project_simulator.snapshot = Some(project_simulator.project_snapshot(&flat));
         Ok(project_simulator)
     }
 
@@ -137,10 +181,54 @@ impl ProjectSimulator {
             .expect("successful rebuild has a snapshot"))
     }
 
+    pub fn update_project_v3(
+        &mut self,
+        project: ProjectDocumentV3,
+    ) -> Result<ProjectSnapshot, Vec<ProjectDiagnostic>> {
+        if self.project_v3.is_none() {
+            return Err(vec![project_error(
+                "PROJECT_VERSION_MISMATCH",
+                "a v3 project cannot update a v2 project simulator",
+                None,
+            )]);
+        }
+        let compiled_v3 = compile_project_v3(project.clone(), &self.active_circuit_id)?;
+        let compiled = compiled_v3.compiled.clone();
+        let network_index = FlatNetworkIndex::new(&compiled);
+        let simulator = Simulator::load(compiled.circuit.clone()).map_err(|diagnostics| {
+            diagnostics
+                .iter()
+                .map(|diagnostic| {
+                    remap_v3_diagnostic(
+                        project_flat_diagnostic(diagnostic, &compiled, &network_index),
+                        &compiled_v3,
+                    )
+                })
+                .collect::<Vec<_>>()
+        })?;
+        let flat = simulator.snapshot();
+
+        self.project = compiled_v3.lowered.project.clone();
+        self.project_v3 = Some(project);
+        self.validated = None;
+        self.compiled = Some(compiled);
+        self.compiled_v3 = Some(compiled_v3);
+        self.simulator = Some(simulator);
+        self.compile_count += 1;
+        self.snapshot = Some(self.project_snapshot(&flat));
+        Ok(self
+            .snapshot
+            .clone()
+            .expect("successful v3 rebuild has a snapshot"))
+    }
+
     pub fn switch_active(
         &mut self,
         active_circuit_id: &str,
     ) -> Result<ProjectSnapshot, Vec<ProjectDiagnostic>> {
+        if let Some(project) = self.project_v3.clone() {
+            return self.switch_active_v3(project, active_circuit_id);
+        }
         let validated = match &self.validated {
             Some(validated) => validated.clone(),
             None => validate_project(self.project.clone())?,
@@ -166,6 +254,40 @@ impl ProjectSimulator {
             .expect("successful rebuild has a snapshot"))
     }
 
+    fn switch_active_v3(
+        &mut self,
+        project: ProjectDocumentV3,
+        active_circuit_id: &str,
+    ) -> Result<ProjectSnapshot, Vec<ProjectDiagnostic>> {
+        let compiled_v3 = compile_project_v3(project, active_circuit_id)?;
+        let compiled = compiled_v3.compiled.clone();
+        let network_index = FlatNetworkIndex::new(&compiled);
+        let simulator = Simulator::load(compiled.circuit.clone()).map_err(|diagnostics| {
+            diagnostics
+                .iter()
+                .map(|diagnostic| {
+                    remap_v3_diagnostic(
+                        project_flat_diagnostic(diagnostic, &compiled, &network_index),
+                        &compiled_v3,
+                    )
+                })
+                .collect::<Vec<_>>()
+        })?;
+        let flat = simulator.snapshot();
+        self.project = compiled_v3.lowered.project.clone();
+        self.active_circuit_id = active_circuit_id.to_owned();
+        self.compile_count += 1;
+        self.validated = None;
+        self.compiled = Some(compiled);
+        self.compiled_v3 = Some(compiled_v3);
+        self.simulator = Some(simulator);
+        self.snapshot = Some(self.project_snapshot(&flat));
+        Ok(self
+            .snapshot
+            .clone()
+            .expect("successful v3 active switch has a snapshot"))
+    }
+
     #[allow(clippy::result_large_err)]
     pub fn set_source(
         &mut self,
@@ -173,7 +295,7 @@ impl ProjectSimulator {
         component_id: &str,
         value: Trit,
     ) -> Result<ProjectSnapshot, ProjectDiagnostic> {
-        if self.validated.is_none() || self.simulator.is_none() || self.compiled.is_none() {
+        if self.simulator.is_none() || self.compiled.is_none() {
             return Err(project_error(
                 "PROJECT_NOT_READY",
                 "project simulation is unavailable until validation succeeds",
@@ -241,8 +363,156 @@ impl ProjectSimulator {
     }
 
     #[allow(clippy::result_large_err)]
+    pub fn set_source_word(
+        &mut self,
+        circuit_id: &str,
+        component_id: &str,
+        value: &str,
+    ) -> Result<ProjectSnapshot, ProjectDiagnostic> {
+        let Some(project) = self.project_v3.as_ref() else {
+            return Err(project_error(
+                "PROJECT_VERSION_MISMATCH",
+                "word source updates require a v3 project simulator",
+                None,
+            ));
+        };
+        let Some(compiled_v3) = self.compiled_v3.as_ref() else {
+            return Err(project_error(
+                "PROJECT_NOT_READY",
+                "project simulation is unavailable until validation succeeds",
+                None,
+            ));
+        };
+        let Some(component) = project
+            .circuits
+            .iter()
+            .find(|circuit| circuit.id == circuit_id)
+            .and_then(|circuit| {
+                circuit
+                    .components
+                    .iter()
+                    .find(|component| component.id == component_id)
+            })
+        else {
+            return Err(invalid_source(circuit_id, component_id));
+        };
+        let property = match component.type_id.as_str() {
+            "source.trit_input" | "source.constant" => "value",
+            MODULE_INPUT => "previewValue",
+            _ => return Err(invalid_source(circuit_id, component_id)),
+        };
+        let shape = resolve_project_ports(&component.type_id, &component.properties)
+            .map_err(|error| {
+                project_error(
+                    error.code(),
+                    &error.to_string(),
+                    Some(QualifiedComponentRef::new(
+                        circuit_id,
+                        [] as [&str; 0],
+                        component_id,
+                    )),
+                )
+            })?
+            .first()
+            .expect("mutable source has an output port")
+            .shape;
+        let word = KnownWord::parse(value, shape).map_err(|error| {
+            let code = match error {
+                SignalError::WidthMismatch { .. } | SignalError::InvalidWidth { .. } => {
+                    "INVALID_SIGNAL_WIDTH"
+                }
+                SignalError::InvalidSymbol { .. } | SignalError::ValueOverflow => {
+                    "INVALID_TRIT_SYMBOL"
+                }
+            };
+            project_error(
+                code,
+                &error.to_string(),
+                Some(QualifiedComponentRef::new(
+                    circuit_id,
+                    [] as [&str; 0],
+                    component_id,
+                )),
+            )
+        })?;
+
+        let mut updates = BTreeMap::new();
+        for (reference, bits) in &compiled_v3.reassembly.ports {
+            if reference.circuit_id != circuit_id
+                || reference.component_id != component_id
+                || (component.type_id == MODULE_INPUT && !reference.instance_path.is_empty())
+            {
+                continue;
+            }
+            for (bit_index, bit) in bits.iter().enumerate() {
+                let Some(scalar_port) = &bit.scalar_port else {
+                    continue;
+                };
+                let Some(copies) =
+                    compiled_v3
+                        .compiled
+                        .provenance
+                        .source_copies
+                        .get(&QualifiedComponentRef::new(
+                            &scalar_port.circuit_id,
+                            scalar_port.instance_path.iter().cloned(),
+                            &scalar_port.component_id,
+                        ))
+                else {
+                    continue;
+                };
+                for copy in copies {
+                    updates.insert(copy.clone(), word.trit(bit_index as u8));
+                }
+            }
+        }
+
+        let flat = if updates.is_empty() {
+            self.simulator
+                .as_ref()
+                .expect("ready v3 project has a simulator")
+                .snapshot()
+        } else {
+            self.simulator
+                .as_mut()
+                .expect("ready v3 project has a simulator")
+                .set_sources(updates)
+                .map_err(|diagnostic| {
+                    let compiled = self
+                        .compiled
+                        .as_ref()
+                        .expect("ready v3 project has compiled provenance");
+                    let network_index = FlatNetworkIndex::new(compiled);
+                    remap_v3_diagnostic(
+                        project_flat_diagnostic(&diagnostic, compiled, &network_index),
+                        self.compiled_v3
+                            .as_ref()
+                            .expect("ready v3 project has reassembly provenance"),
+                    )
+                })?
+        };
+        set_document_source_word_v3(
+            self.project_v3
+                .as_mut()
+                .expect("ready word source belongs to v3 project"),
+            circuit_id,
+            component_id,
+            property,
+            value,
+        );
+        self.snapshot = Some(self.project_snapshot(&flat));
+        Ok(self
+            .snapshot
+            .clone()
+            .expect("ready v3 project has a snapshot"))
+    }
+
+    #[allow(clippy::result_large_err)]
     pub fn tick(&mut self) -> Result<ProjectSnapshot, ProjectDiagnostic> {
-        if self.validated.is_none() || self.simulator.is_none() || self.compiled.is_none() {
+        if (self.project_v3.is_none() && self.validated.is_none())
+            || self.simulator.is_none()
+            || self.compiled.is_none()
+        {
             return Err(project_error(
                 "PROJECT_NOT_READY",
                 "project simulation is unavailable until validation succeeds",
@@ -263,11 +533,12 @@ impl ProjectSimulator {
                     .as_ref()
                     .expect("ready project has compiled provenance");
                 let network_index = FlatNetworkIndex::new(compiled);
-                return Err(project_flat_diagnostic(
-                    &diagnostic,
-                    compiled,
-                    &network_index,
-                ));
+                let diagnostic = project_flat_diagnostic(&diagnostic, compiled, &network_index);
+                return Err(if let Some(compiled_v3) = &self.compiled_v3 {
+                    remap_v3_diagnostic(diagnostic, compiled_v3)
+                } else {
+                    diagnostic
+                });
             }
         };
         self.snapshot = Some(self.project_snapshot(&flat));
@@ -340,6 +611,8 @@ impl ProjectSimulator {
         let flat = simulator.snapshot();
         self.validated = Some(validated);
         self.compiled = Some(compiled);
+        self.project_v3 = None;
+        self.compiled_v3 = None;
         self.simulator = Some(simulator);
         self.snapshot = Some(self.project_snapshot(&flat));
         Ok(())
@@ -379,17 +652,27 @@ impl ProjectSimulator {
     fn invalidate(&mut self) {
         self.validated = None;
         self.compiled = None;
+        self.compiled_v3 = None;
         self.simulator = None;
         self.snapshot = None;
     }
 
     fn project_snapshot(&self, flat: &SimulationSnapshot) -> ProjectSnapshot {
+        if self.compiled_v3.is_some() {
+            return self.project_snapshot_v3(flat);
+        }
+        self.project_snapshot_v2(flat)
+    }
+
+    fn project_snapshot_v2(&self, flat: &SimulationSnapshot) -> ProjectSnapshot {
         let compiled = self
             .compiled
             .as_ref()
             .expect("project snapshot requires compiled projection");
         let mut component_outputs: BTreeMap<String, BTreeMap<String, Trit>> = BTreeMap::new();
         let mut input_nets: BTreeMap<String, BTreeMap<String, Trit>> = BTreeMap::new();
+        let mut component_output_words = BTreeMap::new();
+        let mut input_net_words = BTreeMap::new();
         for (reference, entry) in &compiled.projection.ports {
             let value = projected_driver_value(flat, &entry.drivers);
             let target = match entry.direction {
@@ -403,6 +686,15 @@ impl ProjectSimulator {
                 .entry(reference.component_id.clone())
                 .or_default()
                 .insert(reference.port_id.clone(), value);
+            let word_target = match entry.direction {
+                PortDirection::Input => &mut input_net_words,
+                PortDirection::Output => &mut component_output_words,
+                PortDirection::InOut => unreachable!(),
+            };
+            word_target
+                .entry(reference.component_id.clone())
+                .or_insert_with(BTreeMap::new)
+                .insert(reference.port_id.clone(), scalar_word(value));
         }
 
         let mut diagnostics = ProjectDiagnosticSet::new();
@@ -428,6 +720,106 @@ impl ProjectSimulator {
         ProjectSnapshot {
             component_outputs,
             input_nets,
+            component_output_words,
+            input_net_words,
+            diagnostics: diagnostics.into_vec(),
+            stable: flat.stable,
+            tick_count: flat.tick_count,
+            compile_count: self.compile_count,
+        }
+    }
+
+    fn project_snapshot_v3(&self, flat: &SimulationSnapshot) -> ProjectSnapshot {
+        let compiled_v3 = self
+            .compiled_v3
+            .as_ref()
+            .expect("v3 snapshot requires reassembly metadata");
+        let project = self
+            .project_v3
+            .as_ref()
+            .expect("v3 snapshot requires its source document");
+        let active = project
+            .circuits
+            .iter()
+            .find(|circuit| circuit.id == self.active_circuit_id)
+            .expect("compiled active v3 circuit still exists");
+        let mut component_outputs = BTreeMap::new();
+        let mut input_nets = BTreeMap::new();
+        let mut component_output_words = BTreeMap::new();
+        let mut input_net_words = BTreeMap::new();
+
+        for component in &active.components {
+            for port in resolved_v3_component_ports(project, component) {
+                let reference =
+                    QualifiedPortRef::new(&active.id, [] as [&str; 0], &component.id, &port.id);
+                let Some(bits) = compiled_v3.reassembly.ports.get(&reference) else {
+                    continue;
+                };
+                let trits = bits
+                    .iter()
+                    .map(|bit| {
+                        let values = compiled_v3
+                            .reassembly
+                            .observable_endpoints(bit)
+                            .iter()
+                            .map(|endpoint| {
+                                flat.input_value(&endpoint.component_id, &endpoint.port_id)
+                                    .or_else(|| {
+                                        flat.output_value(&endpoint.component_id, &endpoint.port_id)
+                                    })
+                                    .unwrap_or(Trit::HighZ)
+                            })
+                            .collect::<Vec<_>>();
+                        resolve_drivers(&values)
+                    })
+                    .collect::<Vec<_>>();
+                let word = WordValue::new(port.shape, trits)
+                    .expect("v3 reassembly has one runtime trit per declared bit");
+                let (word_target, scalar_target) = match port.direction {
+                    PortDirection::Output => {
+                        (&mut component_output_words, Some(&mut component_outputs))
+                    }
+                    PortDirection::Input | PortDirection::InOut => {
+                        (&mut input_net_words, Some(&mut input_nets))
+                    }
+                };
+                if port.shape.width() == 1 {
+                    scalar_target
+                        .expect("v3 scalar projection target exists")
+                        .entry(component.id.clone())
+                        .or_insert_with(BTreeMap::new)
+                        .insert(port.id.clone(), word.trit(0));
+                }
+                word_target
+                    .entry(component.id.clone())
+                    .or_insert_with(BTreeMap::new)
+                    .insert(port.id, word);
+            }
+        }
+
+        let compiled = &compiled_v3.compiled;
+        let network_index = FlatNetworkIndex::new(compiled);
+        let mut diagnostics = ProjectDiagnosticSet::new();
+        let boundary_conflicts = self.boundary_conflicts(flat, compiled);
+        for conflict in &boundary_conflicts {
+            diagnostics.insert(remap_v3_diagnostic(
+                conflict.diagnostic.clone(),
+                compiled_v3,
+            ));
+        }
+        for diagnostic in &flat.diagnostics {
+            if !target_conflict_is_covered(diagnostic, &network_index, &boundary_conflicts) {
+                diagnostics.insert(remap_v3_diagnostic(
+                    project_flat_diagnostic(diagnostic, compiled, &network_index),
+                    compiled_v3,
+                ));
+            }
+        }
+        ProjectSnapshot {
+            component_outputs,
+            input_nets,
+            component_output_words,
+            input_net_words,
             diagnostics: diagnostics.into_vec(),
             stable: flat.stable,
             tick_count: flat.tick_count,
@@ -876,6 +1268,187 @@ fn set_document_source_value(
         .expect("validated mutable source still exists")
         .properties
         .set_known_value(property, value);
+}
+
+fn set_document_source_word_v3(
+    project: &mut ProjectDocumentV3,
+    circuit_id: &str,
+    component_id: &str,
+    property: &str,
+    value: &str,
+) {
+    project
+        .circuits
+        .iter_mut()
+        .find(|circuit| circuit.id == circuit_id)
+        .and_then(|circuit| {
+            circuit
+                .components
+                .iter_mut()
+                .find(|component| component.id == component_id)
+        })
+        .expect("validated mutable v3 source still exists")
+        .properties
+        .set_known_word(property, value);
+}
+
+fn scalar_word(value: Trit) -> WordValue {
+    WordValue::new(
+        SignalShape::new(1).expect("scalar signals have width one"),
+        vec![value],
+    )
+    .expect("one trit matches scalar shape")
+}
+
+fn resolved_v3_component_ports(
+    project: &ProjectDocumentV3,
+    component: &crate::project::ProjectComponent,
+) -> Vec<crate::project_validation::ResolvedProjectPort> {
+    if component.type_id != "project.module_instance" {
+        return resolve_project_ports(&component.type_id, &component.properties)
+            .unwrap_or_default();
+    }
+    let Some(module_id) = component.properties.module_id() else {
+        return Vec::new();
+    };
+    let Some(module) = project
+        .circuits
+        .iter()
+        .find(|circuit| circuit.id == module_id)
+    else {
+        return Vec::new();
+    };
+    let mut ports = module
+        .components
+        .iter()
+        .filter_map(|boundary| {
+            let direction = match boundary.type_id.as_str() {
+                "project.module_input" => PortDirection::Input,
+                "project.module_output" => PortDirection::Output,
+                _ => return None,
+            };
+            let id = boundary.properties.port_id()?.to_owned();
+            let shape = resolve_project_ports(&boundary.type_id, &boundary.properties)
+                .ok()?
+                .first()?
+                .shape;
+            Some(crate::project_validation::ResolvedProjectPort {
+                id,
+                direction,
+                shape,
+            })
+        })
+        .collect::<Vec<_>>();
+    ports.sort_by(|left, right| left.id.cmp(&right.id));
+    ports
+}
+
+fn remap_v3_diagnostic(
+    diagnostic: ProjectDiagnostic,
+    compiled_v3: &CompiledProjectV3,
+) -> ProjectDiagnostic {
+    let component_refs = diagnostic
+        .component_refs
+        .iter()
+        .map(|reference| remap_v3_component_ref(reference, compiled_v3))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let port_refs = diagnostic
+        .port_refs
+        .iter()
+        .map(|reference| {
+            let component = remap_v3_component_ref(
+                &QualifiedComponentRef::new(
+                    &reference.circuit_id,
+                    reference.instance_path.iter().cloned(),
+                    &reference.component_id,
+                ),
+                compiled_v3,
+            );
+            QualifiedPortRef::new(
+                component.circuit_id,
+                component.instance_path,
+                component.component_id,
+                &reference.port_id,
+            )
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let connection_refs = diagnostic
+        .connection_refs
+        .iter()
+        .flat_map(|reference| {
+            let static_ref = QualifiedConnectionRef::new(
+                &reference.circuit_id,
+                [] as [&str; 0],
+                &reference.connection_id,
+            );
+            compiled_v3
+                .lowered
+                .provenance
+                .connections
+                .get(&static_ref)
+                .cloned()
+                .unwrap_or_else(|| vec![static_ref])
+                .into_iter()
+                .map(|wire| {
+                    QualifiedConnectionRef::new(
+                        wire.circuit_id,
+                        reference.instance_path.iter().cloned(),
+                        wire.connection_id,
+                    )
+                })
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let primary_location = port_refs
+        .first()
+        .cloned()
+        .map(ProjectLocation::Port)
+        .or_else(|| {
+            component_refs
+                .first()
+                .cloned()
+                .map(ProjectLocation::Component)
+        })
+        .or_else(|| {
+            connection_refs
+                .first()
+                .cloned()
+                .map(ProjectLocation::Connection)
+        });
+    ProjectDiagnostic {
+        primary_location,
+        component_refs,
+        connection_refs,
+        port_refs,
+        ..diagnostic
+    }
+}
+
+fn remap_v3_component_ref(
+    reference: &QualifiedComponentRef,
+    compiled_v3: &CompiledProjectV3,
+) -> QualifiedComponentRef {
+    let static_ref = QualifiedComponentRef::new(
+        &reference.circuit_id,
+        [] as [&str; 0],
+        &reference.component_id,
+    );
+    let original = compiled_v3
+        .lowered
+        .provenance
+        .components
+        .get(&static_ref)
+        .unwrap_or(&static_ref);
+    QualifiedComponentRef::new(
+        &original.circuit_id,
+        reference.instance_path.iter().cloned(),
+        &original.component_id,
+    )
 }
 
 fn reachable_circuits(

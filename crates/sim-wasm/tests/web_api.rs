@@ -33,7 +33,7 @@ fn connection(
 
 #[wasm_bindgen_test]
 fn api_version_and_catalog_are_available() {
-    assert_eq!(api_version(), 2);
+    assert_eq!(api_version(), 3);
     assert!(component_catalog_json().contains("gate.neg"));
 }
 
@@ -86,7 +86,7 @@ fn ticks_a_dff_and_returns_the_clock_low_across_the_wasm_boundary() {
         serde_wasm_bindgen::from_value(simulator.tick().expect("tick circuit"))
             .expect("deserialize snapshot");
 
-    assert_eq!(snapshot.api_version, 2);
+    assert_eq!(snapshot.api_version, 3);
     assert_eq!(snapshot.output_value("dff", "q"), Some(Trit::Pos));
     assert_eq!(snapshot.output_value("clock", "out"), Some(Trit::Zero));
     assert_eq!(snapshot.input_value("dff", "clk"), Some(Trit::Zero));

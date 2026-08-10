@@ -917,6 +917,6 @@ fn snapshot_round_trips_through_serde() {
     let round_trip: SimulationSnapshot = serde_json::from_str(&json).expect("deserialize snapshot");
 
     assert_eq!(round_trip, snapshot);
-    assert!(json.contains(r#""api_version":2"#));
+    assert!(json.contains(r#""api_version":3"#));
     assert!(json.contains(r#""tick_count":0"#));
 }

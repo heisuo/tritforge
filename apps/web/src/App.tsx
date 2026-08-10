@@ -99,6 +99,7 @@ import { createProjectStore } from "./project/project-store";
 import {
   createWasmRuntime,
   wasmErrorMessage,
+  type ProjectPortResolver,
   type WasmRuntime,
 } from "./wasm-client";
 import { assignWireLanes } from "./wire-routing";
@@ -261,6 +262,7 @@ function Workbench() {
   const [nodes, setNodes] = useState<EditorNode[]>(initialEditor.nodes);
   const [edges, setEdges] = useState<EditorEdge[]>(initialEditor.edges);
   const [baseCatalog, setBaseCatalog] = useState<CatalogComponent[]>([]);
+  const [portResolver, setPortResolver] = useState<ProjectPortResolver | null>(null);
   const [snapshot, setSnapshot] = useState<ProjectSimulationSnapshot | null>(null);
   const [diagnostics, setDiagnostics] = useState<ProjectSimulationDiagnostic[]>([]);
   const [wasmState, setWasmState] = useState<"loading" | "ready" | "error">("loading");
@@ -282,9 +284,12 @@ function Workbench() {
   const instanceRef = useRef<ReactFlowInstance<EditorNode, EditorEdge> | null>(null);
   const inputClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const dynamicCatalog = useMemo(
-    () => buildProjectCatalog(baseCatalog, project, activeCircuitId),
-    [activeCircuitId, baseCatalog, project],
+  const dynamicCatalog = useMemo<ProjectCatalogComponent[]>(
+    () =>
+      portResolver
+        ? buildProjectCatalog(baseCatalog, project, activeCircuitId, portResolver)
+        : [],
+    [activeCircuitId, baseCatalog, portResolver, project],
   );
   const moduleDescriptors = useMemo(
     () => dynamicCatalog.filter((item) => item.category === "project-module"),
@@ -402,6 +407,7 @@ function Workbench() {
         const runtime = new HierarchyRuntime(wasm.projectSimulator);
         runtimeRef.current = runtime;
         setBaseCatalog(wasm.catalog);
+        setPortResolver(() => wasm.resolveProjectPorts);
         setWasmVersion(wasm.apiVersion);
         try {
           const state = store.getState();

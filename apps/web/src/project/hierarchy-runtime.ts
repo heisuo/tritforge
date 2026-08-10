@@ -1,20 +1,22 @@
-import type {
-  KnownTrit,
-  ProjectSimulationSnapshot,
-} from "../editor-model";
+import type { ProjectSimulationSnapshot } from "../editor-model";
+import type { EditorComponent } from "../editor/circuit-document";
 import {
   wasmProjectError,
   type WasmProjectError,
   type WasmProjectSimulatorBinding,
 } from "../wasm-client";
-import type {
-  ProjectCircuit,
-  ProjectDocumentV2,
-} from "./project-document";
+import type { ProjectDocumentV2 } from "./project-document";
+import {
+  migrateV2ToV3,
+  type ProjectDocumentV3,
+  type ProjectWire,
+} from "./project-v3";
+
+export type EditableProjectDocument = ProjectDocumentV2 | ProjectDocumentV3;
 
 export interface RuntimeProjectDocument {
   format: "logsim-ternary";
-  version: 2;
+  version: 3;
   rootCircuitId: string;
   circuits: RuntimeProjectCircuit[];
 }
@@ -24,7 +26,7 @@ export interface RuntimeProjectCircuit {
   name: string;
   kind: "main" | "module";
   components: RuntimeProjectComponent[];
-  connections: ProjectCircuit["connections"];
+  wires: ProjectWire[];
 }
 
 export interface RuntimeProjectComponent {
@@ -46,9 +48,8 @@ export class HierarchyRuntimeError extends Error {
 }
 
 export class HierarchyRuntime {
-  private project: ProjectDocumentV2 | null = null;
+  private project: ProjectDocumentV3 | null = null;
   private activeCircuitId: string | null = null;
-  private reachableCircuits = new Set<string>();
   private wasmProjectSynchronized = false;
   private projectValid = false;
   private currentSnapshot: ProjectSimulationSnapshot | null = null;
@@ -56,17 +57,17 @@ export class HierarchyRuntime {
   constructor(private readonly wasm: WasmProjectSimulatorBinding) {}
 
   load(
-    project: ProjectDocumentV2,
+    project: EditableProjectDocument,
     activeCircuitId: string,
   ): ProjectSimulationSnapshot {
+    const projectV3 = normalizeProject(project);
     try {
       const snapshot = this.wasm.loadProject(
-        toRuntimeProject(project),
+        toRuntimeProject(projectV3),
         activeCircuitId,
       );
-      this.project = cloneProject(project);
+      this.project = cloneProject(projectV3);
       this.activeCircuitId = activeCircuitId;
-      this.reachableCircuits = reachableFrom(project, activeCircuitId);
       this.wasmProjectSynchronized = true;
       this.projectValid = true;
       this.currentSnapshot = snapshot;
@@ -76,12 +77,12 @@ export class HierarchyRuntime {
     }
   }
 
-  updateProject(project: ProjectDocumentV2): ProjectSimulationSnapshot {
+  updateProject(project: EditableProjectDocument): ProjectSimulationSnapshot {
     this.requireLoaded();
-    this.project = cloneProject(project);
-    this.reachableCircuits = reachableFrom(project, this.activeCircuitId!);
+    const projectV3 = normalizeProject(project);
     try {
-      const snapshot = this.wasm.updateProject(toRuntimeProject(project));
+      const snapshot = this.wasm.updateProject(toRuntimeProject(projectV3));
+      this.project = cloneProject(projectV3);
       this.wasmProjectSynchronized = true;
       this.projectValid = true;
       this.currentSnapshot = snapshot;
@@ -97,7 +98,7 @@ export class HierarchyRuntime {
   setSource(
     circuitId: string,
     componentId: string,
-    value: KnownTrit,
+    value: string,
   ): ProjectSimulationSnapshot | null {
     const project = this.requireLoaded();
     if (!this.projectValid) {
@@ -105,18 +106,14 @@ export class HierarchyRuntime {
         "project simulation is unavailable until validation succeeds",
       );
     }
-    if (value !== "T" && value !== "0" && value !== "1") {
-      throw runtimeSourceError(`'${String(value)}' is not a known ternary source value`);
+    if (!/^[T01]+$/.test(value)) {
+      throw runtimeSourceError(`'${String(value)}' is not a known ternary source word`);
     }
     const nextProject = withSourceValue(project, circuitId, componentId, value);
-    if (!this.reachableCircuits.has(circuitId)) {
-      this.project = nextProject;
-      this.wasmProjectSynchronized = false;
-      return this.currentSnapshot;
-    }
     try {
       const snapshot = this.wasm.setSource(circuitId, componentId, value);
       this.project = nextProject;
+      this.wasmProjectSynchronized = true;
       this.currentSnapshot = snapshot;
       return snapshot;
     } catch (error) {
@@ -157,7 +154,6 @@ export class HierarchyRuntime {
     try {
       const snapshot = this.wasm.switchActive(activeCircuitId);
       this.activeCircuitId = activeCircuitId;
-      this.reachableCircuits = reachableFrom(project, activeCircuitId);
       this.currentSnapshot = snapshot;
       return snapshot;
     } catch (error) {
@@ -174,7 +170,7 @@ export class HierarchyRuntime {
     return snapshot;
   }
 
-  private requireLoaded(): ProjectDocumentV2 {
+  private requireLoaded(): ProjectDocumentV3 {
     if (!this.project || !this.activeCircuitId) {
       throw new HierarchyRuntimeError({
         name: "SimulationError",
@@ -188,13 +184,14 @@ export class HierarchyRuntime {
 }
 
 export function toRuntimeProject(
-  project: ProjectDocumentV2,
+  project: EditableProjectDocument,
 ): RuntimeProjectDocument {
+  const projectV3 = normalizeProject(project);
   return {
-    format: project.format,
-    version: project.version,
-    rootCircuitId: project.rootCircuitId,
-    circuits: project.circuits.map((circuit) => {
+    format: projectV3.format,
+    version: projectV3.version,
+    rootCircuitId: projectV3.rootCircuitId,
+    circuits: projectV3.circuits.map((circuit) => {
       const boundaries = circuit.components
         .filter(isBoundary)
         .slice()
@@ -215,66 +212,31 @@ export function toRuntimeProject(
         ).map((component) => ({
           id: component.id,
           typeId: component.typeId,
-          properties: runtimeProperties(component.typeId, component.properties),
+          properties: structuredClone(component.properties),
         })),
-        connections: circuit.connections.map((connection) => ({ ...connection })),
+        wires: circuit.wires.map((wire) => ({
+          id: wire.id,
+          endpointA: { ...wire.endpointA },
+          endpointB: { ...wire.endpointB },
+        })),
       };
     }),
   };
 }
 
-function runtimeProperties(
-  typeId: string,
-  properties: Record<string, unknown>,
-): Record<string, unknown> {
-  const cloned = structuredClone(properties);
-  if (!typeId.startsWith("project.")) {
-    delete cloned.label;
-  }
-  return cloned;
-}
-
-function isBoundary(component: ProjectCircuit["components"][number]): boolean {
+function isBoundary(component: EditorComponent): boolean {
   return (
     component.typeId === "project.module_input" ||
     component.typeId === "project.module_output"
   );
 }
 
-function reachableFrom(
-  project: ProjectDocumentV2,
-  activeCircuitId: string,
-): Set<string> {
-  const circuits = new Map(
-    project.circuits.map((circuit) => [circuit.id, circuit]),
-  );
-  const reachable = new Set<string>();
-  const pending = [activeCircuitId];
-  while (pending.length > 0) {
-    const circuitId = pending.pop()!;
-    if (reachable.has(circuitId)) {
-      continue;
-    }
-    reachable.add(circuitId);
-    for (const component of circuits.get(circuitId)?.components ?? []) {
-      const moduleId = component.properties.moduleId;
-      if (
-        component.typeId === "project.module_instance" &&
-        typeof moduleId === "string"
-      ) {
-        pending.push(moduleId);
-      }
-    }
-  }
-  return reachable;
-}
-
 function withSourceValue(
-  project: ProjectDocumentV2,
+  project: ProjectDocumentV3,
   circuitId: string,
   componentId: string,
-  value: KnownTrit,
-): ProjectDocumentV2 {
+  value: string,
+): ProjectDocumentV3 {
   let foundCircuit = false;
   let foundSource = false;
   const circuits = project.circuits.map((circuit) => {
@@ -324,6 +286,12 @@ function runtimeSourceError(message: string): HierarchyRuntimeError {
   });
 }
 
-function cloneProject(project: ProjectDocumentV2): ProjectDocumentV2 {
+function normalizeProject(project: EditableProjectDocument): ProjectDocumentV3 {
+  return project.version === 3
+    ? cloneProject(project)
+    : migrateV2ToV3(project);
+}
+
+function cloneProject(project: ProjectDocumentV3): ProjectDocumentV3 {
   return structuredClone(project);
 }

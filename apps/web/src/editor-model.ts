@@ -3,6 +3,8 @@ import type { WireLaneAssignment } from "./wire-routing";
 
 export type KnownTrit = "T" | "0" | "1";
 export type TritSymbol = KnownTrit | "X" | "Z" | "E";
+/** MS-first ternary word. Runtime words may contain T/0/1/X/Z/E. */
+export type TernaryWord = string;
 
 export interface QualifiedComponentRef {
   circuitId: string;
@@ -41,6 +43,8 @@ export interface ProjectSimulationDiagnostic {
 export interface ProjectSimulationSnapshot {
   componentOutputs: Record<string, Record<string, TritSymbol>>;
   inputNets: Record<string, Record<string, TritSymbol>>;
+  componentOutputWords: Record<string, Record<string, TernaryWord>>;
+  inputNetWords: Record<string, Record<string, TernaryWord>>;
   diagnostics: ProjectSimulationDiagnostic[];
   stable: boolean;
   tickCount: number;
