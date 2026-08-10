@@ -6,8 +6,8 @@ use serde_json::Value;
 use crate::catalog::PortDirection;
 use crate::diagnostic::Severity;
 use crate::hierarchy::{
-    CompiledProject, FlatPortRef, MAX_EXPANDED_COMPONENTS, MAX_EXPANDED_CONNECTIONS,
-    MAX_PROJECTION_ENDPOINTS, compile_project,
+    CompiledProject, FlatPortRef, MAX_ANALYSIS_EDGES, MAX_EXPANDED_COMPONENTS,
+    MAX_EXPANDED_CONNECTIONS, MAX_PROJECTION_ENDPOINTS, MAX_PROVENANCE_REFERENCES, compile_project,
 };
 use crate::project::{
     ProjectCircuit, ProjectCircuitKind, ProjectComponent, ProjectConnection, ProjectDiagnostic,
@@ -27,13 +27,46 @@ const SPLITTER: &str = "wiring.splitter";
 #[serde(rename_all = "camelCase")]
 pub struct ScalarBitEndpoint {
     pub scalar_port: Option<QualifiedPortRef>,
+    pub scalar_net: Option<QualifiedNetRef>,
     pub flat_endpoints: Vec<FlatPortRef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QualifiedNetRef {
+    pub circuit_id: String,
+    pub instance_path: Vec<String>,
+    pub net_id: String,
+}
+
+impl QualifiedNetRef {
+    fn new<I, S>(circuit_id: impl Into<String>, instance_path: I, net_id: impl Into<String>) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self {
+            circuit_id: circuit_id.into(),
+            instance_path: instance_path.into_iter().map(Into::into).collect(),
+            net_id: net_id.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReassemblyNet {
+    pub scalar_drivers: Vec<QualifiedPortRef>,
+    pub scalar_consumers: Vec<QualifiedPortRef>,
+    pub flat_drivers: Vec<FlatPortRef>,
+    pub flat_consumers: Vec<FlatPortRef>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReassemblyMetadata {
     pub ports: BTreeMap<QualifiedPortRef, Vec<ScalarBitEndpoint>>,
+    pub nets: BTreeMap<QualifiedNetRef, ReassemblyNet>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,6 +74,36 @@ pub struct ReassemblyMetadata {
 pub struct ConnectivityProvenance {
     pub components: BTreeMap<QualifiedComponentRef, QualifiedComponentRef>,
     pub connections: BTreeMap<QualifiedConnectionRef, Vec<QualifiedConnectionRef>>,
+    pub wire_bits: BTreeMap<QualifiedWireBitRef, Vec<QualifiedConnectionRef>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QualifiedWireBitRef {
+    pub circuit_id: String,
+    pub instance_path: Vec<String>,
+    pub wire_id: String,
+    pub bit_index: u8,
+}
+
+impl QualifiedWireBitRef {
+    pub fn new<I, S>(
+        circuit_id: impl Into<String>,
+        instance_path: I,
+        wire_id: impl Into<String>,
+        bit_index: u8,
+    ) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self {
+            circuit_id: circuit_id.into(),
+            instance_path: instance_path.into_iter().map(Into::into).collect(),
+            wire_id: wire_id.into(),
+            bit_index,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,6 +121,7 @@ pub struct CompiledProjectV3 {
     pub compiled: CompiledProject,
     pub reassembly: ReassemblyMetadata,
     pub wire_provenance: BTreeMap<String, Vec<QualifiedConnectionRef>>,
+    pub reverse_wire_provenance: BTreeMap<QualifiedWireBitRef, Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -130,6 +194,7 @@ struct NetPlan {
     drivers: BTreeSet<(String, String)>,
     consumers: BTreeSet<(String, String)>,
     wires: BTreeSet<QualifiedConnectionRef>,
+    wire_bits: BTreeSet<QualifiedWireBitRef>,
 }
 
 #[derive(Debug)]
@@ -141,6 +206,14 @@ struct CircuitLowering {
 
 pub fn lower_project_v3(
     project: ProjectDocumentV3,
+) -> Result<LoweredProjectV3, Vec<ProjectDiagnostic>> {
+    let active_circuit_id = project.root_circuit_id.clone();
+    lower_project_v3_for_active(project, &active_circuit_id)
+}
+
+fn lower_project_v3_for_active(
+    project: ProjectDocumentV3,
+    active_circuit_id: &str,
 ) -> Result<LoweredProjectV3, Vec<ProjectDiagnostic>> {
     let mut diagnostics = ProjectDiagnosticSet::new();
     validate_v3_header_and_ids(&project, &mut diagnostics);
@@ -243,6 +316,7 @@ pub fn lower_project_v3(
     if has_errors(&diagnostics) {
         return Err(diagnostics);
     }
+    preflight_connectivity(&unique_circuits, &resolved_ports, active_circuit_id)?;
 
     let mut lowered_circuits = Vec::with_capacity(unique_circuits.len());
     let mut reassembly = ReassemblyMetadata::default();
@@ -251,10 +325,12 @@ pub fn lower_project_v3(
         let lowered = lower_circuit(circuit, &resolved_ports, &interfaces)?;
         lowered_circuits.push(lowered.circuit);
         reassembly.ports.extend(lowered.reassembly.ports);
+        reassembly.nets.extend(lowered.reassembly.nets);
         provenance.components.extend(lowered.provenance.components);
         provenance
             .connections
             .extend(lowered.provenance.connections);
+        provenance.wire_bits.extend(lowered.provenance.wire_bits);
     }
     lowered_circuits.sort_by(|left, right| left.id.cmp(&right.id));
 
@@ -283,19 +359,82 @@ pub fn compile_project_v3(
     project: ProjectDocumentV3,
     active_circuit_id: &str,
 ) -> Result<CompiledProjectV3, Vec<ProjectDiagnostic>> {
-    let lowered = lower_project_v3(project)?;
+    let lowered = lower_project_v3_for_active(project, active_circuit_id)?;
     let validated = validate_project(lowered.project.clone())
         .map_err(|errors| remap_diagnostics(&errors, &lowered.provenance, &lowered.reassembly))?;
     let compiled = compile_project(&validated, active_circuit_id)
         .map_err(|errors| remap_diagnostics(&errors, &lowered.provenance, &lowered.reassembly))?;
+    check_compiled_provenance_amplification(&lowered.provenance, &compiled)?;
     let reassembly = expand_reassembly(&lowered, &compiled, active_circuit_id);
     let wire_provenance = compose_wire_provenance(&lowered.provenance, &compiled);
+    let reverse_wire_provenance =
+        compose_reverse_wire_provenance(&lowered, &compiled, active_circuit_id);
     Ok(CompiledProjectV3 {
         lowered,
         compiled,
         reassembly,
         wire_provenance,
+        reverse_wire_provenance,
     })
+}
+
+fn check_compiled_provenance_amplification(
+    provenance: &ConnectivityProvenance,
+    compiled: &CompiledProject,
+) -> Result<(), Vec<ProjectDiagnostic>> {
+    let mut count = 0_usize;
+    for scalar_connections in compiled.provenance.connections.values() {
+        for scalar_connection in scalar_connections {
+            let static_ref = QualifiedConnectionRef::new(
+                &scalar_connection.circuit_id,
+                [] as [&str; 0],
+                &scalar_connection.connection_id,
+            );
+            let Some(wires) = provenance.connections.get(&static_ref) else {
+                continue;
+            };
+            count = count.checked_add(wires.len()).ok_or_else(|| {
+                vec![compiled_provenance_limit(
+                    scalar_connection,
+                    wires.first(),
+                    usize::MAX,
+                )]
+            })?;
+            if count > MAX_PROVENANCE_REFERENCES {
+                return Err(vec![compiled_provenance_limit(
+                    scalar_connection,
+                    wires.first(),
+                    count,
+                )]);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn compiled_provenance_limit(
+    scalar_connection: &QualifiedConnectionRef,
+    wire: Option<&QualifiedConnectionRef>,
+    count: usize,
+) -> ProjectDiagnostic {
+    let wire_ref = wire.map(|wire| {
+        QualifiedConnectionRef::new(
+            &wire.circuit_id,
+            scalar_connection.instance_path.iter().cloned(),
+            &wire.connection_id,
+        )
+    });
+    ProjectDiagnostic {
+        code: "HIERARCHY_EXPANSION_LIMIT".into(),
+        severity: Severity::Error,
+        message: format!(
+            "expanded provenance reference count is at least {count}, exceeding {MAX_PROVENANCE_REFERENCES}"
+        ),
+        primary_location: wire_ref.clone().map(ProjectLocation::Connection),
+        component_refs: Vec::new(),
+        connection_refs: wire_ref.into_iter().collect(),
+        port_refs: Vec::new(),
+    }
 }
 
 fn validate_v3_header_and_ids(project: &ProjectDocumentV3, diagnostics: &mut ProjectDiagnosticSet) {
@@ -653,6 +792,588 @@ fn validate_wires_and_tunnels(
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct ConnectivityMetrics {
+    reassembly_entries: usize,
+    reassembly_endpoints: usize,
+    wire_bit_edges: usize,
+    generated_connections: usize,
+    provenance_references: usize,
+}
+
+impl ConnectivityMetrics {
+    fn checked_add(self, other: Self) -> Option<Self> {
+        Some(Self {
+            reassembly_entries: self
+                .reassembly_entries
+                .checked_add(other.reassembly_entries)?,
+            reassembly_endpoints: self
+                .reassembly_endpoints
+                .checked_add(other.reassembly_endpoints)?,
+            wire_bit_edges: self.wire_bit_edges.checked_add(other.wire_bit_edges)?,
+            generated_connections: self
+                .generated_connections
+                .checked_add(other.generated_connections)?,
+            provenance_references: self
+                .provenance_references
+                .checked_add(other.provenance_references)?,
+        })
+    }
+
+    fn value(self, metric: ConnectivityMetric) -> usize {
+        match metric {
+            ConnectivityMetric::ReassemblyEntries => self.reassembly_entries,
+            ConnectivityMetric::ReassemblyEndpoints => self.reassembly_endpoints,
+            ConnectivityMetric::WireBitEdges => self.wire_bit_edges,
+            ConnectivityMetric::GeneratedConnections => self.generated_connections,
+            ConnectivityMetric::ProvenanceReferences => self.provenance_references,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ConnectivityMetric {
+    ReassemblyEntries,
+    ReassemblyEndpoints,
+    WireBitEdges,
+    GeneratedConnections,
+    ProvenanceReferences,
+}
+
+fn preflight_connectivity(
+    circuits: &BTreeMap<String, &crate::project::ProjectCircuitV3>,
+    resolved: &BTreeMap<(String, String), Vec<ResolvedProjectPort>>,
+    active_circuit_id: &str,
+) -> Result<(), Vec<ProjectDiagnostic>> {
+    let mut local_metrics = BTreeMap::new();
+    for circuit in circuits.values() {
+        let shape = count_local_connectivity_shape(circuit, resolved)?;
+        local_metrics.insert(
+            circuit.id.clone(),
+            analyze_local_connectivity(circuit, resolved, shape)?,
+        );
+    }
+
+    let Some(order) = v3_dependency_postorder(active_circuit_id, circuits) else {
+        return Ok(());
+    };
+    let mut expanded = BTreeMap::new();
+    for circuit_id in order {
+        let Some(circuit) = circuits.get(&circuit_id) else {
+            return Ok(());
+        };
+        let local = *local_metrics
+            .get(&circuit_id)
+            .unwrap_or(&ConnectivityMetrics::default());
+        let mut total = local;
+        let mut children = ConnectivityMetrics::default();
+        let mut growth_instance = None;
+        let mut instances = circuit
+            .components
+            .iter()
+            .filter(|component| component.type_id == MODULE_INSTANCE)
+            .collect::<Vec<_>>();
+        instances.sort_by(|left, right| left.id.cmp(&right.id));
+        for instance in instances {
+            let Some(module_id) = instance.properties.module_id() else {
+                continue;
+            };
+            let Some(child) = expanded.get(module_id).copied() else {
+                continue;
+            };
+            growth_instance = Some(instance);
+            children = children.checked_add(child).ok_or_else(|| {
+                vec![hierarchy_connectivity_limit(
+                    circuit,
+                    instance,
+                    "hierarchy connectivity count overflowed usize",
+                )]
+            })?;
+            total = total.checked_add(child).ok_or_else(|| {
+                vec![hierarchy_connectivity_limit(
+                    circuit,
+                    instance,
+                    "hierarchy connectivity count overflowed usize",
+                )]
+            })?;
+        }
+        let cross_references = local
+            .generated_connections
+            .checked_mul(children.provenance_references)
+            .and_then(|left| {
+                local
+                    .provenance_references
+                    .checked_mul(children.generated_connections)
+                    .and_then(|right| left.checked_add(right))
+            })
+            .ok_or_else(|| {
+                vec![connectivity_cross_limit(
+                    circuit,
+                    growth_instance,
+                    "hierarchy provenance amplification overflowed usize",
+                )]
+            })?;
+        total.provenance_references = total
+            .provenance_references
+            .checked_add(cross_references)
+            .ok_or_else(|| {
+                vec![connectivity_cross_limit(
+                    circuit,
+                    growth_instance,
+                    "hierarchy provenance amplification overflowed usize",
+                )]
+            })?;
+        expanded.insert(circuit_id, total);
+    }
+    let Some(active_metrics) = expanded.get(active_circuit_id).copied() else {
+        return Ok(());
+    };
+
+    check_expanded_metric(
+        active_metrics,
+        ConnectivityMetric::ReassemblyEntries,
+        MAX_PROJECTION_ENDPOINTS,
+        "expanded reassembly entry count",
+        active_circuit_id,
+        circuits,
+        &expanded,
+    )?;
+    check_expanded_metric(
+        active_metrics,
+        ConnectivityMetric::ReassemblyEndpoints,
+        MAX_PROJECTION_ENDPOINTS,
+        "expanded reassembly endpoint count",
+        active_circuit_id,
+        circuits,
+        &expanded,
+    )?;
+    check_expanded_metric(
+        active_metrics,
+        ConnectivityMetric::WireBitEdges,
+        MAX_ANALYSIS_EDGES,
+        "expanded wire-bit analysis edge count",
+        active_circuit_id,
+        circuits,
+        &expanded,
+    )?;
+    check_expanded_metric(
+        active_metrics,
+        ConnectivityMetric::GeneratedConnections,
+        MAX_EXPANDED_CONNECTIONS,
+        "expanded generated connection count",
+        active_circuit_id,
+        circuits,
+        &expanded,
+    )?;
+    check_expanded_metric(
+        active_metrics,
+        ConnectivityMetric::ProvenanceReferences,
+        MAX_PROVENANCE_REFERENCES,
+        "expanded provenance reference count",
+        active_circuit_id,
+        circuits,
+        &expanded,
+    )?;
+    Ok(())
+}
+
+fn connectivity_cross_limit(
+    circuit: &crate::project::ProjectCircuitV3,
+    instance: Option<&ProjectComponent>,
+    message: impl Into<String>,
+) -> ProjectDiagnostic {
+    let message = message.into();
+    match instance {
+        Some(instance) => hierarchy_connectivity_limit(circuit, instance, message),
+        None => connectivity_local_limit(circuit, message),
+    }
+}
+
+fn count_local_connectivity_shape(
+    circuit: &crate::project::ProjectCircuitV3,
+    resolved: &BTreeMap<(String, String), Vec<ResolvedProjectPort>>,
+) -> Result<ConnectivityMetrics, Vec<ProjectDiagnostic>> {
+    let mut metrics = ConnectivityMetrics::default();
+    let mut components = circuit.components.iter().collect::<Vec<_>>();
+    components.sort_by(|left, right| left.id.cmp(&right.id));
+    for component in &components {
+        for port in resolved
+            .get(&(circuit.id.clone(), component.id.clone()))
+            .into_iter()
+            .flatten()
+        {
+            metrics.reassembly_entries =
+                metrics.reassembly_entries.checked_add(1).ok_or_else(|| {
+                    vec![limit_error(
+                        circuit,
+                        Some(component),
+                        "reassembly entry count overflowed usize",
+                    )]
+                })?;
+            metrics.reassembly_endpoints = metrics
+                .reassembly_endpoints
+                .checked_add(usize::from(port.shape.width()))
+                .ok_or_else(|| {
+                    vec![limit_error(
+                        circuit,
+                        Some(component),
+                        "reassembly endpoint count overflowed usize",
+                    )]
+                })?;
+        }
+    }
+    if metrics.reassembly_entries > MAX_PROJECTION_ENDPOINTS
+        || metrics.reassembly_endpoints > MAX_PROJECTION_ENDPOINTS
+    {
+        return Err(vec![limit_error(
+            circuit,
+            components.last().copied(),
+            format!(
+                "expanded reassembly endpoint count {} exceeds projection endpoint limit {}",
+                metrics.reassembly_endpoints, MAX_PROJECTION_ENDPOINTS
+            ),
+        )]);
+    }
+
+    let mut wires = circuit.wires.iter().collect::<Vec<_>>();
+    wires.sort_by(|left, right| left.id.cmp(&right.id));
+    for wire in wires {
+        let width = usize::from(
+            resolved_width(resolved, &circuit.id, &wire.endpoint_a).unwrap_or_default(),
+        );
+        metrics.wire_bit_edges = metrics.wire_bit_edges.checked_add(width).ok_or_else(|| {
+            vec![wire_limit_error(
+                circuit,
+                wire,
+                "wire-bit analysis edge count overflowed usize",
+            )]
+        })?;
+        if metrics.wire_bit_edges > MAX_ANALYSIS_EDGES {
+            return Err(vec![wire_limit_error(
+                circuit,
+                wire,
+                format!(
+                    "wire-bit analysis edge count {} exceeds {}",
+                    metrics.wire_bit_edges, MAX_ANALYSIS_EDGES
+                ),
+            )]);
+        }
+    }
+
+    let mut tunnels: BTreeMap<&str, (usize, usize, &ProjectComponent)> = BTreeMap::new();
+    for component in &components {
+        if component.type_id != TUNNEL {
+            continue;
+        }
+        let Some(label) = component.properties.label() else {
+            continue;
+        };
+        let width = resolved
+            .get(&(circuit.id.clone(), component.id.clone()))
+            .and_then(|ports| ports.first())
+            .map(|port| usize::from(port.shape.width()))
+            .unwrap_or_default();
+        let entry = tunnels.entry(label).or_insert((0, width, component));
+        entry.0 += 1;
+        entry.2 = component;
+    }
+    for (_, (count, width, component)) in tunnels {
+        let edges = count.saturating_sub(1).checked_mul(width).ok_or_else(|| {
+            vec![limit_error(
+                circuit,
+                Some(component),
+                "tunnel analysis edge count overflowed usize",
+            )]
+        })?;
+        metrics.wire_bit_edges = metrics.wire_bit_edges.checked_add(edges).ok_or_else(|| {
+            vec![limit_error(
+                circuit,
+                Some(component),
+                "wire-bit analysis edge count overflowed usize",
+            )]
+        })?;
+    }
+    for component in &components {
+        if component.type_id != SPLITTER {
+            continue;
+        }
+        let edges = component
+            .properties
+            .get("mapping")
+            .and_then(Value::as_array)
+            .map(Vec::len)
+            .unwrap_or_default();
+        metrics.wire_bit_edges = metrics.wire_bit_edges.checked_add(edges).ok_or_else(|| {
+            vec![limit_error(
+                circuit,
+                Some(component),
+                "splitter analysis edge count overflowed usize",
+            )]
+        })?;
+    }
+    if metrics.wire_bit_edges > MAX_ANALYSIS_EDGES {
+        return Err(vec![limit_error(
+            circuit,
+            components.last().copied(),
+            format!(
+                "wire-bit analysis edge count {} exceeds {}",
+                metrics.wire_bit_edges, MAX_ANALYSIS_EDGES
+            ),
+        )]);
+    }
+    Ok(metrics)
+}
+
+fn analyze_local_connectivity(
+    circuit: &crate::project::ProjectCircuitV3,
+    resolved: &BTreeMap<(String, String), Vec<ResolvedProjectPort>>,
+    mut metrics: ConnectivityMetrics,
+) -> Result<ConnectivityMetrics, Vec<ProjectDiagnostic>> {
+    let mut unions = UnionFind::default();
+    let mut directions = BTreeMap::new();
+    for component in &circuit.components {
+        for port in resolved
+            .get(&(circuit.id.clone(), component.id.clone()))
+            .into_iter()
+            .flatten()
+        {
+            for bit in 0..port.shape.width() {
+                let node = bit_node(&component.id, &port.id, bit);
+                unions.insert(node.clone());
+                directions.insert(node, port.direction);
+            }
+        }
+    }
+
+    let mut wire_nodes = Vec::new();
+    let mut wires = circuit.wires.iter().collect::<Vec<_>>();
+    wires.sort_by(|left, right| left.id.cmp(&right.id));
+    for wire in wires {
+        let width = resolved_width(resolved, &circuit.id, &wire.endpoint_a).unwrap_or_default();
+        for bit in 0..width {
+            let left = bit_node(&wire.endpoint_a.component_id, &wire.endpoint_a.port_id, bit);
+            let right = bit_node(&wire.endpoint_b.component_id, &wire.endpoint_b.port_id, bit);
+            unions.union(&left, &right);
+            wire_nodes.push(left);
+        }
+    }
+    union_tunnels(circuit, resolved, &mut unions);
+    union_splitters(circuit, &mut unions);
+
+    let mut net_counts = BTreeMap::<BitNode, (usize, usize, usize)>::new();
+    for (node, direction) in directions {
+        let Some(root) = unions.root(&node) else {
+            continue;
+        };
+        let counts = net_counts.entry(root).or_default();
+        match direction {
+            PortDirection::Output => counts.0 += 1,
+            PortDirection::Input => counts.1 += 1,
+            PortDirection::InOut => {}
+        }
+    }
+    for node in wire_nodes {
+        if let Some(root) = unions.root(&node) {
+            net_counts.entry(root).or_default().2 += 1;
+        }
+    }
+
+    for (drivers, consumers, wire_bits) in net_counts.values().copied() {
+        let connections = drivers.checked_mul(consumers).ok_or_else(|| {
+            vec![limit_error(
+                circuit,
+                None,
+                "connection count overflowed usize",
+            )]
+        })?;
+        metrics.generated_connections = metrics
+            .generated_connections
+            .checked_add(connections)
+            .ok_or_else(|| {
+                vec![limit_error(
+                    circuit,
+                    None,
+                    "connection count overflowed usize",
+                )]
+            })?;
+        let references = connections.checked_mul(wire_bits).ok_or_else(|| {
+            vec![limit_error(
+                circuit,
+                None,
+                "provenance reference count overflowed usize",
+            )]
+        })?;
+        metrics.provenance_references = metrics
+            .provenance_references
+            .checked_add(references)
+            .ok_or_else(|| {
+                vec![limit_error(
+                    circuit,
+                    None,
+                    "provenance reference count overflowed usize",
+                )]
+            })?;
+    }
+    if metrics.generated_connections > MAX_EXPANDED_CONNECTIONS {
+        return Err(vec![connectivity_local_limit(
+            circuit,
+            format!(
+                "generated connection count {} exceeds {}",
+                metrics.generated_connections, MAX_EXPANDED_CONNECTIONS
+            ),
+        )]);
+    }
+    if metrics.provenance_references > MAX_PROVENANCE_REFERENCES {
+        return Err(vec![connectivity_local_limit(
+            circuit,
+            format!(
+                "provenance reference count {} exceeds {}",
+                metrics.provenance_references, MAX_PROVENANCE_REFERENCES
+            ),
+        )]);
+    }
+    Ok(metrics)
+}
+
+fn v3_dependency_postorder(
+    active_circuit_id: &str,
+    circuits: &BTreeMap<String, &crate::project::ProjectCircuitV3>,
+) -> Option<Vec<String>> {
+    circuits.get(active_circuit_id)?;
+    let mut states = BTreeMap::<String, u8>::new();
+    let mut order = Vec::new();
+    let mut stack = vec![(active_circuit_id.to_owned(), 0_usize, Vec::<String>::new())];
+    states.insert(active_circuit_id.to_owned(), 1);
+    while let Some((circuit_id, child_index, children)) = stack.last_mut() {
+        if children.is_empty() {
+            let circuit = circuits.get(circuit_id)?;
+            *children = circuit
+                .components
+                .iter()
+                .filter(|component| component.type_id == MODULE_INSTANCE)
+                .filter_map(|component| component.properties.module_id().map(str::to_owned))
+                .collect();
+            children.sort();
+        }
+        if let Some(child) = children.get(*child_index).cloned() {
+            *child_index += 1;
+            match states.get(&child).copied() {
+                Some(1) => return None,
+                Some(2) => {}
+                _ => {
+                    states.insert(child.clone(), 1);
+                    stack.push((child, 0, Vec::new()));
+                }
+            }
+        } else {
+            let (finished, _, _) = stack.pop()?;
+            states.insert(finished.clone(), 2);
+            order.push(finished);
+        }
+    }
+    Some(order)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn check_expanded_metric(
+    active: ConnectivityMetrics,
+    metric: ConnectivityMetric,
+    limit: usize,
+    label: &str,
+    active_circuit_id: &str,
+    circuits: &BTreeMap<String, &crate::project::ProjectCircuitV3>,
+    expanded: &BTreeMap<String, ConnectivityMetrics>,
+) -> Result<(), Vec<ProjectDiagnostic>> {
+    let count = active.value(metric);
+    if count <= limit {
+        return Ok(());
+    }
+    let Some(circuit) = circuits.get(active_circuit_id) else {
+        return Ok(());
+    };
+    let instance = circuit
+        .components
+        .iter()
+        .filter(|component| component.type_id == MODULE_INSTANCE)
+        .filter_map(|component| {
+            let module_id = component.properties.module_id()?;
+            Some((expanded.get(module_id)?.value(metric), component))
+        })
+        .filter(|(contribution, _)| *contribution > 0)
+        .max_by(|left, right| {
+            left.0
+                .cmp(&right.0)
+                .then_with(|| right.1.id.cmp(&left.1.id))
+        })
+        .map(|(_, component)| component);
+    let diagnostic = if let Some(instance) = instance {
+        hierarchy_connectivity_limit(
+            circuit,
+            instance,
+            format!("{label} {count} exceeds {limit}"),
+        )
+    } else {
+        connectivity_local_limit(circuit, format!("{label} {count} exceeds {limit}"))
+    };
+    Err(vec![diagnostic])
+}
+
+fn hierarchy_connectivity_limit(
+    circuit: &crate::project::ProjectCircuitV3,
+    instance: &ProjectComponent,
+    message: impl Into<String>,
+) -> ProjectDiagnostic {
+    v3_error(
+        "HIERARCHY_EXPANSION_LIMIT",
+        message.into(),
+        &circuit.id,
+        &[&instance.id],
+        &[],
+        &[],
+    )
+}
+
+fn wire_limit_error(
+    circuit: &crate::project::ProjectCircuitV3,
+    wire: &crate::project::ProjectWire,
+    message: impl Into<String>,
+) -> ProjectDiagnostic {
+    v3_error(
+        "HIERARCHY_EXPANSION_LIMIT",
+        message.into(),
+        &circuit.id,
+        &[],
+        &[&wire.id],
+        &[],
+    )
+}
+
+fn connectivity_local_limit(
+    circuit: &crate::project::ProjectCircuitV3,
+    message: impl Into<String>,
+) -> ProjectDiagnostic {
+    let component_ids = circuit
+        .components
+        .iter()
+        .max_by(|left, right| left.id.cmp(&right.id))
+        .map(|component| vec![component.id.as_str()])
+        .unwrap_or_default();
+    let wire_ids = circuit
+        .wires
+        .iter()
+        .max_by(|left, right| left.id.cmp(&right.id))
+        .map(|wire| vec![wire.id.as_str()])
+        .unwrap_or_default();
+    v3_error(
+        "HIERARCHY_EXPANSION_LIMIT",
+        message.into(),
+        &circuit.id,
+        &component_ids,
+        &wire_ids,
+        &[],
+    )
+}
+
 fn lower_circuit(
     circuit: &crate::project::ProjectCircuitV3,
     resolved: &BTreeMap<(String, String), Vec<ResolvedProjectPort>>,
@@ -839,7 +1560,7 @@ fn lower_circuit(
             unions.union(&left, &right);
             wire_bits.push((
                 left,
-                QualifiedConnectionRef::new(&circuit.id, [] as [&str; 0], &wire.id),
+                QualifiedWireBitRef::new(&circuit.id, [] as [&str; 0], &wire.id, bit),
             ));
         }
     }
@@ -870,9 +1591,59 @@ fn lower_circuit(
             PortDirection::InOut => {}
         }
     }
-    for (node, wire_ref) in wire_bits {
+    for (node, wire_bit_ref) in wire_bits {
+        provenance
+            .wire_bits
+            .entry(wire_bit_ref.clone())
+            .or_default();
         if let Some(root) = unions.root(&node) {
-            nets.entry(root).or_default().wires.insert(wire_ref);
+            let net = nets.entry(root).or_default();
+            net.wires.insert(QualifiedConnectionRef::new(
+                &wire_bit_ref.circuit_id,
+                wire_bit_ref.instance_path.iter().cloned(),
+                &wire_bit_ref.wire_id,
+            ));
+            net.wire_bits.insert(wire_bit_ref);
+        }
+    }
+
+    let net_ids = nets
+        .iter()
+        .enumerate()
+        .map(|(index, (root, net))| {
+            let net_ref =
+                QualifiedNetRef::new(&circuit.id, [] as [&str; 0], format!("v3-net-{index:05}"));
+            let scalar_drivers = net
+                .drivers
+                .iter()
+                .map(|(component_id, port_id)| {
+                    QualifiedPortRef::new(&circuit.id, [] as [&str; 0], component_id, port_id)
+                })
+                .collect();
+            let scalar_consumers = net
+                .consumers
+                .iter()
+                .map(|(component_id, port_id)| {
+                    QualifiedPortRef::new(&circuit.id, [] as [&str; 0], component_id, port_id)
+                })
+                .collect();
+            reassembly.nets.insert(
+                net_ref.clone(),
+                ReassemblyNet {
+                    scalar_drivers,
+                    scalar_consumers,
+                    ..ReassemblyNet::default()
+                },
+            );
+            (root.clone(), net_ref)
+        })
+        .collect::<BTreeMap<_, _>>();
+    for (logical, bits) in &mut reassembly.ports {
+        for (bit_index, bit) in bits.iter_mut().enumerate() {
+            let node = bit_node(&logical.component_id, &logical.port_id, bit_index as u8);
+            bit.scalar_net = unions
+                .root(&node)
+                .and_then(|root| net_ids.get(&root).cloned());
         }
     }
 
@@ -937,9 +1708,17 @@ fn lower_circuit(
                     target_port_id: consumer.1.clone(),
                 });
                 provenance.connections.insert(
-                    QualifiedConnectionRef::new(&circuit.id, [] as [&str; 0], id),
+                    QualifiedConnectionRef::new(&circuit.id, [] as [&str; 0], &id),
                     net.wires.iter().cloned().collect(),
                 );
+                let generated_ref = QualifiedConnectionRef::new(&circuit.id, [] as [&str; 0], id);
+                for wire_bit in &net.wire_bits {
+                    provenance
+                        .wire_bits
+                        .entry(wire_bit.clone())
+                        .or_default()
+                        .push(generated_ref.clone());
+                }
             }
         }
     }
@@ -1002,6 +1781,7 @@ fn add_port_bits(
                 scalar_port: component_id.zip(port_id).map(|(component_id, port_id)| {
                     QualifiedPortRef::new(&circuit.id, [] as [&str; 0], component_id, port_id)
                 }),
+                scalar_net: None,
                 flat_endpoints: Vec::new(),
             }
         })
@@ -1134,6 +1914,52 @@ fn expand_reassembly(
         let Some(circuit) = circuits.get(circuit_id.as_str()) else {
             continue;
         };
+        for (net_ref, net) in lowered
+            .reassembly
+            .nets
+            .iter()
+            .filter(|(net_ref, _)| net_ref.circuit_id == circuit_id)
+        {
+            let qualified_net =
+                QualifiedNetRef::new(&net_ref.circuit_id, path.iter().cloned(), &net_ref.net_id);
+            let scalar_drivers = qualify_ports(&net.scalar_drivers, &path);
+            let scalar_consumers = qualify_ports(&net.scalar_consumers, &path);
+            let flat_drivers = scalar_drivers
+                .iter()
+                .flat_map(|port| {
+                    flat_endpoints_with_boundary_alias(
+                        port,
+                        circuit,
+                        parent_instance.as_ref(),
+                        compiled,
+                    )
+                })
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            let flat_consumers = scalar_consumers
+                .iter()
+                .flat_map(|port| {
+                    flat_endpoints_with_boundary_alias(
+                        port,
+                        circuit,
+                        parent_instance.as_ref(),
+                        compiled,
+                    )
+                })
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            result.nets.insert(
+                qualified_net,
+                ReassemblyNet {
+                    scalar_drivers,
+                    scalar_consumers,
+                    flat_drivers,
+                    flat_consumers,
+                },
+            );
+        }
         for (logical, bits) in lowered
             .reassembly
             .ports
@@ -1157,30 +1983,33 @@ fn expand_reassembly(
                             &port.port_id,
                         )
                     });
+                    let scalar_net = bit.scalar_net.as_ref().map(|net| {
+                        QualifiedNetRef::new(&net.circuit_id, path.iter().cloned(), &net.net_id)
+                    });
                     let mut flat_endpoints = scalar_port
                         .as_ref()
-                        .map(|port| flat_endpoints_for(port, compiled))
+                        .map(|port| {
+                            flat_endpoints_with_boundary_alias(
+                                port,
+                                circuit,
+                                parent_instance.as_ref(),
+                                compiled,
+                            )
+                        })
                         .unwrap_or_default();
                     if flat_endpoints.is_empty()
-                        && let (Some(port), Some((parent_circuit, parent_path, instance_id))) =
-                            (&scalar_port, &parent_instance)
-                        && let Some(boundary) = circuit
-                            .components
-                            .iter()
-                            .find(|component| component.id == port.component_id)
-                        && matches!(boundary.type_id.as_str(), MODULE_INPUT | MODULE_OUTPUT)
-                        && let Some(interface_port_id) = boundary.properties.port_id()
+                        && let Some(net_ref) = &scalar_net
+                        && let Some(net) = result.nets.get(net_ref)
                     {
-                        let instance_port = QualifiedPortRef::new(
-                            parent_circuit,
-                            parent_path.iter().cloned(),
-                            instance_id,
-                            interface_port_id,
-                        );
-                        flat_endpoints = flat_endpoints_for(&instance_port, compiled);
+                        flat_endpoints = if net.flat_consumers.is_empty() {
+                            net.flat_drivers.clone()
+                        } else {
+                            net.flat_consumers.clone()
+                        };
                     }
                     ScalarBitEndpoint {
                         scalar_port,
+                        scalar_net,
                         flat_endpoints,
                     }
                 })
@@ -1202,6 +2031,47 @@ fn expand_reassembly(
         }
     }
     result
+}
+
+fn qualify_ports(ports: &[QualifiedPortRef], path: &[String]) -> Vec<QualifiedPortRef> {
+    ports
+        .iter()
+        .map(|port| {
+            QualifiedPortRef::new(
+                &port.circuit_id,
+                path.iter().cloned(),
+                &port.component_id,
+                &port.port_id,
+            )
+        })
+        .collect()
+}
+
+fn flat_endpoints_with_boundary_alias(
+    port: &QualifiedPortRef,
+    circuit: &ProjectCircuit,
+    parent_instance: Option<&(String, Vec<String>, String)>,
+    compiled: &CompiledProject,
+) -> Vec<FlatPortRef> {
+    let mut endpoints = flat_endpoints_for(port, compiled);
+    if endpoints.is_empty()
+        && let Some((parent_circuit, parent_path, instance_id)) = parent_instance
+        && let Some(boundary) = circuit
+            .components
+            .iter()
+            .find(|component| component.id == port.component_id)
+        && matches!(boundary.type_id.as_str(), MODULE_INPUT | MODULE_OUTPUT)
+        && let Some(interface_port_id) = boundary.properties.port_id()
+    {
+        let instance_port = QualifiedPortRef::new(
+            parent_circuit,
+            parent_path.iter().cloned(),
+            instance_id,
+            interface_port_id,
+        );
+        endpoints = flat_endpoints_for(&instance_port, compiled);
+    }
+    endpoints
 }
 
 fn flat_endpoints_for(port: &QualifiedPortRef, compiled: &CompiledProject) -> Vec<FlatPortRef> {
@@ -1263,6 +2133,85 @@ fn compose_wire_provenance(
         result.insert(flat_connection.clone(), wires.into_iter().collect());
     }
     result
+}
+
+fn compose_reverse_wire_provenance(
+    lowered: &LoweredProjectV3,
+    compiled: &CompiledProject,
+    active_circuit_id: &str,
+) -> BTreeMap<QualifiedWireBitRef, Vec<String>> {
+    let mut flat_connections_by_scalar = BTreeMap::<QualifiedConnectionRef, Vec<String>>::new();
+    for (flat_connection_id, scalar_connections) in &compiled.provenance.connections {
+        for scalar_connection in scalar_connections {
+            flat_connections_by_scalar
+                .entry(scalar_connection.clone())
+                .or_default()
+                .push(flat_connection_id.clone());
+        }
+    }
+    for flat_connections in flat_connections_by_scalar.values_mut() {
+        flat_connections.sort();
+        flat_connections.dedup();
+    }
+
+    let mut result = BTreeMap::new();
+    for (circuit_id, path) in active_circuit_occurrences(&lowered.project, active_circuit_id) {
+        for (wire_bit, scalar_connections) in lowered
+            .provenance
+            .wire_bits
+            .iter()
+            .filter(|(wire_bit, _)| wire_bit.circuit_id == circuit_id)
+        {
+            let qualified_wire_bit = QualifiedWireBitRef::new(
+                &wire_bit.circuit_id,
+                path.iter().cloned(),
+                &wire_bit.wire_id,
+                wire_bit.bit_index,
+            );
+            let mut flat_connections = BTreeSet::new();
+            for scalar_connection in scalar_connections {
+                let qualified_scalar = QualifiedConnectionRef::new(
+                    &scalar_connection.circuit_id,
+                    path.iter().cloned(),
+                    &scalar_connection.connection_id,
+                );
+                if let Some(ids) = flat_connections_by_scalar.get(&qualified_scalar) {
+                    flat_connections.extend(ids.iter().cloned());
+                }
+            }
+            result.insert(qualified_wire_bit, flat_connections.into_iter().collect());
+        }
+    }
+    result
+}
+
+fn active_circuit_occurrences(
+    project: &ProjectDocument,
+    active_circuit_id: &str,
+) -> Vec<(String, Vec<String>)> {
+    let circuits = project
+        .circuits
+        .iter()
+        .map(|circuit| (circuit.id.as_str(), circuit))
+        .collect::<BTreeMap<_, _>>();
+    let mut occurrences = Vec::new();
+    let mut stack = vec![(active_circuit_id.to_owned(), Vec::<String>::new())];
+    while let Some((circuit_id, path)) = stack.pop() {
+        let Some(circuit) = circuits.get(circuit_id.as_str()) else {
+            continue;
+        };
+        occurrences.push((circuit_id.clone(), path.clone()));
+        for component in circuit.components.iter().rev() {
+            if component.type_id == MODULE_INSTANCE
+                && let Some(module_id) = component.properties.module_id()
+            {
+                let mut child_path = path.clone();
+                child_path.push(component.id.clone());
+                stack.push((module_id.to_owned(), child_path));
+            }
+        }
+    }
+    occurrences
 }
 
 fn remap_diagnostics(

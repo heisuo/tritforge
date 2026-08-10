@@ -17,8 +17,8 @@ pub const MAX_EXPANDED_CONNECTIONS: usize = 50_000;
 pub const MAX_PROJECTION_ENDPOINTS: usize = 100_000;
 const MAX_EXPANDED_INSTANCES: usize = 10_000;
 const MAX_ANALYSIS_NODES: usize = 50_000;
-const MAX_ANALYSIS_EDGES: usize = 100_000;
-const MAX_PROVENANCE_REFERENCES: usize = 2_000_000;
+pub(crate) const MAX_ANALYSIS_EDGES: usize = 100_000;
+pub(crate) const MAX_PROVENANCE_REFERENCES: usize = 2_000_000;
 
 const MODULE_INPUT: &str = "project.module_input";
 const MODULE_OUTPUT: &str = "project.module_output";
