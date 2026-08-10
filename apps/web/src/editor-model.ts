@@ -53,7 +53,8 @@ export interface ProjectSimulationSnapshot {
 
 export interface CatalogPort {
   id: string;
-  direction: "input" | "output";
+  direction: "input" | "output" | "inout";
+  width: number;
 }
 
 export interface TruthTableRow {
@@ -211,6 +212,7 @@ export function toCircuitDefinition(
 export type ConnectionRejection =
   | "missing_endpoint"
   | "invalid_direction"
+  | "width_mismatch"
   | "duplicate";
 
 export interface ConnectionCandidate {
@@ -255,10 +257,13 @@ export function validateConnection(
     return { valid: false, reason: "missing_endpoint" };
   }
   if (
-    sourcePort.direction !== "output" ||
-    targetPort.direction !== "input"
+    sourcePort.direction === "input" ||
+    targetPort.direction === "output"
   ) {
     return { valid: false, reason: "invalid_direction" };
+  }
+  if (sourcePort.width !== targetPort.width) {
+    return { valid: false, reason: "width_mismatch" };
   }
 
   const duplicate = document.edges.some(

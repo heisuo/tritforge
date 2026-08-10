@@ -1,6 +1,6 @@
 import type { EditorComponent } from "../editor/circuit-document";
 import {
-  parseProjectDocument,
+  parseProjectDocumentV2,
   type ProjectCircuit,
   type ProjectDocumentV2,
 } from "./project-document";
@@ -97,7 +97,7 @@ export function parseProjectDocumentV3(json: string): ProjectDocumentV3 {
     throw new Error("document.format must be 'logsim-ternary'");
   }
   if (candidate.version === 1 || candidate.version === 2) {
-    return migrateV2ToV3(parseProjectDocument(json));
+    return migrateV2ToV3(parseProjectDocumentV2(json));
   }
   if (candidate.version !== 3) {
     throw new Error(

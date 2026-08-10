@@ -66,7 +66,10 @@ describe("project catalog", () => {
       display_name: "BUF",
       category: "gate",
       kind: "gate",
-      ports: [{ id: "a", direction: "input" }, { id: "y", direction: "output" }],
+      ports: [
+        { id: "a", direction: "input", width: 1 },
+        { id: "y", direction: "output", width: 1 },
+      ],
       truth_table: [],
     };
 

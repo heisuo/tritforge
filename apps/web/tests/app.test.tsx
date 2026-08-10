@@ -80,13 +80,19 @@ const runtimeMock = vi.hoisted(() => {
 vi.mock("../src/wasm-client", () => ({
   createWasmRuntime: vi.fn(async () => ({
     apiVersion: 3,
-    resolveProjectPorts: (typeId: string, properties: Record<string, unknown>) => [
-      {
-        id: typeId === "project.module_output" ? "in" : "out",
-        direction: typeId === "project.module_output" ? "input" : "output",
-        width: typeof properties.width === "number" ? properties.width : 1,
-      },
-    ],
+    resolveProjectPorts: (typeId: string, properties: Record<string, unknown>) => {
+      const width = typeof properties.width === "number" ? properties.width : 1;
+      if (typeId === "gate.neg") {
+        return [
+          { id: "a", direction: "input", width: 1 },
+          { id: "y", direction: "output", width: 1 },
+        ];
+      }
+      if (typeId === "sink.probe" || typeId === "project.module_output") {
+        return [{ id: "in", direction: "input", width }];
+      }
+      return [{ id: "out", direction: "output", width }];
+    },
     resolveProjectModulePorts: runtimeMock.resolveProjectModulePorts,
     resolveProjectModuleInterfaces: runtimeMock.resolveProjectModuleInterfaces,
     catalog: [
@@ -95,7 +101,7 @@ vi.mock("../src/wasm-client", () => ({
         display_name: "Trit Input",
         category: "source",
         kind: "source",
-        ports: [{ id: "out", direction: "output" }],
+        ports: [{ id: "out", direction: "output", width: 1 }],
         truth_table: [],
       },
       {
@@ -104,8 +110,8 @@ vi.mock("../src/wasm-client", () => ({
         category: "gate",
         kind: "gate",
         ports: [
-          { id: "a", direction: "input" },
-          { id: "y", direction: "output" },
+          { id: "a", direction: "input", width: 1 },
+          { id: "y", direction: "output", width: 1 },
         ],
         truth_table: [],
       },
@@ -114,7 +120,7 @@ vi.mock("../src/wasm-client", () => ({
         display_name: "Probe",
         category: "sink",
         kind: "sink",
-        ports: [{ id: "in", direction: "input" }],
+        ports: [{ id: "in", direction: "input", width: 1 }],
         truth_table: [],
       },
     ],

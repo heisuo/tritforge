@@ -4,6 +4,11 @@ import {
   type EditorComponent,
   type EditorConnection,
 } from "../editor/circuit-document";
+import {
+  parseProjectDocumentV3,
+  serializeProjectDocumentV3,
+  type ProjectDocumentV3,
+} from "./project-v3";
 
 export interface ProjectDocumentV2 {
   format: "logsim-ternary";
@@ -72,7 +77,7 @@ export function migrateV1ToV2(document: CircuitDocument): ProjectDocumentV2 {
   };
 }
 
-export function parseProjectDocument(json: string): ProjectDocumentV2 {
+export function parseProjectDocumentV2(json: string): ProjectDocumentV2 {
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);
@@ -97,8 +102,18 @@ export function parseProjectDocument(json: string): ProjectDocumentV2 {
   return projectV2At(candidate);
 }
 
-export function serializeProjectDocument(document: ProjectDocumentV2): string {
+export function serializeProjectDocumentV2(document: ProjectDocumentV2): string {
   return JSON.stringify(document, null, 2);
+}
+
+/** Imports every supported legacy format into the current v3 editor model. */
+export function parseProjectDocument(json: string): ProjectDocumentV3 {
+  return parseProjectDocumentV3(json);
+}
+
+/** Project exports are intentionally v3-only; there is no lossy v3 downgrade. */
+export function serializeProjectDocument(document: ProjectDocumentV3): string {
+  return serializeProjectDocumentV3(document);
 }
 
 function projectV2At(document: Record<string, unknown>): ProjectDocumentV2 {

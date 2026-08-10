@@ -15,7 +15,6 @@ export interface ProjectCatalogComponent extends CatalogComponent {
 
 export interface ProjectCatalogPort extends CatalogPort {
   label?: string;
-  width?: number;
 }
 
 export function buildProjectCatalog(

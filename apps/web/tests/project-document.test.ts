@@ -7,7 +7,9 @@ import {
 import {
   migrateV1ToV2,
   parseProjectDocument,
+  parseProjectDocumentV2,
   serializeProjectDocument,
+  serializeProjectDocumentV2,
   type ProjectDocumentV2,
 } from "../src/project/project-document";
 
@@ -50,7 +52,7 @@ describe("project document v2", () => {
       viewport: { x: 12, y: -8, zoom: 1.25 },
     };
 
-    const migrated = parseProjectDocument(serializeCircuitDocument(v1));
+    const migrated = parseProjectDocumentV2(serializeCircuitDocument(v1));
 
     expect(migrated).toMatchObject({
       format: "logsim-ternary",
@@ -84,9 +86,9 @@ describe("project document v2", () => {
       components: [component(" ", "gate.buf", { label: " " })],
     };
 
-    const migrated = parseProjectDocument(serializeCircuitDocument(v1));
+    const migrated = parseProjectDocumentV2(serializeCircuitDocument(v1));
 
-    expect(parseProjectDocument(serializeProjectDocument(migrated))).toEqual(
+    expect(parseProjectDocumentV2(serializeProjectDocumentV2(migrated))).toEqual(
       migrated,
     );
   });
@@ -121,7 +123,7 @@ describe("project document v2", () => {
       ],
     };
 
-    expect(parseProjectDocument(serializeProjectDocument(project))).toEqual(project);
+    expect(parseProjectDocumentV2(serializeProjectDocumentV2(project))).toEqual(project);
   });
 
   it.each([
@@ -137,7 +139,7 @@ describe("project document v2", () => {
     const project = emptyProject();
     project.circuits[0].components = [component("bad", typeId, properties)];
 
-    expect(() => parseProjectDocument(JSON.stringify(project))).toThrow(message);
+    expect(() => parseProjectDocumentV2(JSON.stringify(project))).toThrow(message);
   });
 
   it("rejects multiple main circuits and duplicate circuit IDs", () => {
@@ -147,23 +149,23 @@ describe("project document v2", () => {
       id: "other-main",
       name: "Other Main",
     });
-    expect(() => parseProjectDocument(JSON.stringify(twoMains))).toThrow(/main/i);
+    expect(() => parseProjectDocumentV2(JSON.stringify(twoMains))).toThrow(/main/i);
 
     const duplicate = emptyProject();
     duplicate.circuits.push({
       ...duplicate.circuits[0],
       kind: "module",
     });
-    expect(() => parseProjectDocument(JSON.stringify(duplicate))).toThrow(/duplicate/i);
+    expect(() => parseProjectDocumentV2(JSON.stringify(duplicate))).toThrow(/duplicate/i);
   });
 
   it("rejects invalid circuit viewport zoom and unknown top-level keys", () => {
     const invalidZoom = emptyProject();
     invalidZoom.circuits[0].viewport = { x: 0, y: 0, zoom: 0 };
-    expect(() => parseProjectDocument(JSON.stringify(invalidZoom))).toThrow(/zoom/i);
+    expect(() => parseProjectDocumentV2(JSON.stringify(invalidZoom))).toThrow(/zoom/i);
 
     expect(() =>
-      parseProjectDocument(
+      parseProjectDocumentV2(
         JSON.stringify({ ...emptyProject(), unexpected: true }),
       ),
     ).toThrow(/unexpected/i);
@@ -175,7 +177,7 @@ describe("project document v2", () => {
       component("same"),
       component("same"),
     ];
-    expect(() => parseProjectDocument(JSON.stringify(duplicateComponents))).toThrow(
+    expect(() => parseProjectDocumentV2(JSON.stringify(duplicateComponents))).toThrow(
       /duplicate component/i,
     );
 
@@ -197,8 +199,27 @@ describe("project document v2", () => {
         targetPortId: "in",
       },
     ];
-    expect(() => parseProjectDocument(JSON.stringify(duplicateConnections))).toThrow(
+    expect(() => parseProjectDocumentV2(JSON.stringify(duplicateConnections))).toThrow(
       /duplicate connection/i,
     );
+  });
+});
+
+describe("default project document compatibility", () => {
+  it("imports v1 and v2 through stable v3-only export", () => {
+    const v1 = createEmptyCircuitDocument();
+    const v2 = emptyProject();
+
+    for (const legacy of [v1, v2]) {
+      const parsed = parseProjectDocument(JSON.stringify(legacy));
+      const serialized = serializeProjectDocument(parsed);
+      const encoded = JSON.parse(serialized) as Record<string, unknown>;
+
+      expect(parsed.version).toBe(3);
+      expect(encoded.version).toBe(3);
+      expect(serialized).toContain('"wires"');
+      expect(serialized).not.toContain('"connections"');
+      expect(parseProjectDocument(serialized)).toEqual(parsed);
+    }
   });
 });

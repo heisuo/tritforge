@@ -117,11 +117,32 @@ function initializedWasmModule(): Promise<WasmModule> {
 
 export async function createWasmRuntime(): Promise<WasmRuntime> {
   const wasm = await initializedWasmModule();
+  const resolveProjectPorts = wasm.resolveProjectPorts as ProjectPortResolver;
+  const rawCatalog = wasm.componentCatalog() as Array<
+    Omit<CatalogComponent, "ports"> & {
+      ports: Array<Omit<CatalogComponent["ports"][number], "width">>;
+    }
+  >;
+  const catalog: CatalogComponent[] = rawCatalog.map((descriptor) => {
+    const resolved = resolveProjectPorts(descriptor.type_id, {});
+    return {
+      ...descriptor,
+      ports: descriptor.ports.map((port) => {
+        const shape = resolved.find((candidate) => candidate.id === port.id);
+        if (!shape) {
+          throw new Error(
+            `Rust catalog port '${descriptor.type_id}.${port.id}' was not resolved`,
+          );
+        }
+        return { ...port, direction: shape.direction, width: shape.width };
+      }),
+    };
+  });
 
   return {
     apiVersion: wasm.apiVersion(),
-    catalog: wasm.componentCatalog() as CatalogComponent[],
-    resolveProjectPorts: wasm.resolveProjectPorts as ProjectPortResolver,
+    catalog,
+    resolveProjectPorts,
     resolveProjectModulePorts:
       wasm.resolveProjectModulePorts as ProjectModulePortResolver,
     resolveProjectModuleInterfaces:

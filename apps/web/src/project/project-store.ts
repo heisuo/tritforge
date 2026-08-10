@@ -1,13 +1,17 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
-import type { KnownTrit } from "../editor-model";
+import type { EditorComponent } from "../editor/circuit-document";
 import type {
-  EditorComponent,
-  EditorConnection,
-} from "../editor/circuit-document";
-import type {
-  ProjectCircuit,
-  ProjectDocumentV2,
-} from "./project-document";
+  ProjectModuleInterfaceResolver,
+  ProjectPortResolver,
+  ResolvedProjectPort,
+} from "../wasm-client";
+import {
+  type ProjectCircuitV3,
+  type ProjectDocumentV3,
+  type ProjectWire,
+  type WireEndpoint,
+} from "./project-v3";
+import { assertKnownWord } from "./signal-shape";
 
 export interface ProjectPathEntry {
   circuitId: string;
@@ -16,41 +20,74 @@ export interface ProjectPathEntry {
 
 export interface ProjectSelection {
   componentIds: string[];
-  connectionIds: string[];
+  wireIds: string[];
+}
+
+export interface ProjectStorePortResolver {
+  resolvePorts: ProjectPortResolver;
+  resolveModuleInterfaces: ProjectModuleInterfaceResolver;
+}
+
+export interface ProjectStoreOptions {
+  portResolver?: ProjectStorePortResolver;
+  /** Called only after all edit validation succeeds and before the store commits. */
+  applyProject?: (project: ProjectDocumentV3) => void;
+}
+
+export type ProjectEditErrorCode =
+  | "DUPLICATE_COMPONENT"
+  | "DUPLICATE_WIRE"
+  | "INVALID_WORD"
+  | "PORT_RESOLVER_UNAVAILABLE"
+  | "UNKNOWN_COMPONENT"
+  | "UNKNOWN_PORT"
+  | "WIDTH_MISMATCH"
+  | string;
+
+export class ProjectEditError extends Error {
+  readonly code: ProjectEditErrorCode;
+
+  constructor(code: ProjectEditErrorCode, message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "ProjectEditError";
+    this.code = code;
+  }
 }
 
 export interface ProjectEditorState {
-  past: ProjectDocumentV2[];
-  project: ProjectDocumentV2;
-  future: ProjectDocumentV2[];
+  past: ProjectDocumentV3[];
+  project: ProjectDocumentV3;
+  future: ProjectDocumentV3[];
   activePath: ProjectPathEntry[];
   selectionByCircuit: Record<string, ProjectSelection>;
   structureRevision: number;
   valueRevision: number;
+  setPortResolver: (resolver: ProjectStorePortResolver) => void;
   setCircuit: (
     circuitId: string,
-    update: Pick<ProjectCircuit, "components" | "connections"> & {
-      viewport?: ProjectCircuit["viewport"];
+    update: Pick<ProjectCircuitV3, "components" | "wires"> & {
+      viewport?: ProjectCircuitV3["viewport"];
     },
   ) => void;
-  replaceProject: (project: ProjectDocumentV2) => void;
+  replaceProject: (project: ProjectDocumentV3) => void;
   openCircuit: (circuitId: string) => void;
   createModule: (name: string) => string;
   renameModule: (circuitId: string, name: string) => void;
   deleteModule: (circuitId: string) => void;
   addComponent: (circuitId: string, component: EditorComponent) => void;
-  addConnection: (circuitId: string, connection: EditorConnection) => void;
+  addWire: (circuitId: string, wire: ProjectWire) => void;
+  setComponentProperties: (
+    circuitId: string,
+    componentId: string,
+    properties: Record<string, unknown>,
+  ) => void;
   deleteModulePort: (circuitId: string, componentId: string) => void;
   renameModulePort: (
     circuitId: string,
     componentId: string,
     label: string,
   ) => void;
-  setSource: (
-    circuitId: string,
-    componentId: string,
-    value: KnownTrit,
-  ) => void;
+  setSource: (circuitId: string, componentId: string, value: string) => void;
   setViewport: (
     circuitId: string,
     viewport: { x: number; y: number; zoom: number },
@@ -58,7 +95,7 @@ export interface ProjectEditorState {
   setSelection: (
     circuitId: string,
     componentIds: string[],
-    connectionIds: string[],
+    wireIds: string[],
   ) => void;
   enterInstance: (parentCircuitId: string, instanceId: string) => void;
   navigateToDepth: (depth: number) => void;
@@ -67,14 +104,26 @@ export interface ProjectEditorState {
 }
 
 export function createProjectStore(
-  initialProject: ProjectDocumentV2,
+  initialProject: ProjectDocumentV3,
+  options: ProjectStoreOptions = {},
 ): StoreApi<ProjectEditorState> {
+  let portResolver = options.portResolver;
+
   return createStore<ProjectEditorState>((set, get) => {
-    const commit = (nextProject: ProjectDocumentV2): void => {
-      const current = get().project;
-      if (documentsEqual(current, nextProject)) {
-        return;
+    const requireResolver = (): ProjectStorePortResolver => {
+      if (!portResolver) {
+        throw new ProjectEditError(
+          "PORT_RESOLVER_UNAVAILABLE",
+          "Rust/WASM port resolver is not installed",
+        );
       }
+      return portResolver;
+    };
+
+    const commit = (nextProject: ProjectDocumentV3): void => {
+      const current = get().project;
+      if (documentsEqual(current, nextProject)) return;
+      options.applyProject?.(cloneProject(nextProject));
       const revisions = changedRevisions(current, nextProject, get());
       set((state) => ({
         past: [...state.past, cloneProject(current)],
@@ -84,18 +133,68 @@ export function createProjectStore(
       }));
     };
 
+    const validateProjectSemantics = (project: ProjectDocumentV3): void => {
+      const resolver = requireResolver();
+      try {
+        const moduleInterfaces = resolver.resolveModuleInterfaces(project);
+        const portIndex = new Map<string, Map<string, ResolvedProjectPort>>();
+        for (const circuit of project.circuits) {
+          for (const component of circuit.components) {
+            let ports: ResolvedProjectPort[];
+            if (component.typeId === "project.module_instance") {
+              const moduleId = component.properties.moduleId;
+              if (
+                typeof moduleId !== "string" ||
+                !moduleInterfaces[moduleId]
+              ) {
+                throw new ProjectEditError(
+                  "UNKNOWN_MODULE",
+                  `Module instance '${component.id}' references an unknown module`,
+                );
+              }
+              ports = moduleInterfaces[moduleId].map(
+                ({ id, direction, width }) => ({ id, direction, width }),
+              );
+            } else {
+              ports = resolver.resolvePorts(
+                component.typeId,
+                component.properties,
+              );
+            }
+            portIndex.set(
+              componentPortIndexKey(circuit.id, component.id),
+              new Map(ports.map((port) => [port.id, port])),
+            );
+          }
+          for (const wire of circuit.wires) {
+            const left = indexedPort(portIndex, circuit.id, wire.endpointA);
+            const right = indexedPort(portIndex, circuit.id, wire.endpointB);
+            if (left.width !== right.width) {
+              throw new ProjectEditError(
+                "WIDTH_MISMATCH",
+                `Wire '${wire.id}' connects width ${left.width} to width ${right.width}`,
+              );
+            }
+          }
+        }
+      } catch (error) {
+        throw normalizeResolverError(error);
+      }
+    };
+
     const updateCircuit = (
       circuitId: string,
-      update: (circuit: ProjectCircuit) => ProjectCircuit,
+      update: (circuit: ProjectCircuitV3) => ProjectCircuitV3,
+      validateSemantics = false,
     ): void => {
       const project = get().project;
       const index = project.circuits.findIndex((circuit) => circuit.id === circuitId);
-      if (index < 0) {
-        throw new Error(`Unknown circuit: ${circuitId}`);
-      }
+      if (index < 0) throw new Error(`Unknown circuit: ${circuitId}`);
       const circuits = [...project.circuits];
       circuits[index] = update(circuits[index]);
-      commit({ ...project, circuits });
+      const next = { ...project, circuits };
+      if (validateSemantics) validateProjectSemantics(next);
+      commit(next);
     };
 
     return {
@@ -106,24 +205,29 @@ export function createProjectStore(
       selectionByCircuit: {},
       structureRevision: 0,
       valueRevision: 0,
+      setPortResolver: (resolver) => {
+        portResolver = resolver;
+      },
       setCircuit: (circuitId, update) => {
-        updateCircuit(circuitId, (circuit) => ({
-          ...circuit,
-          components: update.components.map(cloneComponent),
-          connections: update.connections.map((connection) => ({ ...connection })),
-          ...(update.viewport
-            ? { viewport: { ...update.viewport } }
-            : circuit.viewport
-              ? { viewport: { ...circuit.viewport } }
-              : {}),
-        }));
+        updateCircuit(
+          circuitId,
+          (circuit) => ({
+            ...circuit,
+            components: update.components.map(cloneComponent),
+            wires: update.wires.map(normalizeWire),
+            ...(update.viewport
+              ? { viewport: { ...update.viewport } }
+              : circuit.viewport
+                ? { viewport: { ...circuit.viewport } }
+                : {}),
+          }),
+          true,
+        );
       },
       replaceProject: (project) => {
+        if (portResolver) validateProjectSemantics(project);
         commit(project);
-        set({
-          activePath: initialPath(project),
-          selectionByCircuit: {},
-        });
+        set({ activePath: initialPath(project), selectionByCircuit: {} });
       },
       openCircuit: (circuitId) => {
         const project = get().project;
@@ -132,17 +236,12 @@ export function createProjectStore(
           activePath:
             circuit.kind === "main"
               ? [{ circuitId }]
-              : [
-                  { circuitId: project.rootCircuitId },
-                  { circuitId },
-                ],
+              : [{ circuitId: project.rootCircuitId }, { circuitId }],
         });
       },
       createModule: (name) => {
         const trimmedName = name.trim();
-        if (!trimmedName) {
-          throw new Error("Module name must not be empty");
-        }
+        if (!trimmedName) throw new Error("Module name must not be empty");
         const project = get().project;
         const id = allocateModuleId(trimmedName, project);
         commit({
@@ -154,7 +253,7 @@ export function createProjectStore(
               name: trimmedName,
               kind: "module",
               components: [],
-              connections: [],
+              wires: [],
             },
           ],
         });
@@ -162,17 +261,13 @@ export function createProjectStore(
       },
       renameModule: (circuitId, name) => {
         const trimmedName = name.trim();
-        if (!trimmedName) {
-          throw new Error("Module name must not be empty");
-        }
+        if (!trimmedName) throw new Error("Module name must not be empty");
         updateCircuit(circuitId, (circuit) => ({ ...circuit, name: trimmedName }));
       },
       deleteModule: (circuitId) => {
         const project = get().project;
         const circuit = requireCircuit(project, circuitId);
-        if (circuit.kind !== "module") {
-          throw new Error("The main circuit cannot be deleted");
-        }
+        if (circuit.kind !== "module") throw new Error("The main circuit cannot be deleted");
         const references = project.circuits.flatMap((owner) =>
           owner.components
             .filter(
@@ -198,35 +293,85 @@ export function createProjectStore(
         if (component.typeId === "project.module_instance") {
           validateModuleInstance(get().project, circuitId, component);
         }
-        updateCircuit(circuitId, (circuit) => {
-          if (circuit.components.some((item) => item.id === component.id)) {
-            throw new Error(`Duplicate component ID: ${component.id}`);
-          }
-          return {
-            ...circuit,
-            components: [...circuit.components, cloneComponent(component)],
-          };
-        });
+        updateCircuit(
+          circuitId,
+          (circuit) => {
+            if (circuit.components.some((item) => item.id === component.id)) {
+              throw new ProjectEditError(
+                "DUPLICATE_COMPONENT",
+                `Duplicate component ID: ${component.id}`,
+              );
+            }
+            return {
+              ...circuit,
+              components: [...circuit.components, cloneComponent(component)],
+            };
+          },
+          Boolean(portResolver),
+        );
       },
-      addConnection: (circuitId, connection) => {
-        updateCircuit(circuitId, (circuit) => {
-          if (circuit.connections.some((item) => item.id === connection.id)) {
-            throw new Error(`Duplicate connection ID: ${connection.id}`);
-          }
-          const componentIds = new Set(
-            circuit.components.map((component) => component.id),
+      addWire: (circuitId, wire) => {
+        const project = get().project;
+        const circuit = requireCircuit(project, circuitId);
+        if (circuit.wires.some((item) => item.id === wire.id)) {
+          throw new ProjectEditError("DUPLICATE_WIRE", `Duplicate wire ID: ${wire.id}`);
+        }
+        const resolver = requireResolver();
+        let interfaces: ReturnType<ProjectModuleInterfaceResolver>;
+        try {
+          interfaces = resolver.resolveModuleInterfaces(project);
+        } catch (error) {
+          throw normalizeResolverError(error);
+        }
+        const endpointA = resolvedEndpoint(
+          circuit,
+          wire.endpointA,
+          resolver,
+          interfaces,
+        );
+        const endpointB = resolvedEndpoint(
+          circuit,
+          wire.endpointB,
+          resolver,
+          interfaces,
+        );
+        if (endpointA.port.width !== endpointB.port.width) {
+          throw new ProjectEditError(
+            "WIDTH_MISMATCH",
+            `Wire '${wire.id}' connects width ${endpointA.port.width} to width ${endpointB.port.width}`,
           );
-          if (
-            !componentIds.has(connection.sourceComponentId) ||
-            !componentIds.has(connection.targetComponentId)
-          ) {
-            throw new Error("Connection references a missing component");
-          }
-          return {
-            ...circuit,
-            connections: [...circuit.connections, { ...connection }],
-          };
-        });
+        }
+        const normalized = normalizeWire(wire);
+        updateCircuit(
+          circuitId,
+          (current) => ({
+            ...current,
+            wires: [...current.wires, normalized],
+          }),
+          true,
+        );
+      },
+      setComponentProperties: (circuitId, componentId, properties) => {
+        updateCircuit(
+          circuitId,
+          (circuit) => {
+            if (!circuit.components.some((component) => component.id === componentId)) {
+              throw new ProjectEditError(
+                "UNKNOWN_COMPONENT",
+                `Unknown component: ${componentId}`,
+              );
+            }
+            return {
+              ...circuit,
+              components: circuit.components.map((component) =>
+                component.id === componentId
+                  ? { ...component, properties: structuredClone(properties) }
+                  : component,
+              ),
+            };
+          },
+          true,
+        );
       },
       deleteModulePort: (circuitId, componentId) => {
         const project = get().project;
@@ -238,13 +383,9 @@ export function createProjectStore(
           throw new Error(`Unknown module port component: ${componentId}`);
         }
         const portId = String(boundary.properties.portId ?? "");
-        const usageLocations = circuit.connections
-          .filter(
-            (connection) =>
-              connection.sourceComponentId === componentId ||
-              connection.targetComponentId === componentId,
-          )
-          .map((connection) => `${circuit.id}/${connection.id}`);
+        const usageLocations = circuit.wires
+          .filter((wire) => wireUsesComponent(wire, componentId))
+          .map((wire) => `${circuit.id}/${wire.id}`);
         for (const owner of project.circuits) {
           const instanceIds = new Set(
             owner.components
@@ -256,15 +397,9 @@ export function createProjectStore(
               .map((component) => component.id),
           );
           usageLocations.push(
-            ...owner.connections
-              .filter(
-                (connection) =>
-                  (instanceIds.has(connection.sourceComponentId) &&
-                    connection.sourcePortId === portId) ||
-                  (instanceIds.has(connection.targetComponentId) &&
-                    connection.targetPortId === portId),
-              )
-              .map((connection) => `${owner.id}/${connection.id}`),
+            ...owner.wires
+              .filter((wire) => wireUsesInstancePort(wire, instanceIds, portId))
+              .map((wire) => `${owner.id}/${wire.id}`),
           );
         }
         if (usageLocations.length > 0) {
@@ -281,56 +416,67 @@ export function createProjectStore(
       },
       renameModulePort: (circuitId, componentId, label) => {
         const nextLabel = label.trim();
-        if (!nextLabel) {
-          throw new Error("Module port label must not be empty");
-        }
+        if (!nextLabel) throw new Error("Module port label must not be empty");
         const target = requireCircuit(get().project, circuitId).components.find(
           (component) => component.id === componentId && isBoundary(component),
         );
-        if (!target) {
-          throw new Error(`Unknown module port component: ${componentId}`);
-        }
+        if (!target) throw new Error(`Unknown module port component: ${componentId}`);
         updateCircuit(circuitId, (circuit) => ({
           ...circuit,
-          components: circuit.components.map((component) => {
-            if (component.id !== componentId || !isBoundary(component)) {
-              return component;
-            }
-            return {
-              ...component,
-              properties: { ...component.properties, label: nextLabel },
-            };
-          }),
+          components: circuit.components.map((component) =>
+            component.id === componentId && isBoundary(component)
+              ? {
+                  ...component,
+                  properties: { ...component.properties, label: nextLabel },
+                }
+              : component,
+          ),
         }));
       },
       setSource: (circuitId, componentId, value) => {
-        updateCircuit(circuitId, (circuit) => {
-          let found = false;
-          const components = circuit.components.map((component) => {
-            if (component.id !== componentId) {
-              return component;
-            }
-            const valueKey =
-              component.typeId === "project.module_input"
-                ? "previewValue"
-                : component.typeId === "source.trit_input" ||
-                    component.typeId === "source.constant"
-                  ? "value"
-                  : null;
-            if (!valueKey) {
-              throw new Error(`Component '${componentId}' is not a source`);
-            }
-            found = true;
-            return {
-              ...component,
-              properties: { ...component.properties, [valueKey]: value },
-            };
+        const project = get().project;
+        const circuit = requireCircuit(project, circuitId);
+        const component = circuit.components.find((item) => item.id === componentId);
+        if (!component) throw new Error(`Unknown source component: ${componentId}`);
+        const valueKey =
+          component.typeId === "project.module_input"
+            ? "previewValue"
+            : component.typeId === "source.trit_input" ||
+                component.typeId === "source.constant"
+              ? "value"
+              : null;
+        if (!valueKey) throw new Error(`Component '${componentId}' is not a source`);
+        let ports: ResolvedProjectPort[];
+        try {
+          ports = requireResolver().resolvePorts(component.typeId, component.properties);
+        } catch (error) {
+          throw normalizeResolverError(error);
+        }
+        const output = ports.find((port) => port.direction !== "input");
+        if (!output) {
+          throw new ProjectEditError(
+            "UNKNOWN_PORT",
+            `Source component '${componentId}' has no resolved output port`,
+          );
+        }
+        try {
+          assertKnownWord(value, output.width);
+        } catch (error) {
+          throw new ProjectEditError("INVALID_WORD", String((error as Error).message), {
+            cause: error,
           });
-          if (!found) {
-            throw new Error(`Unknown source component: ${componentId}`);
-          }
-          return { ...circuit, components };
-        });
+        }
+        updateCircuit(circuitId, (current) => ({
+          ...current,
+          components: current.components.map((item) =>
+            item.id === componentId
+              ? {
+                  ...item,
+                  properties: { ...item.properties, [valueKey]: value },
+                }
+              : item,
+          ),
+        }));
       },
       setViewport: (circuitId, viewport) => {
         if (
@@ -354,14 +500,14 @@ export function createProjectStore(
           },
         });
       },
-      setSelection: (circuitId, componentIds, connectionIds) => {
+      setSelection: (circuitId, componentIds, wireIds) => {
         requireCircuit(get().project, circuitId);
         set((state) => ({
           selectionByCircuit: {
             ...state.selectionByCircuit,
             [circuitId]: {
               componentIds: [...componentIds],
-              connectionIds: [...connectionIds],
+              wireIds: [...wireIds],
             },
           },
         }));
@@ -403,10 +549,9 @@ export function createProjectStore(
       undo: () => {
         const state = get();
         const previous = state.past.at(-1);
-        if (!previous) {
-          return;
-        }
+        if (!previous) return;
         const project = mergeCurrentViewports(cloneProject(previous), state.project);
+        options.applyProject?.(cloneProject(project));
         set({
           past: state.past.slice(0, -1),
           project,
@@ -418,10 +563,9 @@ export function createProjectStore(
       redo: () => {
         const state = get();
         const next = state.future[0];
-        if (!next) {
-          return;
-        }
+        if (!next) return;
         const project = mergeCurrentViewports(cloneProject(next), state.project);
+        options.applyProject?.(cloneProject(project));
         set({
           past: [...state.past, cloneProject(state.project)],
           project,
@@ -434,20 +578,135 @@ export function createProjectStore(
   });
 }
 
-function initialPath(project: ProjectDocumentV2): ProjectPathEntry[] {
+function normalizeResolverError(error: unknown): ProjectEditError {
+  if (error instanceof ProjectEditError) return error;
+  const code =
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string"
+      ? error.code
+      : "PORT_RESOLUTION_FAILED";
+  const message = error instanceof Error ? error.message : String(error);
+  return new ProjectEditError(code, message, { cause: error });
+}
+
+function componentPortIndexKey(circuitId: string, componentId: string): string {
+  return `${circuitId}\0${componentId}`;
+}
+
+function indexedPort(
+  index: ReadonlyMap<string, ReadonlyMap<string, ResolvedProjectPort>>,
+  circuitId: string,
+  endpoint: WireEndpoint,
+): ResolvedProjectPort {
+  const ports = index.get(componentPortIndexKey(circuitId, endpoint.componentId));
+  if (!ports) {
+    throw new ProjectEditError(
+      "UNKNOWN_COMPONENT",
+      `Wire endpoint references missing component '${endpoint.componentId}'`,
+    );
+  }
+  const port = ports.get(endpoint.portId);
+  if (!port) {
+    throw new ProjectEditError(
+      "UNKNOWN_PORT",
+      `Component '${endpoint.componentId}' has no resolved port '${endpoint.portId}'`,
+    );
+  }
+  return port;
+}
+
+function resolvedEndpoint(
+  circuit: ProjectCircuitV3,
+  endpoint: WireEndpoint,
+  resolver: ProjectStorePortResolver,
+  interfaces: ReturnType<ProjectModuleInterfaceResolver>,
+): { component: EditorComponent; port: ResolvedProjectPort } {
+  const component = circuit.components.find((item) => item.id === endpoint.componentId);
+  if (!component) {
+    throw new ProjectEditError(
+      "UNKNOWN_COMPONENT",
+      `Wire endpoint references missing component '${endpoint.componentId}'`,
+    );
+  }
+  let ports: ResolvedProjectPort[];
+  try {
+    if (component.typeId === "project.module_instance") {
+      const moduleId = component.properties.moduleId;
+      if (typeof moduleId !== "string" || !interfaces[moduleId]) {
+        throw new ProjectEditError(
+          "UNKNOWN_MODULE",
+          `Module instance '${component.id}' references an unknown module`,
+        );
+      }
+      ports = interfaces[moduleId].map(({ id, direction, width }) => ({
+        id,
+        direction,
+        width,
+      }));
+    } else {
+      ports = resolver.resolvePorts(component.typeId, component.properties);
+    }
+  } catch (error) {
+    throw normalizeResolverError(error);
+  }
+  const port = ports.find((item) => item.id === endpoint.portId);
+  if (!port) {
+    throw new ProjectEditError(
+      "UNKNOWN_PORT",
+      `Component '${endpoint.componentId}' has no resolved port '${endpoint.portId}'`,
+    );
+  }
+  return { component, port };
+}
+
+export function normalizeWire(wire: ProjectWire): ProjectWire {
+  const left = endpointSortKey(wire.endpointA);
+  const right = endpointSortKey(wire.endpointB);
+  return left <= right
+    ? cloneWire(wire)
+    : {
+        id: wire.id,
+        endpointA: { ...wire.endpointB },
+        endpointB: { ...wire.endpointA },
+      };
+}
+
+function endpointSortKey(endpoint: WireEndpoint): string {
+  return `${endpoint.componentId}\0${endpoint.portId}`;
+}
+
+function wireUsesComponent(wire: ProjectWire, componentId: string): boolean {
+  return (
+    wire.endpointA.componentId === componentId ||
+    wire.endpointB.componentId === componentId
+  );
+}
+
+function wireUsesInstancePort(
+  wire: ProjectWire,
+  instanceIds: ReadonlySet<string>,
+  portId: string,
+): boolean {
+  return [wire.endpointA, wire.endpointB].some(
+    (endpoint) =>
+      instanceIds.has(endpoint.componentId) && endpoint.portId === portId,
+  );
+}
+
+function initialPath(project: ProjectDocumentV3): ProjectPathEntry[] {
   return [{ circuitId: project.rootCircuitId }];
 }
 
 function sanitizePath(
   path: ProjectPathEntry[],
-  project: ProjectDocumentV2,
+  project: ProjectDocumentV3,
 ): ProjectPathEntry[] {
   const root = project.circuits.find(
     (circuit) => circuit.id === project.rootCircuitId && circuit.kind === "main",
   );
-  if (!root) {
-    return initialPath(project);
-  }
+  if (!root) return initialPath(project);
   const valid: ProjectPathEntry[] = [{ circuitId: root.id }];
   for (const entry of path.slice(1)) {
     const parent = requireCircuit(project, valid.at(-1)!.circuitId);
@@ -465,7 +724,7 @@ function sanitizePath(
   return valid;
 }
 
-function allocateModuleId(name: string, project: ProjectDocumentV2): string {
+function allocateModuleId(name: string, project: ProjectDocumentV3): string {
   const stem =
     name
       .toLowerCase()
@@ -474,20 +733,16 @@ function allocateModuleId(name: string, project: ProjectDocumentV2): string {
       .replace(/^-|-$/g, "") || "module";
   const used = new Set(project.circuits.map((circuit) => circuit.id));
   let suffix = 1;
-  while (used.has(`${stem}-${suffix}`)) {
-    suffix += 1;
-  }
+  while (used.has(`${stem}-${suffix}`)) suffix += 1;
   return `${stem}-${suffix}`;
 }
 
 function requireCircuit(
-  project: ProjectDocumentV2,
+  project: ProjectDocumentV3,
   circuitId: string,
-): ProjectCircuit {
+): ProjectCircuitV3 {
   const circuit = project.circuits.find((item) => item.id === circuitId);
-  if (!circuit) {
-    throw new Error(`Unknown circuit: ${circuitId}`);
-  }
+  if (!circuit) throw new Error(`Unknown circuit: ${circuitId}`);
   return circuit;
 }
 
@@ -499,7 +754,7 @@ function isBoundary(component: EditorComponent): boolean {
 }
 
 function validateModuleInstance(
-  project: ProjectDocumentV2,
+  project: ProjectDocumentV3,
   ownerCircuitId: string,
   component: EditorComponent,
 ): void {
@@ -509,9 +764,7 @@ function validateModuleInstance(
     throw new Error("Module instance must reference a module");
   }
   const target = project.circuits.find((circuit) => circuit.id === moduleId);
-  if (!target || target.kind !== "module") {
-    throw new Error(`Unknown module: ${moduleId}`);
-  }
+  if (!target || target.kind !== "module") throw new Error(`Unknown module: ${moduleId}`);
   if (owner.kind === "module" && reachesCircuit(project, moduleId, ownerCircuitId)) {
     throw new Error(
       `Module instance '${component.id}' would create a dependency cycle`,
@@ -520,7 +773,7 @@ function validateModuleInstance(
 }
 
 function reachesCircuit(
-  project: ProjectDocumentV2,
+  project: ProjectDocumentV3,
   start: string,
   target: string,
 ): boolean {
@@ -531,12 +784,8 @@ function reachesCircuit(
   const visited = new Set<string>();
   while (pending.length > 0) {
     const currentId = pending.pop()!;
-    if (currentId === target) {
-      return true;
-    }
-    if (visited.has(currentId)) {
-      continue;
-    }
+    if (currentId === target) return true;
+    if (visited.has(currentId)) continue;
     visited.add(currentId);
     const current = circuitsById.get(currentId);
     for (const instance of current?.components ?? []) {
@@ -552,9 +801,9 @@ function reachesCircuit(
 }
 
 function mergeCurrentViewports(
-  restored: ProjectDocumentV2,
-  current: ProjectDocumentV2,
-): ProjectDocumentV2 {
+  restored: ProjectDocumentV3,
+  current: ProjectDocumentV3,
+): ProjectDocumentV3 {
   const currentById = new Map(
     current.circuits.map((circuit) => [circuit.id, circuit]),
   );
@@ -562,9 +811,7 @@ function mergeCurrentViewports(
     ...restored,
     circuits: restored.circuits.map((circuit) => {
       const currentCircuit = currentById.get(circuit.id);
-      if (!currentCircuit) {
-        return circuit;
-      }
+      if (!currentCircuit) return circuit;
       const { viewport: _restoredViewport, ...withoutViewport } = circuit;
       const viewport = currentCircuit.viewport;
       return {
@@ -583,28 +830,36 @@ function cloneComponent(component: EditorComponent): EditorComponent {
   };
 }
 
-function cloneProject(project: ProjectDocumentV2): ProjectDocumentV2 {
+function cloneWire(wire: ProjectWire): ProjectWire {
+  return {
+    id: wire.id,
+    endpointA: { ...wire.endpointA },
+    endpointB: { ...wire.endpointB },
+  };
+}
+
+function cloneProject(project: ProjectDocumentV3): ProjectDocumentV3 {
   return {
     ...project,
     circuits: project.circuits.map((circuit) => ({
       ...circuit,
       components: circuit.components.map(cloneComponent),
-      connections: circuit.connections.map((connection) => ({ ...connection })),
+      wires: circuit.wires.map(cloneWire),
       ...(circuit.viewport ? { viewport: { ...circuit.viewport } } : {}),
     })),
   };
 }
 
 function documentsEqual(
-  left: ProjectDocumentV2,
-  right: ProjectDocumentV2,
+  left: ProjectDocumentV3,
+  right: ProjectDocumentV3,
 ): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function changedRevisions(
-  previous: ProjectDocumentV2,
-  next: ProjectDocumentV2,
+  previous: ProjectDocumentV3,
+  next: ProjectDocumentV3,
   state: Pick<ProjectEditorState, "structureRevision" | "valueRevision">,
 ): Pick<ProjectEditorState, "structureRevision" | "valueRevision"> {
   const structureChanged =
@@ -617,7 +872,7 @@ function changedRevisions(
   };
 }
 
-function structureFingerprint(project: ProjectDocumentV2): string {
+function structureFingerprint(project: ProjectDocumentV3): string {
   return JSON.stringify({
     ...project,
     circuits: project.circuits.map(({ viewport: _viewport, ...circuit }) => ({
@@ -634,7 +889,7 @@ function structureFingerprint(project: ProjectDocumentV2): string {
   });
 }
 
-function valueFingerprint(project: ProjectDocumentV2): string {
+function valueFingerprint(project: ProjectDocumentV3): string {
   return JSON.stringify(
     project.circuits.map((circuit) => [
       circuit.id,

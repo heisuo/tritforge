@@ -50,7 +50,16 @@ const wasmMock = vi.hoisted(() => {
 vi.mock("../src/wasm/pkg/sim_wasm", () => ({
   default: wasmMock.initialize,
   apiVersion: () => 3,
-  componentCatalog: () => [],
+  componentCatalog: () => [
+    {
+      type_id: "source.constant",
+      display_name: "Constant",
+      category: "source",
+      kind: "constant",
+      ports: [{ id: "out", direction: "output" }],
+      truth_table: [],
+    },
+  ],
   resolveProjectPorts: (_typeId: string, properties: unknown) => [
     { id: "out", direction: "output", width: (properties as { width?: number }).width ?? 1 },
   ],
@@ -101,6 +110,9 @@ describe("WASM runtime initialization", () => {
     expect(project.componentOutputWords.dff.q).toBe("1");
     expect(runtime.resolveProjectPorts("source.constant", { width: 3 })).toEqual([
       { id: "out", direction: "output", width: 3 },
+    ]);
+    expect(runtime.catalog[0].ports).toEqual([
+      { id: "out", direction: "output", width: 1 },
     ]);
     expect(runtime.resolveProjectModulePorts({ version: 3 }, "word")).toEqual([
       { id: "word-in", direction: "input", width: 3 },

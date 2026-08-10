@@ -14,7 +14,7 @@ const catalog: CatalogComponent[] = [
     display_name: "Trit Input",
     category: "source",
     kind: "TritInput",
-    ports: [{ id: "out", direction: "output" }],
+    ports: [{ id: "out", direction: "output", width: 1 }],
     truth_table: [],
   },
   {
@@ -23,8 +23,8 @@ const catalog: CatalogComponent[] = [
     category: "gate",
     kind: "Neg",
     ports: [
-      { id: "a", direction: "input" },
-      { id: "y", direction: "output" },
+      { id: "a", direction: "input", width: 1 },
+      { id: "y", direction: "output", width: 1 },
     ],
     truth_table: [],
   },
@@ -33,7 +33,7 @@ const catalog: CatalogComponent[] = [
     display_name: "Probe",
     category: "sink",
     kind: "Probe",
-    ports: [{ id: "in", direction: "input" }],
+    ports: [{ id: "in", direction: "input", width: 1 }],
     truth_table: [],
   },
 ];
@@ -116,6 +116,23 @@ describe("editor document model", () => {
         catalog,
       ),
     ).toEqual({ valid: false, reason: "invalid_direction" });
+  });
+
+  it("rejects catalog-resolved width mismatches", () => {
+    const mismatchedCatalog = structuredClone(catalog);
+    mismatchedCatalog[0].ports[0].width = 3;
+    expect(
+      validateConnection(
+        {
+          source: "input-1",
+          sourceHandle: "out",
+          target: "neg-1",
+          targetHandle: "a",
+        },
+        DEFAULT_DOCUMENT,
+        mismatchedCatalog,
+      ),
+    ).toEqual({ valid: false, reason: "width_mismatch" });
   });
 
   it("rejects an exact duplicate connection", () => {

@@ -87,8 +87,9 @@ import {
   parseProjectDocument,
   serializeProjectDocument,
   migrateV1ToV2,
-  type ProjectCircuit,
-  type ProjectDocumentV2,
+  migrateV2ToV3,
+  type ProjectCircuitV3,
+  type ProjectDocumentV3,
 } from "./project/project-document";
 import {
   buildProjectCatalog,
@@ -145,7 +146,7 @@ const BOUNDARY_CATALOG: ProjectCatalogComponent[] = [
     display_name: "Module Input",
     category: "project-boundary",
     kind: "source",
-    ports: [{ id: "out", direction: "output", label: "out" }],
+    ports: [{ id: "out", direction: "output", label: "out", width: 1 }],
     truth_table: [],
   },
   {
@@ -153,21 +154,29 @@ const BOUNDARY_CATALOG: ProjectCatalogComponent[] = [
     display_name: "Module Output",
     category: "project-boundary",
     kind: "sink",
-    ports: [{ id: "in", direction: "input", label: "in" }],
+    ports: [{ id: "in", direction: "input", label: "in", width: 1 }],
     truth_table: [],
   },
 ];
 
-function initialProject(): ProjectDocumentV2 {
-  return migrateV1ToV2(fromEditorDocument(createDefaultDocument()));
+function initialProject(): ProjectDocumentV3 {
+  return migrateV2ToV3(
+    migrateV1ToV2(fromEditorDocument(createDefaultDocument())),
+  );
 }
 
-function circuitDocument(circuit: ProjectCircuit): CircuitDocument {
+function circuitDocument(circuit: ProjectCircuitV3): CircuitDocument {
   return {
     format: "logsim-ternary",
     version: 1,
     components: circuit.components,
-    connections: circuit.connections,
+    connections: circuit.wires.map((wire) => ({
+      id: wire.id,
+      sourceComponentId: wire.endpointA.componentId,
+      sourcePortId: wire.endpointA.portId,
+      targetComponentId: wire.endpointB.componentId,
+      targetPortId: wire.endpointB.portId,
+    })),
     ...(circuit.viewport ? { viewport: circuit.viewport } : {}),
   };
 }
@@ -209,9 +218,9 @@ function nextId(stem: string, used: string[]): string {
 }
 
 function sourceChanges(
-  before: ProjectDocumentV2,
-  after: ProjectDocumentV2,
-): Array<{ circuitId: string; componentId: string; value: KnownTrit }> {
+  before: ProjectDocumentV3,
+  after: ProjectDocumentV3,
+): Array<{ circuitId: string; componentId: string; value: string }> {
   const oldValues = new Map<string, unknown>();
   for (const circuit of before.circuits) {
     for (const component of circuit.components) {
@@ -223,7 +232,7 @@ function sourceChanges(
       );
     }
   }
-  const updates: Array<{ circuitId: string; componentId: string; value: KnownTrit }> = [];
+  const updates: Array<{ circuitId: string; componentId: string; value: string }> = [];
   for (const circuit of after.circuits) {
     for (const component of circuit.components) {
       const value =
@@ -231,7 +240,8 @@ function sourceChanges(
           ? component.properties.previewValue
           : component.properties.value;
       if (
-        (value === "T" || value === "0" || value === "1") &&
+        typeof value === "string" &&
+        /^[T01]+$/.test(value) &&
         oldValues.get(`${circuit.id}\0${component.id}`) !== value
       ) {
         updates.push({ circuitId: circuit.id, componentId: component.id, value });
@@ -333,7 +343,7 @@ function Workbench() {
 
   const prepareProjectCatalog = useCallback(
     (
-      nextProject: ProjectDocumentV2,
+      nextProject: ProjectDocumentV3,
       nextActiveCircuitId: string,
       resolveInterfaces = true,
     ) => {
@@ -410,11 +420,11 @@ function Workbench() {
     setEdges(
       next.edges.map((edge) => ({
         ...edge,
-        selected: selection?.connectionIds.includes(edge.id) ?? false,
+        selected: selection?.wireIds.includes(edge.id) ?? false,
       })),
     );
     setSelectedNodeId(selection?.componentIds.at(-1) ?? null);
-    setSelectedEdgeIds(selection?.connectionIds ?? []);
+    setSelectedEdgeIds(selection?.wireIds ?? []);
     setReloadRevision((value) => value + 1);
     if (circuit.viewport) {
       requestAnimationFrame(() => instanceRef.current?.setViewport(circuit.viewport!));
@@ -460,6 +470,10 @@ function Workbench() {
         runtimeRef.current = runtime;
         baseCatalogRef.current = wasm.catalog;
         moduleInterfaceResolverRef.current = wasm.resolveProjectModuleInterfaces;
+        store.getState().setPortResolver({
+          resolvePorts: wasm.resolveProjectPorts,
+          resolveModuleInterfaces: wasm.resolveProjectModuleInterfaces,
+        });
         setBaseCatalog(wasm.catalog);
         setWasmVersion(wasm.apiVersion);
         try {
@@ -503,7 +517,21 @@ function Workbench() {
     (next: EditorDocument) => {
       const viewport = instanceRef.current?.getViewport();
       const saved = fromEditorDocument(next, viewport);
-      store.getState().setCircuit(activeCircuitId, saved);
+      store.getState().setCircuit(activeCircuitId, {
+        components: saved.components,
+        wires: saved.connections.map((connection) => ({
+          id: connection.id,
+          endpointA: {
+            componentId: connection.sourceComponentId,
+            portId: connection.sourcePortId,
+          },
+          endpointB: {
+            componentId: connection.targetComponentId,
+            portId: connection.targetPortId,
+          },
+        })),
+        ...(saved.viewport ? { viewport: saved.viewport } : {}),
+      });
       setNodes(next.nodes);
       setEdges(next.edges);
       syncStructure();
@@ -997,8 +1025,7 @@ function Workbench() {
   );
 
   const loadProject = useCallback(
-    (nextProject: ProjectDocumentV2, message: string) => {
-      store.getState().replaceProject(nextProject);
+    (nextProject: ProjectDocumentV3, message: string) => {
       try {
         const runtime = runtimeRef.current;
         const nextCatalog = prepareProjectCatalog(
@@ -1009,6 +1036,7 @@ function Workbench() {
           nextProject,
           nextProject.rootCircuitId,
         );
+        store.getState().replaceProject(nextProject);
         acceptProjectCatalog(nextCatalog);
         if (nextSnapshot) setSuccessfulSnapshot(nextSnapshot);
         restoreActiveCircuit();
@@ -1023,9 +1051,10 @@ function Workbench() {
 
   const loadExample = useCallback(
     (exampleId: ExampleId) => {
-      const next =
+      const legacy =
         cloneExampleProject(exampleId) ??
         migrateV1ToV2(fromEditorDocument(cloneExampleDocument(exampleId)));
+      const next = migrateV2ToV3(legacy);
       const example = EXAMPLES.find((item) => item.id === exampleId);
       loadProject(next, `已载入示例: ${example?.name ?? exampleId}`);
       setActiveExampleId(exampleId);
@@ -1066,7 +1095,7 @@ function Workbench() {
   const clearCircuit = useCallback(() => {
     store.getState().setCircuit(activeCircuitId, {
       components: [],
-      connections: [],
+      wires: [],
     });
     setNodes([]);
     setEdges([]);

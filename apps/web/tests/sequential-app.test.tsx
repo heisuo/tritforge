@@ -33,13 +33,28 @@ const mock = vi.hoisted(() => {
 vi.mock("../src/wasm-client", () => ({
   createWasmRuntime: vi.fn(async () => ({
     apiVersion: 3,
-    resolveProjectPorts: (typeId: string, properties: Record<string, unknown>) => [
-      {
-        id: typeId === "project.module_output" ? "in" : "out",
-        direction: typeId === "project.module_output" ? "input" : "output",
-        width: typeof properties.width === "number" ? properties.width : 1,
-      },
-    ],
+    resolveProjectPorts: (typeId: string, properties: Record<string, unknown>) => {
+      const width = typeof properties.width === "number" ? properties.width : 1;
+      if (typeId === "gate.neg") {
+        return [
+          { id: "a", direction: "input", width: 1 },
+          { id: "y", direction: "output", width: 1 },
+        ];
+      }
+      if (typeId === "sequential.dff") {
+        return [
+          { id: "d", direction: "input" as const, width: 1 },
+          { id: "clk", direction: "input" as const, width: 1 },
+          { id: "en", direction: "input" as const, width: 1 },
+          { id: "rst", direction: "input" as const, width: 1 },
+          { id: "q", direction: "output" as const, width: 1 },
+        ];
+      }
+      if (typeId === "sink.probe" || typeId === "project.module_output") {
+        return [{ id: "in", direction: "input", width }];
+      }
+      return [{ id: "out", direction: "output", width }];
+    },
     resolveProjectModulePorts: () => [],
     resolveProjectModuleInterfaces: () => ({}),
     catalog: [
@@ -48,7 +63,7 @@ vi.mock("../src/wasm-client", () => ({
         display_name: "Trit Input",
         category: "source",
         kind: "source",
-        ports: [{ id: "out", direction: "output" }],
+        ports: [{ id: "out", direction: "output", width: 1 }],
         truth_table: [],
       },
       {
@@ -56,7 +71,7 @@ vi.mock("../src/wasm-client", () => ({
         display_name: "Clock",
         category: "source",
         kind: "source",
-        ports: [{ id: "out", direction: "output" }],
+        ports: [{ id: "out", direction: "output", width: 1 }],
         truth_table: [],
       },
       {
@@ -65,11 +80,11 @@ vi.mock("../src/wasm-client", () => ({
         category: "sequential",
         kind: "sequential",
         ports: [
-          { id: "d", direction: "input" },
-          { id: "clk", direction: "input" },
-          { id: "en", direction: "input" },
-          { id: "rst", direction: "input" },
-          { id: "q", direction: "output" },
+          { id: "d", direction: "input", width: 1 },
+          { id: "clk", direction: "input", width: 1 },
+          { id: "en", direction: "input", width: 1 },
+          { id: "rst", direction: "input", width: 1 },
+          { id: "q", direction: "output", width: 1 },
         ],
         truth_table: [],
       },
@@ -79,8 +94,8 @@ vi.mock("../src/wasm-client", () => ({
         category: "gate",
         kind: "gate",
         ports: [
-          { id: "a", direction: "input" },
-          { id: "y", direction: "output" },
+          { id: "a", direction: "input", width: 1 },
+          { id: "y", direction: "output", width: 1 },
         ],
         truth_table: [],
       },
@@ -89,7 +104,7 @@ vi.mock("../src/wasm-client", () => ({
         display_name: "Probe",
         category: "sink",
         kind: "sink",
-        ports: [{ id: "in", direction: "input" }],
+        ports: [{ id: "in", direction: "input", width: 1 }],
         truth_table: [],
       },
     ],
