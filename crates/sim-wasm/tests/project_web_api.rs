@@ -6,6 +6,10 @@ use sim_core::project::{
     ProjectWire, WireEndpoint,
 };
 use sim_core::project_simulator::{ProjectCompileMetrics, ProjectSnapshot};
+use sim_core::simulator::ClockPhase;
+use sim_core::trace::{
+    MAX_TRACE_WATCHES, TRACE_CAPACITY, TraceFrame, TraceFrameReason, TraceSignalRef, TraceWatch,
+};
 use sim_core::trit::Trit;
 use sim_wasm::{
     WasmProjectSimulator, resolve_project_module_interfaces, resolve_project_module_ports,
@@ -87,6 +91,38 @@ fn project(circuits: Vec<ProjectCircuitV3>) -> ProjectDocumentV3 {
 
 fn js_project(project: &ProjectDocumentV3) -> wasm_bindgen::JsValue {
     serde_wasm_bindgen::to_value(project).expect("serialize project")
+}
+
+fn trace_watch(
+    id: &str,
+    circuit_id: &str,
+    instance_path: &[&str],
+    component_id: &str,
+    port_id: &str,
+) -> TraceWatch {
+    TraceWatch {
+        id: id.into(),
+        signal: TraceSignalRef::ComponentPort(sim_core::project::QualifiedPortRef::new(
+            circuit_id,
+            instance_path.iter().copied(),
+            component_id,
+            port_id,
+        )),
+    }
+}
+
+fn js_watches(watches: &[TraceWatch]) -> wasm_bindgen::JsValue {
+    serde_wasm_bindgen::to_value(watches).expect("serialize trace watches")
+}
+
+fn trace_frames(simulator: &WasmProjectSimulator) -> Vec<TraceFrame> {
+    serde_wasm_bindgen::from_value(simulator.trace_frames().expect("query trace frames"))
+        .expect("deserialize trace frames")
+}
+
+fn trace_watches(simulator: &WasmProjectSimulator) -> Vec<TraceWatch> {
+    serde_wasm_bindgen::from_value(simulator.trace_watches().expect("query trace watches"))
+        .expect("deserialize trace watches")
 }
 
 fn sequential_project() -> ProjectDocumentV3 {
@@ -180,6 +216,435 @@ fn project_handle_ticks_and_projects_dff_state() {
     assert_eq!(snapshot.input_nets["dff"]["clk"], Trit::Zero);
     assert_eq!(snapshot.input_net_words["dff"]["clk"].to_string(), "0");
     assert_eq!(snapshot.tick_count, 1);
+}
+
+#[wasm_bindgen_test]
+fn project_phase_and_trace_api_preserves_ms_first_scalar_and_word_values() {
+    let project = project(vec![connected_circuit(
+        "main",
+        ProjectCircuitKind::Main,
+        vec![
+            component("clock", "source.clock", serde_json::json!({})),
+            component(
+                "word",
+                "source.trit_input",
+                serde_json::json!({"width": 3, "value": "1T0"}),
+            ),
+        ],
+        vec![],
+    )]);
+    let mut simulator = WasmProjectSimulator::new();
+    let initial: ProjectSnapshot = serde_wasm_bindgen::from_value(
+        simulator
+            .load_project(js_project(&project), "main")
+            .expect("load project"),
+    )
+    .unwrap();
+    assert_eq!(initial.clock_phase, ClockPhase::LowStable);
+
+    simulator
+        .set_trace_watches(js_watches(&[
+            trace_watch("clock", "main", &[], "clock", "out"),
+            trace_watch("word", "main", &[], "word", "out"),
+        ]))
+        .expect("watch scalar and word");
+    let load = trace_frames(&simulator);
+    assert_eq!(load.len(), 1);
+    assert_eq!(load[0].reason, TraceFrameReason::Load);
+    assert_eq!(load[0].clock_phase, ClockPhase::LowStable);
+    assert_eq!(load[0].values[0].value.to_string(), "0");
+    assert_eq!(load[0].values[1].value.to_string(), "1T0");
+
+    let risen: ProjectSnapshot =
+        serde_wasm_bindgen::from_value(simulator.advance_phase().expect("advance to high phase"))
+            .unwrap();
+    assert_eq!(risen.clock_phase, ClockPhase::HighStable);
+    let fallen: ProjectSnapshot =
+        serde_wasm_bindgen::from_value(simulator.advance_phase().expect("advance to low phase"))
+            .unwrap();
+    assert_eq!(fallen.clock_phase, ClockPhase::LowStable);
+    assert_eq!(fallen.tick_count, 1);
+    let frames = trace_frames(&simulator);
+    assert_eq!(frames[1].reason, TraceFrameReason::ClockRise);
+    assert_eq!(frames[2].reason, TraceFrameReason::ClockFall);
+
+    let ticked: ProjectSnapshot =
+        serde_wasm_bindgen::from_value(simulator.tick().expect("complete tick")).unwrap();
+    assert_eq!(ticked.clock_phase, ClockPhase::LowStable);
+    assert_eq!(ticked.tick_count, 2);
+    let frames = trace_frames(&simulator);
+    assert_eq!(frames[3].reason, TraceFrameReason::ClockRise);
+    assert_eq!(frames[4].reason, TraceFrameReason::ClockFall);
+}
+
+#[wasm_bindgen_test]
+fn project_trace_watch_replacement_history_clear_and_reset_are_stable() {
+    let project = project(vec![connected_circuit(
+        "main",
+        ProjectCircuitKind::Main,
+        vec![
+            component(
+                "left",
+                "source.trit_input",
+                serde_json::json!({"value": "0"}),
+            ),
+            component(
+                "right",
+                "source.trit_input",
+                serde_json::json!({"value": "1"}),
+            ),
+        ],
+        vec![],
+    )]);
+    let mut simulator = WasmProjectSimulator::new();
+    simulator
+        .load_project(js_project(&project), "main")
+        .expect("load project");
+    let left = trace_watch("left", "main", &[], "left", "out");
+    let right = trace_watch("right", "main", &[], "right", "out");
+
+    simulator
+        .set_trace_watches(js_watches(&[left.clone(), right.clone()]))
+        .unwrap();
+    simulator
+        .set_trace_watches(js_watches(&[right.clone(), left.clone()]))
+        .unwrap();
+    let frames = trace_frames(&simulator);
+    assert_eq!(
+        frames[0]
+            .values
+            .iter()
+            .map(|value| value.watch_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["right", "left"]
+    );
+    simulator
+        .set_trace_watches(js_watches(std::slice::from_ref(&left)))
+        .unwrap();
+    assert_eq!(trace_watches(&simulator), vec![left]);
+
+    for index in 0..TRACE_CAPACITY {
+        simulator
+            .set_source("main", "left", if index % 2 == 0 { "1" } else { "T" })
+            .unwrap();
+    }
+    assert_eq!(trace_frames(&simulator).len(), TRACE_CAPACITY);
+    simulator.clear_trace().expect("clear trace");
+    assert!(trace_frames(&simulator).is_empty());
+
+    let reset: ProjectSnapshot =
+        serde_wasm_bindgen::from_value(simulator.reset().expect("reset project")).unwrap();
+    assert_eq!(reset.clock_phase, ClockPhase::LowStable);
+    let frames = trace_frames(&simulator);
+    assert_eq!(frames.len(), 1);
+    assert_eq!(frames[0].reason, TraceFrameReason::Reset);
+}
+
+#[wasm_bindgen_test]
+fn project_trace_nested_qualified_refs_preserve_instance_values() {
+    let main = connected_circuit(
+        "main",
+        ProjectCircuitKind::Main,
+        vec![
+            component(
+                "left-source",
+                "source.constant",
+                serde_json::json!({"width": 3, "value": "1T0"}),
+            ),
+            component(
+                "right-source",
+                "source.constant",
+                serde_json::json!({"width": 3, "value": "T01"}),
+            ),
+            module_instance("left", "cell"),
+            module_instance("right", "cell"),
+        ],
+        vec![
+            wire("left-data", "left-source", "out", "left", "data"),
+            wire("right-data", "right-source", "out", "right", "data"),
+        ],
+    );
+    let cell = connected_circuit(
+        "cell",
+        ProjectCircuitKind::Module,
+        vec![
+            component(
+                "input",
+                "project.module_input",
+                serde_json::json!({
+                    "portId": "data", "label": "Data", "width": 3, "previewValue": "000"
+                }),
+            ),
+            component("probe", "sink.probe", serde_json::json!({"width": 3})),
+        ],
+        vec![wire("inside", "input", "out", "probe", "in")],
+    );
+    let mut simulator = WasmProjectSimulator::new();
+    simulator
+        .load_project(js_project(&project(vec![main, cell])), "main")
+        .unwrap();
+    simulator
+        .set_trace_watches(js_watches(&[
+            trace_watch("left", "cell", &["left"], "probe", "in"),
+            trace_watch("right", "cell", &["right"], "probe", "in"),
+        ]))
+        .unwrap();
+
+    let frames = trace_frames(&simulator);
+    assert_eq!(frames[0].values[0].value.to_string(), "1T0");
+    assert_eq!(frames[0].values[1].value.to_string(), "T01");
+}
+
+#[wasm_bindgen_test]
+fn invalid_trace_watch_replacements_are_structured_and_transactional() {
+    let components = (0..=MAX_TRACE_WATCHES)
+        .map(|index| {
+            component(
+                &format!("source-{index}"),
+                "source.constant",
+                serde_json::json!({"value": "0"}),
+            )
+        })
+        .collect();
+    let mut simulator = WasmProjectSimulator::new();
+    simulator
+        .load_project(
+            js_project(&project(vec![circuit(
+                "main",
+                ProjectCircuitKind::Main,
+                components,
+            )])),
+            "main",
+        )
+        .unwrap();
+    let original = trace_watch("original", "main", &[], "source-0", "out");
+    simulator
+        .set_trace_watches(js_watches(std::slice::from_ref(&original)))
+        .unwrap();
+    simulator.tick().unwrap();
+    let frames_before = trace_frames(&simulator);
+
+    let unavailable = trace_watch("missing", "main", &[], "missing", "out");
+    let error = simulator
+        .set_trace_watches(js_watches(&[unavailable]))
+        .expect_err("unavailable watch must fail");
+    let error: ProjectBoundaryErrorView = serde_wasm_bindgen::from_value(error).unwrap();
+    assert_eq!(error.code, "TRACE_SIGNAL_UNAVAILABLE");
+    assert_eq!(error.diagnostics[0].code, "TRACE_SIGNAL_UNAVAILABLE");
+    assert_eq!(error.diagnostics[0].port_refs[0].component_id, "missing");
+    let diagnostics: Vec<ProjectDiagnostic> = serde_wasm_bindgen::from_value(
+        simulator
+            .trace_diagnostics()
+            .expect("query trace diagnostics"),
+    )
+    .unwrap();
+    assert_eq!(diagnostics, error.diagnostics);
+    assert_eq!(trace_watches(&simulator), vec![original.clone()]);
+    assert_eq!(trace_frames(&simulator), frames_before);
+
+    let error = simulator
+        .set_trace_watches(wasm_bindgen::JsValue::from_str("not an array"))
+        .expect_err("malformed watches must fail");
+    let error: ProjectBoundaryErrorView = serde_wasm_bindgen::from_value(error).unwrap();
+    assert_eq!(error.code, "INVALID_TRACE_WATCHES");
+    assert!(error.diagnostics.is_empty());
+    assert_eq!(trace_watches(&simulator), vec![original.clone()]);
+    assert_eq!(trace_frames(&simulator), frames_before);
+
+    let duplicate_id = vec![
+        trace_watch("same", "main", &[], "source-1", "out"),
+        trace_watch("same", "main", &[], "source-2", "out"),
+    ];
+    let error = simulator
+        .set_trace_watches(js_watches(&duplicate_id))
+        .expect_err("duplicate watch id must fail");
+    let error: ProjectBoundaryErrorView = serde_wasm_bindgen::from_value(error).unwrap();
+    assert_eq!(error.code, "DUPLICATE_TRACE_WATCH");
+    assert_eq!(trace_watches(&simulator), vec![original.clone()]);
+    assert_eq!(trace_frames(&simulator), frames_before);
+
+    let duplicate = vec![
+        trace_watch("first", "main", &[], "source-1", "out"),
+        trace_watch("second", "main", &[], "source-1", "out"),
+    ];
+    let error = simulator
+        .set_trace_watches(js_watches(&duplicate))
+        .expect_err("duplicate signal must fail");
+    let error: ProjectBoundaryErrorView = serde_wasm_bindgen::from_value(error).unwrap();
+    assert_eq!(error.code, "DUPLICATE_TRACE_SIGNAL");
+    assert_eq!(trace_watches(&simulator), vec![original.clone()]);
+    assert_eq!(trace_frames(&simulator), frames_before);
+
+    let over_limit = (0..=MAX_TRACE_WATCHES)
+        .map(|index| {
+            trace_watch(
+                &format!("watch-{index}"),
+                "main",
+                &[],
+                &format!("source-{index}"),
+                "out",
+            )
+        })
+        .collect::<Vec<_>>();
+    let error = simulator
+        .set_trace_watches(js_watches(&over_limit))
+        .expect_err("watch limit must fail");
+    let error: ProjectBoundaryErrorView = serde_wasm_bindgen::from_value(error).unwrap();
+    assert_eq!(error.code, "TRACE_WATCH_LIMIT_EXCEEDED");
+    assert_eq!(trace_watches(&simulator), vec![original]);
+    assert_eq!(trace_frames(&simulator), frames_before);
+}
+
+#[wasm_bindgen_test]
+fn trace_words_keep_high_impedance_and_error_symbols_across_wasm() {
+    let project = project(vec![connected_circuit(
+        "main",
+        ProjectCircuitKind::Main,
+        vec![
+            component(
+                "negative",
+                "source.constant",
+                serde_json::json!({"width": 3, "value": "TTT"}),
+            ),
+            component(
+                "positive",
+                "source.constant",
+                serde_json::json!({"width": 3, "value": "111"}),
+            ),
+            component(
+                "conflict",
+                "wiring.tunnel",
+                serde_json::json!({"width": 3, "label": "CONFLICT"}),
+            ),
+            component(
+                "floating",
+                "wiring.tunnel",
+                serde_json::json!({"width": 3, "label": "FLOATING"}),
+            ),
+        ],
+        vec![
+            wire("negative-conflict", "negative", "out", "conflict", "net"),
+            wire("positive-conflict", "positive", "out", "conflict", "net"),
+        ],
+    )]);
+    let mut simulator = WasmProjectSimulator::new();
+    simulator
+        .load_project(js_project(&project), "main")
+        .unwrap();
+    simulator
+        .set_trace_watches(js_watches(&[
+            trace_watch("conflict", "main", &[], "conflict", "net"),
+            trace_watch("floating", "main", &[], "floating", "net"),
+        ]))
+        .unwrap();
+
+    let frame = trace_frames(&simulator).remove(0);
+    assert_eq!(frame.reason, TraceFrameReason::Fault);
+    assert_eq!(frame.values[0].value.to_string(), "EEE");
+    assert_eq!(frame.values[1].value.to_string(), "ZZZ");
+}
+
+#[wasm_bindgen_test]
+fn project_update_and_active_switch_follow_core_trace_lifecycle() {
+    let initial = project(vec![
+        circuit(
+            "main",
+            ProjectCircuitKind::Main,
+            vec![component(
+                "input",
+                "source.trit_input",
+                serde_json::json!({"value": "0", "label": "Input"}),
+            )],
+        ),
+        circuit(
+            "spare",
+            ProjectCircuitKind::Module,
+            vec![component(
+                "spare-input",
+                "source.trit_input",
+                serde_json::json!({"value": "0"}),
+            )],
+        ),
+    ]);
+    let mut simulator = WasmProjectSimulator::new();
+    simulator
+        .load_project(js_project(&initial), "main")
+        .unwrap();
+    let watch = trace_watch("input", "main", &[], "input", "out");
+    simulator
+        .set_trace_watches(js_watches(std::slice::from_ref(&watch)))
+        .unwrap();
+    let before = trace_frames(&simulator);
+
+    let mut unreachable_edit = initial;
+    unreachable_edit.circuits[1].components[0] = component(
+        "spare-input",
+        "source.trit_input",
+        serde_json::json!({"value": "0", "label": "Spare"}),
+    );
+    simulator
+        .update_project(js_project(&unreachable_edit))
+        .expect("unreachable edit preserves runtime trace");
+    assert_eq!(trace_watches(&simulator), vec![watch]);
+    assert_eq!(trace_frames(&simulator), before);
+
+    let switched: ProjectSnapshot = serde_wasm_bindgen::from_value(
+        simulator
+            .switch_active("spare")
+            .expect("switch active circuit"),
+    )
+    .unwrap();
+    assert!(trace_watches(&simulator).is_empty());
+    assert!(trace_frames(&simulator).is_empty());
+    let diagnostics: Vec<ProjectDiagnostic> =
+        serde_wasm_bindgen::from_value(simulator.trace_diagnostics().expect("trace diagnostics"))
+            .unwrap();
+    assert_eq!(diagnostics[0].code, "TRACE_SIGNAL_UNAVAILABLE");
+    assert!(
+        switched
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "TRACE_SIGNAL_UNAVAILABLE")
+    );
+}
+
+#[wasm_bindgen_test]
+fn boundary_fault_is_queryable_after_the_source_call_throws() {
+    let project = project(vec![circuit(
+        "main",
+        ProjectCircuitKind::Main,
+        vec![component(
+            "input",
+            "source.trit_input",
+            serde_json::json!({"value": "0"}),
+        )],
+    )]);
+    let mut simulator = WasmProjectSimulator::new();
+    simulator
+        .load_project(js_project(&project), "main")
+        .unwrap();
+    simulator
+        .set_trace_watches(js_watches(&[trace_watch(
+            "input",
+            "main",
+            &[],
+            "input",
+            "out",
+        )]))
+        .unwrap();
+
+    let error = simulator
+        .set_source("main", "input", "X")
+        .expect_err("meta-valued source update must fail");
+    let error: ProjectBoundaryErrorView = serde_wasm_bindgen::from_value(error).unwrap();
+    assert_eq!(error.code, "INVALID_TRIT_SYMBOL");
+    assert_eq!(error.diagnostics[0].code, "INVALID_TRIT_SYMBOL");
+
+    let frames = trace_frames(&simulator);
+    let fault = frames.last().expect("fault frame remains queryable");
+    assert_eq!(fault.reason, TraceFrameReason::Fault);
+    assert_eq!(fault.values[0].value.to_string(), "0");
+    assert_eq!(fault.diagnostics[0].code, "INVALID_TRIT_SYMBOL");
 }
 
 #[wasm_bindgen_test]

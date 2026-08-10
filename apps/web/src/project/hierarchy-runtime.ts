@@ -1,6 +1,8 @@
 import type { ProjectSimulationSnapshot } from "../editor-model";
 import {
   wasmProjectError,
+  type TraceFrame,
+  type TraceWatch,
   type WasmProjectError,
   type WasmProjectSimulatorBinding,
 } from "../wasm-client";
@@ -109,6 +111,69 @@ export class HierarchyRuntime {
     this.requireLoaded();
     try {
       return this.accept(this.wasm.tick());
+    } catch (error) {
+      throw new HierarchyRuntimeError(wasmProjectError(error));
+    }
+  }
+
+  advancePhase(): ProjectSimulationSnapshot {
+    this.requireLoaded();
+    try {
+      return this.accept(this.wasm.advancePhase());
+    } catch (error) {
+      throw new HierarchyRuntimeError(wasmProjectError(error));
+    }
+  }
+
+  reset(): ProjectSimulationSnapshot {
+    this.requireLoaded();
+    try {
+      return this.accept(this.wasm.reset());
+    } catch (error) {
+      throw new HierarchyRuntimeError(wasmProjectError(error));
+    }
+  }
+
+  setTraceWatches(watches: TraceWatch[]): TraceFrame {
+    this.requireLoaded();
+    try {
+      return this.wasm.setTraceWatches(watches);
+    } catch (error) {
+      throw new HierarchyRuntimeError(wasmProjectError(error));
+    }
+  }
+
+  traceFrames(): TraceFrame[] {
+    this.requireLoaded();
+    try {
+      return this.wasm.traceFrames();
+    } catch (error) {
+      throw new HierarchyRuntimeError(wasmProjectError(error));
+    }
+  }
+
+  traceWatches(): TraceWatch[] {
+    this.requireLoaded();
+    try {
+      return this.wasm.traceWatches();
+    } catch (error) {
+      throw new HierarchyRuntimeError(wasmProjectError(error));
+    }
+  }
+
+  traceDiagnostics(): WasmProjectError["diagnostics"] {
+    this.requireLoaded();
+    try {
+      return this.wasm.traceDiagnostics();
+    } catch (error) {
+      throw new HierarchyRuntimeError(wasmProjectError(error));
+    }
+  }
+
+  clearTrace(): void {
+    this.requireLoaded();
+    try {
+      this.wasm.clearTrace();
     } catch (error) {
       throw new HierarchyRuntimeError(wasmProjectError(error));
     }

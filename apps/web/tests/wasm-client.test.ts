@@ -2,6 +2,9 @@ import { beforeAll, describe, expect, expectTypeOf, it, vi } from "vitest";
 
 import type {
   SimulationSnapshot,
+  TraceFrame,
+  TraceFrameReason,
+  TraceWatch,
   WasmProjectSimulatorBinding,
   WasmSimulatorBinding,
 } from "../src/wasm-client";
@@ -26,6 +29,7 @@ const wasmMock = vi.hoisted(() => {
     stable: true,
     tickCount: 1,
     compileCount: 1,
+    clockPhase: "lowStable" as const,
   };
   class WasmSimulator {
     tick() {
@@ -36,6 +40,31 @@ const wasmMock = vi.hoisted(() => {
     tick() {
       return projectSnapshot;
     }
+    advancePhase() {
+      return { ...projectSnapshot, clockPhase: "highStable" as const };
+    }
+    reset() {
+      return projectSnapshot;
+    }
+    setTraceWatches() {
+      return {
+        cycle: 0,
+        clockPhase: "lowStable" as const,
+        reason: "load" as const,
+        values: [],
+        diagnostics: [],
+      };
+    }
+    traceFrames() {
+      return [];
+    }
+    traceWatches() {
+      return [];
+    }
+    traceDiagnostics() {
+      return [];
+    }
+    clearTrace() {}
   }
 
   return {
@@ -102,12 +131,28 @@ describe("WASM runtime initialization", () => {
 
     const flat = runtime.simulator.tick();
     const project = runtime.projectSimulator.tick();
+    const phase = runtime.projectSimulator.advancePhase();
+    const watch: TraceWatch = {
+      id: "clock",
+      signal: {
+        kind: "componentPort",
+        ref: {
+          circuitId: "main",
+          instancePath: [],
+          componentId: "clock",
+          portId: "out",
+        },
+      },
+    };
+    const frame = runtime.projectSimulator.setTraceWatches([watch]);
 
     expect(flat).toEqual(wasmMock.flatSnapshot);
     expect(flat.tick_count).toBe(1);
     expect(project).toEqual(wasmMock.projectSnapshot);
     expect(project.tickCount).toBe(1);
     expect(project.componentOutputWords.dff.q).toBe("1");
+    expect(phase.clockPhase).toBe("highStable");
+    expect(frame.reason).toBe("load");
     expect(runtime.resolveProjectPorts("source.constant", { width: 3 })).toEqual([
       { id: "out", direction: "output", width: 3 },
     ]);
@@ -122,6 +167,8 @@ describe("WASM runtime initialization", () => {
     });
     expectTypeOf(flat).toEqualTypeOf<SimulationSnapshot>();
     expectTypeOf(project).toEqualTypeOf<ProjectSimulationSnapshot>();
+    expectTypeOf(frame).toEqualTypeOf<TraceFrame>();
+    expectTypeOf(frame.reason).toEqualTypeOf<TraceFrameReason>();
     expectTypeOf(runtime.simulator).toMatchTypeOf<WasmSimulatorBinding>();
     expectTypeOf(runtime.projectSimulator).toMatchTypeOf<WasmProjectSimulatorBinding>();
   });

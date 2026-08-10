@@ -1,10 +1,13 @@
 import type {
   CatalogComponent,
   CircuitDefinition,
+  ClockPhase,
   KnownTrit,
+  QualifiedPortRef,
   ProjectSimulationDiagnostic,
   ProjectSimulationSnapshot,
   TritSymbol,
+  TernaryWord,
 } from "./editor-model";
 
 export interface SimulationDiagnostic {
@@ -47,8 +50,48 @@ export interface WasmProjectSimulatorBinding {
     value: string,
   ): ProjectSimulationSnapshot;
   tick(): ProjectSimulationSnapshot;
+  advancePhase(): ProjectSimulationSnapshot;
+  reset(): ProjectSimulationSnapshot;
+  setTraceWatches(watches: TraceWatch[]): TraceFrame;
+  traceFrames(): TraceFrame[];
+  traceWatches(): TraceWatch[];
+  traceDiagnostics(): ProjectSimulationDiagnostic[];
+  clearTrace(): void;
   snapshot(): ProjectSimulationSnapshot;
   metrics(): ProjectCompileMetrics;
+}
+
+export type TraceFrameReason =
+  | "load"
+  | "inputChange"
+  | "clockRise"
+  | "clockFall"
+  | "reset"
+  | "fault";
+
+export interface TraceComponentPortSignalRef {
+  kind: "componentPort";
+  ref: QualifiedPortRef;
+}
+
+export type TraceSignalRef = TraceComponentPortSignalRef;
+
+export interface TraceWatch {
+  id: string;
+  signal: TraceSignalRef;
+}
+
+export interface TraceValue {
+  watchId: string;
+  value: TernaryWord;
+}
+
+export interface TraceFrame {
+  cycle: number;
+  clockPhase: ClockPhase;
+  reason: TraceFrameReason;
+  values: TraceValue[];
+  diagnostics: ProjectSimulationDiagnostic[];
 }
 
 export interface ProjectCompileMetrics {

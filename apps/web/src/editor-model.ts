@@ -9,6 +9,7 @@ export type KnownTrit = "T" | "0" | "1";
 export type TritSymbol = KnownTrit | "X" | "Z" | "E";
 /** MS-first ternary word. Runtime words may contain T/0/1/X/Z/E. */
 export type TernaryWord = string;
+export type ClockPhase = "lowStable" | "highStable";
 
 export interface QualifiedComponentRef {
   circuitId: string;
@@ -53,6 +54,7 @@ export interface ProjectSimulationSnapshot {
   stable: boolean;
   tickCount: number;
   compileCount: number;
+  clockPhase: ClockPhase;
 }
 
 export interface CatalogPort {

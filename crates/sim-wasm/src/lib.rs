@@ -9,6 +9,7 @@ use sim_core::project::{ProjectDiagnostic, ProjectDocumentV3, ProjectProperties}
 use sim_core::project_simulator::ProjectSimulator;
 use sim_core::project_validation::resolve_project_ports as resolve_core_project_ports;
 use sim_core::simulator::Simulator;
+use sim_core::trace::TraceWatch;
 use sim_core::trit::Trit;
 use wasm_bindgen::prelude::*;
 
@@ -241,6 +242,77 @@ impl WasmProjectSimulator {
         to_js_value(&snapshot)
     }
 
+    #[wasm_bindgen(js_name = advancePhase)]
+    pub fn advance_phase(&mut self) -> Result<JsValue, JsValue> {
+        let snapshot = self
+            .simulator_mut()?
+            .advance_phase()
+            .map_err(project_boundary_diagnostic)?;
+        to_js_value(&snapshot)
+    }
+
+    pub fn reset(&mut self) -> Result<JsValue, JsValue> {
+        let snapshot = self
+            .simulator_mut()?
+            .reset()
+            .map_err(project_boundary_diagnostic)?;
+        to_js_value(&snapshot)
+    }
+
+    #[wasm_bindgen(js_name = setTraceWatches)]
+    pub fn set_trace_watches(&mut self, watches: JsValue) -> Result<JsValue, JsValue> {
+        let watches: Vec<TraceWatch> =
+            serde_wasm_bindgen::from_value(watches).map_err(|error| {
+                BoundaryError::<ProjectDiagnostic>::new(
+                    "INVALID_TRACE_WATCHES",
+                    format!("could not deserialize trace watches: {error}"),
+                    Vec::new(),
+                )
+                .into_js()
+            })?;
+        let frame = self
+            .simulator_mut()?
+            .set_trace_watches(watches)
+            .map_err(project_diagnostics_error)?;
+        to_js_value(&frame)
+    }
+
+    #[wasm_bindgen(js_name = traceFrames)]
+    pub fn trace_frames(&self) -> Result<JsValue, JsValue> {
+        let frames = self
+            .simulator
+            .as_ref()
+            .ok_or_else(|| BoundaryError::<ProjectDiagnostic>::project_not_loaded().into_js())?
+            .trace_frames();
+        to_js_value(frames)
+    }
+
+    #[wasm_bindgen(js_name = traceWatches)]
+    pub fn trace_watches(&self) -> Result<JsValue, JsValue> {
+        let watches = self
+            .simulator
+            .as_ref()
+            .ok_or_else(|| BoundaryError::<ProjectDiagnostic>::project_not_loaded().into_js())?
+            .trace_watches();
+        to_js_value(watches)
+    }
+
+    #[wasm_bindgen(js_name = traceDiagnostics)]
+    pub fn trace_diagnostics(&self) -> Result<JsValue, JsValue> {
+        let diagnostics = self
+            .simulator
+            .as_ref()
+            .ok_or_else(|| BoundaryError::<ProjectDiagnostic>::project_not_loaded().into_js())?
+            .trace_diagnostics();
+        to_js_value(diagnostics)
+    }
+
+    #[wasm_bindgen(js_name = clearTrace)]
+    pub fn clear_trace(&mut self) -> Result<(), JsValue> {
+        self.simulator_mut()?.clear_trace();
+        Ok(())
+    }
+
     pub fn metrics(&self) -> Result<JsValue, JsValue> {
         let metrics = self
             .simulator
@@ -410,7 +482,7 @@ impl BoundaryError<Diagnostic> {
     }
 }
 
-fn to_js_value<T: Serialize>(value: &T) -> Result<JsValue, JsValue> {
+fn to_js_value<T: Serialize + ?Sized>(value: &T) -> Result<JsValue, JsValue> {
     value
         .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
         .map_err(|error| {

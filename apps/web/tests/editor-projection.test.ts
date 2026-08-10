@@ -66,6 +66,7 @@ describe("v3 editor projection", () => {
       stable: true,
       tickCount: 0,
       compileCount: 1,
+      clockPhase: "lowStable",
     };
 
     expect(edgeNetValue(editor.edges[0], snapshot)).toBe("E");

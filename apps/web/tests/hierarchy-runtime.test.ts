@@ -9,7 +9,11 @@ import {
 } from "../src/project/hierarchy-runtime";
 import type { ProjectDocumentV2 } from "../src/project/project-document";
 import type { ProjectDocumentV3 } from "../src/project/project-v3";
-import type { WasmProjectSimulatorBinding } from "../src/wasm-client";
+import type {
+  TraceFrame,
+  TraceWatch,
+  WasmProjectSimulatorBinding,
+} from "../src/wasm-client";
 
 function snapshot(compileCount: number): ProjectSimulationSnapshot {
   return {
@@ -21,8 +25,30 @@ function snapshot(compileCount: number): ProjectSimulationSnapshot {
     stable: true,
     tickCount: 0,
     compileCount,
+    clockPhase: "lowStable",
   };
 }
+
+const clockWatch = {
+  id: "clock",
+  signal: {
+    kind: "componentPort" as const,
+    ref: {
+      circuitId: "main",
+      instancePath: [],
+      componentId: "clock",
+      portId: "out",
+    },
+  },
+} satisfies TraceWatch;
+
+const loadFrame = {
+  cycle: 0,
+  clockPhase: "lowStable" as const,
+  reason: "load" as const,
+  values: [{ watchId: "clock", value: "0" }],
+  diagnostics: [],
+} satisfies TraceFrame;
 
 function project(): ProjectDocumentV2 {
   return {
@@ -100,6 +126,13 @@ function binding() {
         snapshot(count),
     ),
     tick: vi.fn(() => snapshot(count)),
+    advancePhase: vi.fn(() => ({ ...snapshot(count), clockPhase: "highStable" as const })),
+    reset: vi.fn(() => snapshot(count)),
+    setTraceWatches: vi.fn((_watches: TraceWatch[]): TraceFrame => loadFrame),
+    traceFrames: vi.fn((): TraceFrame[] => [loadFrame]),
+    traceWatches: vi.fn(() => [clockWatch]),
+    traceDiagnostics: vi.fn(() => []),
+    clearTrace: vi.fn(() => undefined),
     snapshot: vi.fn(() => snapshot(count)),
     metrics: vi.fn(() => ({
       expandedComponents: 0,
@@ -148,6 +181,87 @@ describe("hierarchy runtime", () => {
     expect(wasm.tick).toHaveBeenCalledTimes(1);
     expect(runtime.snapshot()).toBe(ticked);
     expect(runtime.snapshot()?.tickCount).toBe(3);
+  });
+
+  it("exposes phase, reset, and trace lifecycle without changing watch order", () => {
+    const wasm = binding();
+    const runtime = new HierarchyRuntime(wasm);
+    runtime.load(project(), "main");
+
+    expect(runtime.setTraceWatches([clockWatch])).toBe(loadFrame);
+    expect(runtime.traceWatches()).toEqual([clockWatch]);
+    expect(runtime.traceFrames()).toEqual([loadFrame]);
+    expect(runtime.traceDiagnostics()).toEqual([]);
+    expect(runtime.advancePhase().clockPhase).toBe("highStable");
+    expect(runtime.reset().clockPhase).toBe("lowStable");
+    runtime.clearTrace();
+
+    expect(wasm.setTraceWatches).toHaveBeenCalledWith([clockWatch]);
+    expect(wasm.advancePhase).toHaveBeenCalledTimes(1);
+    expect(wasm.reset).toHaveBeenCalledTimes(1);
+    expect(wasm.clearTrace).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the last snapshot and exposes a fault frame after a boundary error", () => {
+    const wasm = binding();
+    const runtime = new HierarchyRuntime(wasm);
+    const previous = runtime.load(project(), "main");
+    const fault = {
+      ...loadFrame,
+      reason: "fault" as const,
+      diagnostics: [
+        {
+          code: "NON_CONVERGENT_COMBINATIONAL_LOOP",
+          severity: "error" as const,
+          message: "did not converge",
+          primaryLocation: null,
+          componentRefs: [],
+          connectionRefs: [],
+          portRefs: [],
+        },
+      ],
+    };
+    wasm.advancePhase.mockImplementationOnce(() => {
+      throw {
+        code: "NON_CONVERGENT_COMBINATIONAL_LOOP",
+        message: "did not converge",
+        diagnostics: fault.diagnostics,
+      };
+    });
+    wasm.traceFrames.mockReturnValueOnce([loadFrame, fault]);
+
+    expect(() => runtime.advancePhase()).toThrow(/did not converge/i);
+    expect(runtime.snapshot()).toBe(previous);
+    expect(runtime.traceFrames()).toEqual([loadFrame, fault]);
+  });
+
+  it("does not alter runtime trace state after invalid watch replacement", () => {
+    const wasm = binding();
+    const runtime = new HierarchyRuntime(wasm);
+    runtime.load(project(), "main");
+    runtime.setTraceWatches([clockWatch]);
+    wasm.setTraceWatches.mockImplementationOnce(() => {
+      throw {
+        code: "TRACE_SIGNAL_UNAVAILABLE",
+        message: "signal is unavailable",
+        diagnostics: [],
+      };
+    });
+
+    expect(() =>
+      runtime.setTraceWatches([
+        {
+          ...clockWatch,
+          id: "missing",
+          signal: {
+            ...clockWatch.signal,
+            ref: { ...clockWatch.signal.ref, componentId: "missing" },
+          },
+        },
+      ]),
+    ).toThrow(/unavailable/i);
+    expect(runtime.traceWatches()).toEqual([clockWatch]);
+    expect(runtime.snapshot()?.clockPhase).toBe("lowStable");
   });
 
   it("validates and synchronizes a zero-copy source through Rust immediately", () => {

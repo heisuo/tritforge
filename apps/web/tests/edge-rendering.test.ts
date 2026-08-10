@@ -44,6 +44,7 @@ function snapshot(value: TernaryWord): ProjectSimulationSnapshot {
     stable: true,
     tickCount: 0,
     compileCount: 1,
+    clockPhase: "lowStable",
   };
 }
 

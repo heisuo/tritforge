@@ -13,6 +13,7 @@ const mock = vi.hoisted(() => {
     stable: true,
     tickCount: 0,
     compileCount: 1,
+    clockPhase: "lowStable",
   });
   const projectSimulator = {
     loadProject: vi.fn(() => snapshot()),
@@ -20,6 +21,19 @@ const mock = vi.hoisted(() => {
     switchActive: vi.fn(() => snapshot()),
     setSource: vi.fn(() => snapshot()),
     tick: vi.fn(() => snapshot()),
+    advancePhase: vi.fn(() => snapshot()),
+    reset: vi.fn(() => snapshot()),
+    setTraceWatches: vi.fn(() => ({
+      cycle: 0,
+      clockPhase: "lowStable" as const,
+      reason: "load" as const,
+      values: [],
+      diagnostics: [],
+    })),
+    traceFrames: vi.fn(() => []),
+    traceWatches: vi.fn(() => []),
+    traceDiagnostics: vi.fn(() => []),
+    clearTrace: vi.fn(),
     snapshot: vi.fn(() => snapshot()),
     metrics: vi.fn(() => ({
       expandedComponents: 0,
