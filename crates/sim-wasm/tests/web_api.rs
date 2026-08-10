@@ -62,6 +62,27 @@ fn loads_and_updates_a_circuit_across_the_wasm_boundary() {
 }
 
 #[wasm_bindgen_test]
+fn flat_wasm_api_rejects_structural_registers() {
+    let definition = CircuitDefinition {
+        components: vec![component("register", "sequential.register", None)],
+        connections: vec![],
+    };
+    let value = serde_wasm_bindgen::to_value(&definition).expect("serialize definition");
+    let error = WasmSimulator::new()
+        .load_circuit(value)
+        .expect_err("flat Wasm API must reject structural macros");
+    let error: BoundaryErrorView =
+        serde_wasm_bindgen::from_value(error).expect("deserialize boundary error");
+
+    assert_eq!(error.code, "STRUCTURAL_COMPONENT_REQUIRES_PROJECT_V3");
+    assert_eq!(
+        error.diagnostics[0].code,
+        "STRUCTURAL_COMPONENT_REQUIRES_PROJECT_V3"
+    );
+    assert_eq!(error.diagnostics[0].component_ids, vec!["register"]);
+}
+
+#[wasm_bindgen_test]
 fn ticks_a_dff_and_returns_the_clock_low_across_the_wasm_boundary() {
     let definition = CircuitDefinition {
         components: vec![

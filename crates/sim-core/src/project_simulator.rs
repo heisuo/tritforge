@@ -14,6 +14,9 @@ use crate::project::{
 use crate::project_validation::{ValidatedProject, resolve_project_ports, validate_project};
 use crate::signal::{KnownWord, SignalError, SignalShape, WordValue};
 use crate::simulator::{ClockPhase, SimulationSnapshot, Simulator};
+use crate::structural::{
+    StructuralExpansionInspection, StructuralPrimitiveInspection, register_lane_index,
+};
 use crate::trace::{
     MAX_TRACE_WATCHES, TraceBinding, TraceFrame, TraceFrameReason, TracePerformanceCounters,
     TraceRecorder, TraceValue, TraceWatch,
@@ -951,6 +954,105 @@ impl ProjectSimulator {
             expanded_components: compiled.circuit.components.len(),
             expanded_connections: compiled.circuit.connections.len(),
             projection_endpoints,
+        })
+    }
+
+    #[allow(clippy::result_large_err)]
+    pub fn inspect_structural_expansion(
+        &self,
+        source: &QualifiedComponentRef,
+    ) -> Result<StructuralExpansionInspection, ProjectDiagnostic> {
+        let Some(compiled_v3) = self.compiled_v3.as_ref() else {
+            return Err(project_error(
+                "STRUCTURAL_EXPANSION_REQUIRES_PROJECT_V3",
+                "structural expansion inspection requires a ready Project v3 simulator",
+                Some(source.clone()),
+            ));
+        };
+
+        let component_types = compiled_v3
+            .compiled
+            .circuit
+            .components
+            .iter()
+            .map(|component| (component.id.as_str(), component.type_id.as_str()))
+            .collect::<BTreeMap<_, _>>();
+        let mut primitives = Vec::new();
+
+        for (flat_id, generated_ref) in &compiled_v3.compiled.provenance.components {
+            let static_generated = QualifiedComponentRef::new(
+                &generated_ref.circuit_id,
+                [] as [&str; 0],
+                &generated_ref.component_id,
+            );
+            let Some(static_origin) = compiled_v3
+                .lowered
+                .provenance
+                .components
+                .get(&static_generated)
+            else {
+                continue;
+            };
+            let qualified_origin = QualifiedComponentRef::new(
+                &static_origin.circuit_id,
+                generated_ref.instance_path.iter().cloned(),
+                &static_origin.component_id,
+            );
+            if &qualified_origin != source {
+                continue;
+            }
+
+            let Some(type_id) = component_types.get(flat_id.as_str()) else {
+                continue;
+            };
+            let port_origins = compiled_v3
+                .lowered
+                .provenance
+                .ports
+                .iter()
+                .filter(|(generated_port, _)| {
+                    generated_port.circuit_id == generated_ref.circuit_id
+                        && generated_port.instance_path.is_empty()
+                        && generated_port.component_id == generated_ref.component_id
+                })
+                .map(|(generated_port, origin_port)| {
+                    (
+                        generated_port.port_id.clone(),
+                        QualifiedPortRef::new(
+                            &origin_port.circuit_id,
+                            generated_ref.instance_path.iter().cloned(),
+                            &origin_port.component_id,
+                            &origin_port.port_id,
+                        ),
+                    )
+                })
+                .collect();
+            primitives.push(StructuralPrimitiveInspection {
+                component_id: flat_id.clone(),
+                type_id: (*type_id).to_owned(),
+                port_origins,
+            });
+        }
+
+        primitives.sort_by(|left, right| {
+            register_lane_index(&left.component_id)
+                .cmp(&register_lane_index(&right.component_id))
+                .then_with(|| left.component_id.cmp(&right.component_id))
+        });
+        if primitives.is_empty() {
+            return Err(project_error(
+                "STRUCTURAL_EXPANSION_NOT_FOUND",
+                &format!(
+                    "component '{}:{}' has no structural expansion in the active circuit",
+                    source.circuit_id, source.component_id
+                ),
+                Some(source.clone()),
+            ));
+        }
+
+        Ok(StructuralExpansionInspection {
+            source: source.clone(),
+            primitives,
         })
     }
 

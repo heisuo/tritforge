@@ -172,6 +172,19 @@ pub fn validate_circuit(
             component_kinds.insert(component.id.clone(), kind);
         }
 
+        if kind == ComponentKind::Register {
+            diagnostics.insert(Diagnostic::error(
+                "STRUCTURAL_COMPONENT_REQUIRES_PROJECT_V3",
+                format!(
+                    "component '{}' uses structural type '{}', which requires Project v3 lowering",
+                    component.id, component.type_id
+                ),
+                vec![component.id.clone()],
+                vec![],
+                vec![],
+            ));
+        }
+
         if !property_is_valid(kind, &component.properties) {
             diagnostics.insert(Diagnostic::error(
                 "INVALID_PROPERTY",

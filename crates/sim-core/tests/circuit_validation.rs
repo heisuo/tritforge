@@ -3,6 +3,7 @@ use sim_core::circuit::{
     CircuitDefinition, ComponentInstance, Connection, PortRef, validate_circuit,
 };
 use sim_core::diagnostic::{Diagnostic, DiagnosticSeverity};
+use sim_core::simulator::Simulator;
 use sim_core::trit::Trit;
 
 fn component(id: &str, type_id: &str) -> ComponentInstance {
@@ -51,6 +52,25 @@ fn only_error(definition: CircuitDefinition) -> Diagnostic {
     let diagnostics = validate_circuit(definition).expect_err("circuit must be rejected");
     assert_eq!(diagnostics.len(), 1);
     diagnostics.into_iter().next().unwrap()
+}
+
+#[test]
+fn flat_circuit_and_simulator_reject_structural_registers() {
+    let definition = definition(vec![component("register", "sequential.register")], vec![]);
+
+    let diagnostic = only_error(definition.clone());
+    assert_eq!(diagnostic.code, "STRUCTURAL_COMPONENT_REQUIRES_PROJECT_V3");
+    assert_eq!(diagnostic.component_ids, vec!["register"]);
+
+    let diagnostics = match Simulator::load(definition) {
+        Ok(_) => panic!("flat simulator must reject macros"),
+        Err(diagnostics) => diagnostics,
+    };
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(
+        diagnostics[0].code,
+        "STRUCTURAL_COMPONENT_REQUIRES_PROJECT_V3"
+    );
 }
 
 #[test]

@@ -1,8 +1,29 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::project::{ProjectComponent, ProjectProperties, QualifiedPortRef};
+use serde::{Deserialize, Serialize};
+
+use crate::project::{
+    ProjectComponent, ProjectProperties, QualifiedComponentRef, QualifiedPortRef,
+};
 
 pub const REGISTER_TYPE_ID: &str = "sequential.register";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StructuralPrimitiveInspection {
+    /// Identifier of the primitive in the executable flat circuit.
+    pub component_id: String,
+    pub type_id: String,
+    /// Primitive port ID to the user-authored macro port that produced it.
+    pub port_origins: BTreeMap<String, QualifiedPortRef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StructuralExpansionInspection {
+    pub source: QualifiedComponentRef,
+    pub primitives: Vec<StructuralPrimitiveInspection>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RegisterLane {
@@ -102,4 +123,13 @@ fn allocate_generated_id(base: &str, occupied: &mut BTreeSet<String>) -> String 
         candidate.push('#');
     }
     candidate
+}
+
+pub(crate) fn register_lane_index(component_id: &str) -> Option<u8> {
+    let suffix = component_id.rsplit_once("#register#bit")?.1;
+    let digits = suffix
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>();
+    digits.parse().ok()
 }

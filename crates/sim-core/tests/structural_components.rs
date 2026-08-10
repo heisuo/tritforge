@@ -1,7 +1,8 @@
 use sim_core::connectivity::compile_project_v3;
 use sim_core::project::{
-    ProjectCircuitKind, ProjectCircuitV3, ProjectComponent, ProjectDocumentV3, ProjectProperties,
-    ProjectWire, QualifiedPortRef, WireEndpoint,
+    ProjectCircuit, ProjectCircuitKind, ProjectCircuitV3, ProjectComponent, ProjectDocument,
+    ProjectDocumentV3, ProjectProperties, ProjectWire, QualifiedComponentRef, QualifiedPortRef,
+    WireEndpoint,
 };
 use sim_core::project_simulator::ProjectSimulator;
 use sim_core::project_validation::resolve_project_ports;
@@ -82,6 +83,37 @@ fn register_project(width: u8, value: &str) -> ProjectDocumentV3 {
             wire("register-probe", "register", "q", "probe", "in"),
         ],
     }])
+}
+
+#[test]
+fn project_v2_rejects_registers_that_cannot_be_structurally_lowered() {
+    let project = ProjectDocument {
+        format: "logsim-ternary".into(),
+        version: 2,
+        root_circuit_id: "main".into(),
+        circuits: vec![ProjectCircuit {
+            id: "main".into(),
+            name: "Legacy flat project".into(),
+            kind: ProjectCircuitKind::Main,
+            components: vec![component(
+                "register",
+                "sequential.register",
+                serde_json::json!({"width": 3}),
+            )],
+            connections: vec![],
+        }],
+    };
+
+    let diagnostics = match ProjectSimulator::load(project, "main") {
+        Ok(_) => panic!("Project v2 must not silently simulate a structural register"),
+        Err(diagnostics) => diagnostics,
+    };
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(
+        diagnostics[0].code,
+        "STRUCTURAL_COMPONENT_REQUIRES_PROJECT_V3"
+    );
+    assert_eq!(diagnostics[0].component_refs[0].component_id, "register");
 }
 
 fn dff_ids(project: &ProjectDocumentV3) -> Vec<String> {
@@ -239,6 +271,41 @@ fn generated_register_ids_are_stable_and_deterministic() {
     assert!(first.iter().all(|id| id.contains("register")));
 }
 
+#[test]
+fn project_simulator_exposes_actual_generated_register_lanes_and_port_origins() {
+    let simulator = ProjectSimulator::load_v3(register_project(3, "1T0"), "main")
+        .expect("register simulation loads");
+    let source = QualifiedComponentRef::new("main", [] as [&str; 0], "register");
+
+    let expansion = simulator
+        .inspect_structural_expansion(&source)
+        .expect("register expansion is inspectable");
+
+    assert_eq!(expansion.source, source);
+    assert_eq!(
+        expansion
+            .primitives
+            .iter()
+            .map(|primitive| primitive.component_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "register#register#bit0",
+            "register#register#bit1",
+            "register#register#bit2",
+        ]
+    );
+    for primitive in &expansion.primitives {
+        assert_eq!(primitive.type_id, "sequential.dff");
+        assert_eq!(primitive.port_origins.len(), 5);
+        for port_id in ["d", "clk", "en", "rst", "q"] {
+            assert_eq!(
+                primitive.port_origins[port_id],
+                QualifiedPortRef::new("main", [] as [&str; 0], "register", port_id)
+            );
+        }
+    }
+}
+
 fn register_module() -> ProjectCircuitV3 {
     ProjectCircuitV3 {
         id: "register-module".into(),
@@ -369,6 +436,68 @@ fn nested_register_instances_own_isolated_dffs_and_state() {
 }
 
 #[test]
+fn nested_register_expansion_inspection_and_trace_are_isolated_per_instance() {
+    let mut simulator =
+        ProjectSimulator::load_v3(nested_register_project(), "main").expect("nested simulation");
+    let source_a = QualifiedComponentRef::new("register-module", ["register-a"], "word-register");
+    let source_b = QualifiedComponentRef::new("register-module", ["register-b"], "word-register");
+
+    let expansion_a = simulator
+        .inspect_structural_expansion(&source_a)
+        .expect("first expansion");
+    let expansion_b = simulator
+        .inspect_structural_expansion(&source_b)
+        .expect("second expansion");
+    assert_eq!(expansion_a.primitives.len(), 3);
+    assert_eq!(expansion_b.primitives.len(), 3);
+    assert!(
+        expansion_a
+            .primitives
+            .iter()
+            .all(|primitive| primitive.component_id.starts_with("register-a/"))
+    );
+    assert!(
+        expansion_b
+            .primitives
+            .iter()
+            .all(|primitive| primitive.component_id.starts_with("register-b/"))
+    );
+    assert!(expansion_a.primitives.iter().all(|left| {
+        expansion_b
+            .primitives
+            .iter()
+            .all(|right| left.component_id != right.component_id)
+    }));
+
+    simulator
+        .set_trace_watches(vec![
+            TraceWatch {
+                id: "a-q".into(),
+                signal: TraceSignalRef::ComponentPort(QualifiedPortRef::new(
+                    "register-module",
+                    ["register-a"],
+                    "word-register",
+                    "q",
+                )),
+            },
+            TraceWatch {
+                id: "b-q".into(),
+                signal: TraceSignalRef::ComponentPort(QualifiedPortRef::new(
+                    "register-module",
+                    ["register-b"],
+                    "word-register",
+                    "q",
+                )),
+            },
+        ])
+        .expect("nested macro outputs are watchable");
+    simulator.tick().expect("parallel capture");
+    let frame = simulator.trace_frames().back().expect("capture trace");
+    assert_eq!(frame.values[0].value.to_string(), "1T0");
+    assert_eq!(frame.values[1].value.to_string(), "T01");
+}
+
+#[test]
 fn generated_dff_diagnostics_are_remapped_to_the_register_macro() {
     let mut project = register_project(3, "1T0");
     project.circuits[0].components.push(component(
@@ -458,6 +587,69 @@ fn register_rejects_invalid_widths_and_preflights_generated_dffs_against_limits(
     assert_eq!(limit.component_refs.len(), 1);
     assert_eq!(limit.component_refs[0].circuit_id, "register-bank");
     assert_eq!(limit.component_refs[0].component_id, "register-370");
+}
+
+#[test]
+fn register_shared_controls_preflight_generated_connections_against_limits() {
+    let mut components = (0..6)
+        .map(|index| {
+            component(
+                &format!("driver-{index}"),
+                "source.trit_input",
+                serde_json::json!({"value": "1"}),
+            )
+        })
+        .collect::<Vec<_>>();
+    components.extend((0..370).map(|index| {
+        component(
+            &format!("register-{index:03}"),
+            "sequential.register",
+            serde_json::json!({"width": 27}),
+        )
+    }));
+
+    let mut wires = (0..6)
+        .map(|index| {
+            wire(
+                &format!("driver-{index}"),
+                &format!("driver-{index}"),
+                "out",
+                "register-000",
+                "en",
+            )
+        })
+        .collect::<Vec<_>>();
+    wires.extend((1..370).map(|index| {
+        wire(
+            &format!("register-{index:03}"),
+            "register-000",
+            "en",
+            &format!("register-{index:03}"),
+            "en",
+        )
+    }));
+
+    let main = ProjectCircuitV3 {
+        id: "main".into(),
+        name: "Register control fanout limit".into(),
+        kind: ProjectCircuitKind::Main,
+        components,
+        wires,
+    };
+    let diagnostics = compile_project_v3(project(vec![main]), "main")
+        .expect_err("59940 generated driver-consumer connections exceed the limit");
+    let limit = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "HIERARCHY_EXPANSION_LIMIT")
+        .expect("connection expansion limit diagnostic");
+    assert!(limit.message.contains("generated connection count"));
+    assert!(limit.message.contains("50000"));
+    assert_eq!(limit.component_refs.len(), 1);
+    assert!(
+        limit.component_refs[0]
+            .component_id
+            .starts_with("register-")
+    );
 }
 
 #[test]

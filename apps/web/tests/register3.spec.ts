@@ -19,7 +19,7 @@ async function expectWord(page: Page, q2: string, q1: string, q0: string) {
   await expect(node(page, "probe-q0").locator(".node-signal")).toHaveText(q0);
 }
 
-test("desktop Register3 captures, holds, resets, and opens its three DFF lanes", async ({
+test("desktop Register3 captures, holds, resets, and opens its structural module", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -63,9 +63,10 @@ test("desktop Register3 captures, holds, resets, and opens its three DFF lanes",
   await expect(page.getByRole("navigation", { name: "层级导航" })).toContainText(
     "Register3",
   );
-  await expect(node(page, "dff-2")).toBeVisible();
-  await expect(node(page, "dff-1")).toBeVisible();
-  await expect(node(page, "dff-0")).toBeVisible();
+  await expect(node(page, "data-splitter")).toBeVisible();
+  await expect(node(page, "register-word")).toBeVisible();
+  await expect(node(page, "register-word")).toContainText("Register[3]");
+  await expect(node(page, "output-splitter")).toBeVisible();
 
   const dimensions = await page.evaluate(() => ({
     documentClientWidth: document.documentElement.clientWidth,

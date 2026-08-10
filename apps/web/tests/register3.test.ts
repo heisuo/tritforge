@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { cloneExampleProject } from "../src/examples";
 
 describe("3-trit parallel register example", () => {
-  it("freezes the editable root circuit and three-DFF module topology", () => {
+  it("freezes the editable root circuit and structural Register module topology", () => {
     const project = cloneExampleProject("register3");
     expect(project).not.toBeNull();
     expect(project!.circuits.map((circuit) => circuit.id)).toEqual([
@@ -63,20 +63,44 @@ describe("3-trit parallel register example", () => {
     ]);
     expect(
       register.components
-        .filter((component) => component.typeId === "sequential.dff")
-        .map((component) => component.id),
-    ).toEqual(["dff-2", "dff-1", "dff-0"]);
-    expect(register.connections).toHaveLength(15);
-    for (const control of ["clk", "en", "rst"] as const) {
+        .filter((component) =>
+          ["wiring.splitter", "sequential.register"].includes(component.typeId),
+        )
+        .map((component) => [component.id, component.typeId]),
+    ).toEqual([
+      ["data-splitter", "wiring.splitter"],
+      ["register-word", "sequential.register"],
+      ["output-splitter", "wiring.splitter"],
+    ]);
+    expect(
+      register.components.find((component) => component.id === "register-word")
+        ?.properties,
+    ).toMatchObject({ label: "Register[3]", width: 3 });
+    for (const splitterId of ["data-splitter", "output-splitter"]) {
       expect(
-        register.connections
-          .filter((wire) => wire.sourceComponentId === `input-${control}`)
-          .map((wire) => [wire.targetComponentId, wire.targetPortId]),
-      ).toEqual([
-        ["dff-2", control],
-        ["dff-1", control],
-        ["dff-0", control],
-      ]);
+        register.components.find((component) => component.id === splitterId)
+          ?.properties,
+      ).toMatchObject({ width: 3, branchCount: 3, mapping: [0, 1, 2] });
     }
+    expect(
+      register.connections.map((wire) => [
+        wire.sourceComponentId,
+        wire.sourcePortId,
+        wire.targetComponentId,
+        wire.targetPortId,
+      ]),
+    ).toEqual([
+      ["input-d2", "out", "data-splitter", "branch2"],
+      ["input-d1", "out", "data-splitter", "branch1"],
+      ["input-d0", "out", "data-splitter", "branch0"],
+      ["data-splitter", "trunk", "register-word", "d"],
+      ["input-clk", "out", "register-word", "clk"],
+      ["input-en", "out", "register-word", "en"],
+      ["input-rst", "out", "register-word", "rst"],
+      ["register-word", "q", "output-splitter", "trunk"],
+      ["output-splitter", "branch2", "output-q2", "in"],
+      ["output-splitter", "branch1", "output-q1", "in"],
+      ["output-splitter", "branch0", "output-q0", "in"],
+    ]);
   });
 });
