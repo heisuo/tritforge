@@ -54,7 +54,16 @@ import { useStore } from "zustand";
 import "@xyflow/react/dist/style.css";
 import "./styles.css";
 import { CircuitNode, SIGNAL_COLORS } from "./CircuitNode";
+import {
+  AutoClockScheduler,
+  type AutoClockRate,
+  type AutoClockState,
+} from "./app/auto-clock";
 import { COMPONENT_HELP } from "./component-help";
+import {
+  Chronogram,
+  type ChronogramSignalOption,
+} from "./components/Chronogram";
 import { HierarchyBreadcrumbs } from "./components/HierarchyBreadcrumbs";
 import { ModuleManager } from "./components/ModuleManager";
 import { PropertyEditor } from "./components/PropertyEditor";
@@ -116,6 +125,8 @@ import {
   createWasmRuntime,
   wasmErrorMessage,
   wasmProjectError,
+  type TraceFrame,
+  type TraceWatch,
   type WasmRuntime,
 } from "./wasm-client";
 import { assignWireLanes } from "./wire-routing";
@@ -293,6 +304,19 @@ function readTextFile(file: File): Promise<string> {
   });
 }
 
+function snapshotRuntimeFault(
+  snapshot: ProjectSimulationSnapshot,
+): HierarchyRuntimeError | null {
+  const diagnostic = snapshot.diagnostics.find((item) => item.severity === "error");
+  if (snapshot.stable && !diagnostic) return null;
+  return new HierarchyRuntimeError({
+    name: "SimulationError",
+    code: diagnostic?.code ?? "SIMULATION_UNSTABLE",
+    message: diagnostic?.message ?? "simulation did not converge",
+    diagnostics: snapshot.diagnostics,
+  });
+}
+
 function Workbench() {
   const store = useMemo(() => createProjectStore(initialProject()), []);
   const project = useStore(store, (state) => state.project);
@@ -326,7 +350,15 @@ function Workbench() {
   const [compactLayout, setCompactLayout] = useState(false);
   const [activeExampleId, setActiveExampleId] = useState<ExampleId>("neg");
   const [reloadRevision, setReloadRevision] = useState(0);
+  const [traceFrames, setTraceFrames] = useState<TraceFrame[]>([]);
+  const [traceWatches, setTraceWatches] = useState<TraceWatch[]>([]);
+  const [autoClockState, setAutoClockState] = useState<AutoClockState>({
+    status: "paused",
+    rate: 1,
+  });
   const runtimeRef = useRef<HierarchyRuntime | null>(null);
+  const autoClockRef = useRef<AutoClockScheduler | null>(null);
+  const runtimeQueueRef = useRef<Promise<void>>(Promise.resolve());
   const wasmRef = useRef<WasmRuntime | null>(null);
   const baseCatalogRef = useRef<CatalogComponent[]>([]);
   const runtimeActiveCircuitRef = useRef<string | null>(null);
@@ -359,20 +391,51 @@ function Workbench() {
     [baseByType, moduleDescriptors],
   );
 
+  const syncAutoClockState = useCallback(() => {
+    const scheduler = autoClockRef.current;
+    if (scheduler) setAutoClockState(scheduler.state);
+  }, []);
+
+  const pauseAutoClock = useCallback(() => {
+    autoClockRef.current?.pause();
+    syncAutoClockState();
+  }, [syncAutoClockState]);
+
+  const enqueueRuntimeCommand = useCallback(
+    (command: () => void | Promise<void>): Promise<void> => {
+      const pending = runtimeQueueRef.current.then(command, command);
+      runtimeQueueRef.current = pending.then(
+        () => undefined,
+        () => undefined,
+      );
+      return pending;
+    },
+    [],
+  );
+
+  const refreshTraceState = useCallback((runtime: HierarchyRuntime) => {
+    setTraceFrames(runtime.traceFrames());
+    setTraceWatches(runtime.traceWatches());
+  }, []);
+
   const setSuccessfulSnapshot = useCallback((next: ProjectSimulationSnapshot) => {
     setSnapshot(next);
     setDiagnostics(next.diagnostics);
   }, []);
 
-  const runtimeFailure = useCallback((prefix: string, error: unknown, clearSnapshot = true) => {
-    const decoded =
-      error instanceof HierarchyRuntimeError
-        ? error
-        : new HierarchyRuntimeError(wasmProjectError(error));
-    if (clearSnapshot) setSnapshot(null);
-    setDiagnostics(decoded.diagnostics);
-    setStatusMessage(`${prefix}: ${decoded.message}`);
-  }, []);
+  const runtimeFailure = useCallback(
+    (prefix: string, error: unknown, clearSnapshot = true) => {
+      pauseAutoClock();
+      const decoded =
+        error instanceof HierarchyRuntimeError
+          ? error
+          : new HierarchyRuntimeError(wasmProjectError(error));
+      if (clearSnapshot) setSnapshot(null);
+      setDiagnostics(decoded.diagnostics);
+      setStatusMessage(`${prefix}: ${decoded.message}`);
+    },
+    [pauseAutoClock],
+  );
 
   const editFailure = useCallback((prefix: string, error: unknown) => {
     if (error instanceof HierarchyRuntimeError) {
@@ -410,16 +473,113 @@ function Workbench() {
     [],
   );
 
-  const tickSimulation = useCallback(() => {
-    const runtime = runtimeRef.current;
-    if (!runtime) return;
-    try {
-      setSuccessfulSnapshot(runtime.tick());
-      setStatusMessage("已完成单步 Tick");
-    } catch (error) {
-      runtimeFailure("单步 Tick 失败", error);
+  const runManualRuntimeCommand = useCallback(
+    (
+      status: string,
+      failurePrefix: string,
+      command: (runtime: HierarchyRuntime) => ProjectSimulationSnapshot,
+    ): Promise<void> => {
+      pauseAutoClock();
+      return enqueueRuntimeCommand(() => {
+        const runtime = runtimeRef.current;
+        if (!runtime) return;
+        try {
+          setSuccessfulSnapshot(command(runtime));
+          refreshTraceState(runtime);
+          setStatusMessage(status);
+        } catch (error) {
+          try {
+            refreshTraceState(runtime);
+          } catch {
+            // Keep the retained runtime snapshot and report the original command fault.
+          }
+          runtimeFailure(failurePrefix, error, false);
+        }
+      });
+    },
+    [
+      enqueueRuntimeCommand,
+      pauseAutoClock,
+      refreshTraceState,
+      runtimeFailure,
+      setSuccessfulSnapshot,
+    ],
+  );
+
+  const tickSimulation = useCallback(
+    () =>
+      runManualRuntimeCommand(
+        "已完成单步 Tick",
+        "单步 Tick 失败",
+        (runtime) => runtime.tick(),
+      ),
+    [runManualRuntimeCommand],
+  );
+
+  const advanceSimulationPhase = useCallback(
+    () =>
+      runManualRuntimeCommand(
+        "已推进一个时钟相位",
+        "相位推进失败",
+        (runtime) => runtime.advancePhase(),
+      ),
+    [runManualRuntimeCommand],
+  );
+
+  const clearTraceHistory = useCallback(() => {
+    pauseAutoClock();
+    return enqueueRuntimeCommand(() => {
+      const runtime = runtimeRef.current;
+      if (!runtime) return;
+      try {
+        runtime.clearTrace();
+        refreshTraceState(runtime);
+        setStatusMessage("时序记录已清空");
+      } catch (error) {
+        runtimeFailure("清空时序记录失败", error, false);
+      }
+    });
+  }, [enqueueRuntimeCommand, pauseAutoClock, refreshTraceState, runtimeFailure]);
+
+  const replaceTraceWatches = useCallback(
+    (nextWatches: TraceWatch[]) => {
+      pauseAutoClock();
+      return enqueueRuntimeCommand(() => {
+        const runtime = runtimeRef.current;
+        if (!runtime) return;
+        try {
+          runtime.setTraceWatches(nextWatches);
+          refreshTraceState(runtime);
+          setStatusMessage(`正在观察 ${nextWatches.length} 个信号`);
+        } catch (error) {
+          runtimeFailure("观察信号更新失败", error, false);
+        }
+      });
+    },
+    [enqueueRuntimeCommand, pauseAutoClock, refreshTraceState, runtimeFailure],
+  );
+
+  const toggleAutoClock = useCallback(() => {
+    const scheduler = autoClockRef.current;
+    if (!scheduler) return;
+    if (scheduler.state.status === "running" || scheduler.state.status === "suspended") {
+      scheduler.pause();
+      setStatusMessage("自动时钟已暂停");
+    } else {
+      scheduler.start();
+      setStatusMessage("自动时钟正在运行");
     }
-  }, [runtimeFailure, setSuccessfulSnapshot]);
+    syncAutoClockState();
+  }, [syncAutoClockState]);
+
+  const changeAutoClockRate = useCallback(
+    (rate: AutoClockRate) => {
+      autoClockRef.current?.setRate(rate);
+      syncAutoClockState();
+      setStatusMessage(`自动时钟速度: ${rate} cycle/s`);
+    },
+    [syncAutoClockState],
+  );
 
   const restoreActiveCircuit = useCallback(() => {
     const state = store.getState();
@@ -460,6 +620,7 @@ function Workbench() {
     updatePath: () => void,
     failurePrefix: string,
   ): boolean => {
+    pauseAutoClock();
     try {
       const runtime = runtimeRef.current;
       const nextCatalog = prepareProjectCatalog(
@@ -469,7 +630,10 @@ function Workbench() {
       const nextSnapshot = runtime?.switchActive(targetCircuitId);
       if (nextSnapshot) runtimeActiveCircuitRef.current = targetCircuitId;
       acceptProjectCatalog(nextCatalog);
-      if (nextSnapshot) setSuccessfulSnapshot(nextSnapshot);
+      if (nextSnapshot && runtime) {
+        setSuccessfulSnapshot(nextSnapshot);
+        refreshTraceState(runtime);
+      }
       updatePath();
       restoreActiveCircuit();
       return true;
@@ -477,7 +641,7 @@ function Workbench() {
       runtimeFailure(failurePrefix, error, false);
       return false;
     }
-  }, [acceptProjectCatalog, prepareProjectCatalog, restoreActiveCircuit, runtimeFailure, setSuccessfulSnapshot, store]);
+  }, [acceptProjectCatalog, pauseAutoClock, prepareProjectCatalog, refreshTraceState, restoreActiveCircuit, runtimeFailure, setSuccessfulSnapshot, store]);
 
   useEffect(() => {
     let mounted = true;
@@ -487,6 +651,32 @@ function Workbench() {
         wasmRef.current = wasm;
         const runtime = new HierarchyRuntime(wasm.projectSimulator);
         runtimeRef.current = runtime;
+        const scheduler = new AutoClockScheduler({
+          rate: autoClockState.rate,
+          advancePhase: () =>
+            enqueueRuntimeCommand(() => {
+              const activeRuntime = runtimeRef.current;
+              if (!activeRuntime) {
+                throw new Error("层级模拟器尚未就绪");
+              }
+              const nextSnapshot = activeRuntime.advancePhase();
+              setSuccessfulSnapshot(nextSnapshot);
+              refreshTraceState(activeRuntime);
+              const fault = snapshotRuntimeFault(nextSnapshot);
+              if (fault) throw fault;
+            }),
+          onError: (error) => {
+            try {
+              refreshTraceState(runtime);
+            } catch {
+              // The command error remains the primary status message.
+            }
+            runtimeFailure("自动时钟已暂停", error, false);
+            syncAutoClockState();
+          },
+        });
+        autoClockRef.current = scheduler;
+        setAutoClockState(scheduler.state);
         const wiringCatalog: CatalogComponent[] = WIRING_HELPERS.map((helper) => ({
           type_id: helper.typeId,
           display_name: helper.displayName,
@@ -528,15 +718,27 @@ function Workbench() {
             )
               ? currentActive
               : nextProject.rootCircuitId;
-            const accepted =
-              requested !== null || runtimeActiveCircuitRef.current !== nextActive
-                ? runtime.load(nextProject, nextActive)
-                : runtime.updateProject(nextProject);
+            const reloadsRuntime =
+              requested !== null || runtimeActiveCircuitRef.current !== nextActive;
+            const previousCompileCount = runtime.snapshot()?.compileCount;
+            if (reloadsRuntime) pauseAutoClock();
+            const accepted = reloadsRuntime
+              ? runtime.load(nextProject, nextActive)
+              : runtime.updateProject(nextProject);
+            if (
+              !reloadsRuntime &&
+              previousCompileCount !== undefined &&
+              accepted.compileCount !== previousCompileCount
+            ) {
+              pauseAutoClock();
+            }
             runtimeActiveCircuitRef.current = nextActive;
             setSuccessfulSnapshot(accepted);
+            refreshTraceState(runtime);
           });
           acceptProjectCatalog(nextCatalog);
           setSuccessfulSnapshot(nextSnapshot);
+          refreshTraceState(runtime);
           restoreActiveCircuit();
           setWasmState("ready");
           setStatusMessage("Rust/WASM 层级模拟器已就绪");
@@ -552,9 +754,18 @@ function Workbench() {
       });
     return () => {
       mounted = false;
+      autoClockRef.current?.dispose();
+      autoClockRef.current = null;
       store.getState().setApplyProject(undefined);
     };
   }, []);
+
+  useEffect(() => {
+    const syncAfterVisibilityChange = () => queueMicrotask(syncAutoClockState);
+    document.addEventListener("visibilitychange", syncAfterVisibilityChange);
+    return () =>
+      document.removeEventListener("visibilitychange", syncAfterVisibilityChange);
+  }, [syncAutoClockState]);
 
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return;
@@ -1095,6 +1306,7 @@ function Workbench() {
 
   const loadProject = useCallback(
     (nextProject: ProjectDocumentV3, message: string) => {
+      pauseAutoClock();
       try {
         pendingActiveCircuitRef.current = nextProject.rootCircuitId;
         store.getState().replaceProject(nextProject);
@@ -1107,7 +1319,7 @@ function Workbench() {
         pendingActiveCircuitRef.current = null;
       }
     },
-    [restoreActiveCircuit, runtimeFailure, store],
+    [pauseAutoClock, restoreActiveCircuit, runtimeFailure, store],
   );
 
   const loadExample = useCallback(
@@ -1214,6 +1426,51 @@ function Workbench() {
         })),
     [moduleDescriptors, project],
   );
+  const chronogramSignals = useMemo<ChronogramSignalOption[]>(() => {
+    if (wasmState !== "ready") return [];
+    const navigationPath = activePath
+      .slice(1)
+      .flatMap((entry) => (entry.instanceId ? [entry.instanceId] : []));
+    try {
+      return activeCircuit.components.flatMap((component) => {
+        const label =
+          typeof component.properties.label === "string" &&
+          component.properties.label.trim()
+            ? component.properties.label.trim()
+            : component.id;
+        return store
+          .getState()
+          .resolveComponentPorts(activeCircuitId, component.id)
+          .map((port) => {
+            const path = [
+              activeCircuitId,
+              ...navigationPath,
+              component.id,
+              port.id,
+            ]
+              .map(encodeURIComponent)
+              .join("/");
+            return {
+              id: `port/${path}`,
+              label: `${label}.${port.id}`,
+              width: port.width,
+              signal: {
+                kind: "componentPort" as const,
+                ref: {
+                  circuitId: activeCircuitId,
+                  // switchActive compiles the open circuit as the trace root.
+                  instancePath: [],
+                  componentId: component.id,
+                  portId: port.id,
+                },
+              },
+            };
+          });
+      });
+    } catch {
+      return [];
+    }
+  }, [activeCircuit, activeCircuitId, activePath, store, structureRevision, wasmState]);
   const breadcrumbEntries = activePath.map((entry) => ({
     circuitId: entry.circuitId,
     name:
@@ -1391,7 +1648,7 @@ function Workbench() {
         <div className="brand">
           <Workflow aria-hidden="true" />
           <strong>LOGSIM TERNARY</strong>
-          <span>PHASE 3B</span>
+          <span>PHASE 3D</span>
         </div>
         <div className={`toolbar ${mobileMenuOpen ? "is-open" : ""}`} role="toolbar" aria-label="画布工具">
           <button className="mobile-only icon-button" type="button" title="打开工具菜单" aria-label="打开工具菜单" aria-expanded={mobileMenuOpen} aria-controls="mobile-toolbar-menu" onClick={() => setMobileMenuOpen((value) => !value)}><Menu aria-hidden="true" /></button>
@@ -1488,6 +1745,21 @@ function Workbench() {
           <Diagnostics diagnostics={diagnostics} onNavigate={navigateDiagnostic} />
         </aside>
       </div>
+
+      <Chronogram
+        availableSignals={chronogramSignals}
+        watches={traceWatches}
+        frames={traceFrames}
+        rate={autoClockState.rate}
+        status={autoClockState.status}
+        disabled={wasmState !== "ready" || !snapshot}
+        onToggleRun={toggleAutoClock}
+        onAdvancePhase={advanceSimulationPhase}
+        onTick={tickSimulation}
+        onClear={clearTraceHistory}
+        onRateChange={changeAutoClockRate}
+        onWatchesChange={replaceTraceWatches}
+      />
 
       {exampleLibraryOpen && <ExampleLibrary examples={EXAMPLES} onClose={() => setExampleLibraryOpen(false)} onLoad={loadExample} />}
       <footer className="statusbar"><span className={`status-dot state-${wasmState}`} /><strong>{statusMessage}</strong><span className="status-separator" /><span>{snapshot ? snapshot.stable ? "STABLE" : "UNSTABLE" : "NO SNAPSHOT"}</span><span>{snapshot?.tickCount ?? 0} TICKS</span><span>{snapshot?.compileCount ?? 0} COMPILES</span><span>{diagnostics.length} DIAGNOSTICS</span><span className="status-spacer" /><span>{nodes.length} NODES</span><span>{edges.length} WIRES</span></footer>

@@ -9,6 +9,7 @@ export default defineConfig({
     "register3.spec.ts",
     "bus-wiring.spec.ts",
     "bus-teaching-example.spec.ts",
+    "chronogram.spec.ts",
   ],
   fullyParallel: false,
   workers: 1,

@@ -8,7 +8,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectSimulationSnapshot } from "../src/editor-model";
-import type { WasmProjectSimulatorBinding } from "../src/wasm-client";
+import type { TraceFrame, WasmProjectSimulatorBinding } from "../src/wasm-client";
 
 const runtimeMock = vi.hoisted(() => {
   const snapshot = (): ProjectSimulationSnapshot => ({
@@ -39,7 +39,7 @@ const runtimeMock = vi.hoisted(() => {
       values: [],
       diagnostics: [],
     })),
-    traceFrames: vi.fn(() => []),
+    traceFrames: vi.fn((): TraceFrame[] => []),
     traceWatches: vi.fn(() => []),
     traceDiagnostics: vi.fn(() => []),
     clearTrace: vi.fn(),
@@ -1005,5 +1005,58 @@ describe("App", () => {
       expect(navigation).toHaveTextContent("Wrapper");
       expect(navigation).toHaveTextContent("Identity");
     });
+  });
+
+  it("pauses automatic execution while retaining the runtime fault frame", async () => {
+    const faultDiagnostic = {
+      code: "NON_CONVERGENT",
+      severity: "error" as const,
+      message: "simulation did not converge",
+      primaryLocation: null,
+      componentRefs: [],
+      connectionRefs: [],
+      portRefs: [],
+    };
+    runtimeMock.advancePhase.mockImplementationOnce(() => {
+      throw {
+        code: "NON_CONVERGENT",
+        message: "simulation did not converge",
+        diagnostics: [faultDiagnostic],
+      };
+    });
+    runtimeMock.traceFrames.mockImplementation(() =>
+      runtimeMock.advancePhase.mock.calls.length > 0
+        ? [
+            {
+              cycle: 0,
+              clockPhase: "highStable" as const,
+              reason: "fault" as const,
+              values: [],
+              diagnostics: [faultDiagnostic],
+            },
+          ]
+        : [],
+    );
+
+    render(<App />);
+    await screen.findByText(/层级模拟器已就绪/);
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByLabelText("自动时钟速度"), {
+      target: { value: "20" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "运行自动时钟" }));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(25);
+    });
+
+    expect(runtimeMock.advancePhase).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "运行自动时钟" })).toBeVisible();
+    expect(screen.getByText(/自动时钟已暂停: simulation did not converge/))
+      .toBeInTheDocument();
+    expect(screen.getByTestId("chronogram-viewport")).toHaveAttribute(
+      "data-frame-count",
+      "1",
+    );
   });
 });
