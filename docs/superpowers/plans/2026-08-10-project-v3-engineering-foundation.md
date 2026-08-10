@@ -251,12 +251,12 @@ Commit `feat: expose project v3 signal shapes through wasm`.
 - Test: `apps/web/tests/project-store.test.ts`
 - Test: `apps/web/tests/signal-shape.test.ts`
 
-- [ ] Write RED tests for undirected wire creation, mismatched-width rejection, multi-wire endpoints, one-step
+- [x] Write RED tests for undirected wire creation, mismatched-width rejection, multi-wire endpoints, one-step
 undo for width/mapping edits, and unchanged document/runtime after invalid edits.
-- [ ] Run focused Vitest and confirm failures mention v2 connection assumptions.
-- [ ] Implement endpoint-normalized wires and consume only WASM-resolved port shapes.
-- [ ] Run focused and full Web tests.
-- [ ] Commit `feat: edit width-aware v3 wiring transactionally`.
+- [x] Run focused Vitest and confirm failures mention v2 connection assumptions.
+- [x] Implement endpoint-normalized wires and consume only WASM-resolved port shapes.
+- [x] Run focused and full Web tests.
+- [x] Commit `feat: edit width-aware v3 wiring transactionally`.
 
 ### Task 7: Render Junction, Tunnel, Splitter, and Bus Wires
 
