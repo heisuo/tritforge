@@ -6,6 +6,7 @@ import {
   serializeCircuitDocument,
   toEditorDocument,
 } from "../src/editor/circuit-document";
+import { editorHandleId } from "../src/editor/port-handles";
 import { createDefaultDocument } from "../src/editor-model";
 
 describe("versioned circuit documents", () => {
@@ -20,6 +21,24 @@ describe("versioned circuit documents", () => {
     });
     expect(toEditorDocument(parseCircuitDocument(serializeCircuitDocument(document))))
       .toEqual(editor);
+  });
+
+  it("stores semantic port IDs instead of role-specific editor handle IDs", () => {
+    const editor = createDefaultDocument();
+    editor.nodes[0].data.ports = [
+      { id: "out", direction: "output", width: 1 },
+    ];
+    editor.nodes[1].data.ports = [
+      { id: "a", direction: "input", width: 1 },
+      { id: "y", direction: "output", width: 1 },
+    ];
+    editor.edges[0].sourceHandle = editorHandleId("out", "source");
+    editor.edges[0].targetHandle = editorHandleId("a", "target");
+
+    expect(fromEditorDocument(editor).connections[0]).toMatchObject({
+      sourcePortId: "out",
+      targetPortId: "a",
+    });
   });
 
   it("rejects unsupported versions and unknown top-level properties", () => {

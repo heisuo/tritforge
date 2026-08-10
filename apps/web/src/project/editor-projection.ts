@@ -7,6 +7,7 @@ import type {
   ProjectSimulationSnapshot,
   TernaryWord,
 } from "../editor-model";
+import { editorHandleId } from "../editor/port-handles";
 import type { ProjectCircuitV3, ProjectWire, WireEndpoint } from "./project-v3";
 
 export type ComponentPortLookup = (
@@ -50,8 +51,14 @@ export function edgeNetValue(
 ): TernaryWord {
   if (!snapshot) return "Z";
   const endpoints = [
-    { componentId: edge.target, portId: edge.targetHandle ?? "" },
-    { componentId: edge.source, portId: edge.sourceHandle ?? "" },
+    {
+      componentId: edge.target,
+      portId: edge.data?.semanticTargetPortId ?? edge.targetHandle ?? "",
+    },
+    {
+      componentId: edge.source,
+      portId: edge.data?.semanticSourcePortId ?? edge.sourceHandle ?? "",
+    },
   ];
   for (const endpoint of endpoints) {
     const input =
@@ -83,9 +90,13 @@ function orientedEdge(
   return {
     id: wire.id,
     source: source.componentId,
-    sourceHandle: source.portId,
+    sourceHandle: editorHandleId(source.portId, "source"),
     target: target.componentId,
-    targetHandle: target.portId,
+    targetHandle: editorHandleId(target.portId, "target"),
+    data: {
+      semanticSourcePortId: source.portId,
+      semanticTargetPortId: target.portId,
+    },
   };
 }
 

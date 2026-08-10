@@ -15,6 +15,7 @@ import type {
   EditorNode,
   TritSymbol,
 } from "./editor-model";
+import { editorHandleId } from "./editor/port-handles";
 
 const SIGNAL_COLORS: Record<TritSymbol, string> = {
   T: "#246b9a",
@@ -129,7 +130,7 @@ export function CircuitNode({
             }}
           >
             <Handle
-              id={port.id}
+              id={editorHandleId(port.id, "target")}
               data-testid={`handle-${id}-input-${port.id}`}
               type="target"
               position={Position.Left}
@@ -137,7 +138,7 @@ export function CircuitNode({
             />
             {port.direction === "input" && (
               <Handle
-                id={port.id}
+                id={editorHandleId(port.id, "source")}
                 data-testid={`handle-${id}-output-${port.id}`}
                 type="source"
                 position={Position.Left}
@@ -167,7 +168,7 @@ export function CircuitNode({
             <b style={{ color: SIGNAL_COLORS[signal] }}>{signal}</b>
             <span>{"label" in port ? String(port.label) : port.id}</span>
             <Handle
-              id={port.id}
+              id={editorHandleId(port.id, "source")}
               data-testid={`handle-${id}-output-${port.id}`}
               type="source"
               position={Position.Right}
@@ -175,7 +176,7 @@ export function CircuitNode({
             />
             {port.direction === "output" && (
               <Handle
-                id={port.id}
+                id={editorHandleId(port.id, "target")}
                 data-testid={`handle-${id}-input-${port.id}`}
                 type="target"
                 position={Position.Right}

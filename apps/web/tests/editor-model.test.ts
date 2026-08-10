@@ -109,7 +109,7 @@ describe("editor document model", () => {
     ).toBe(DEFAULT_DOCUMENT.nodes);
   });
 
-  it("rejects connections that do not run output to input", () => {
+  it("accepts input-input connections because v3 wires are undirected", () => {
     expect(
       validateConnection(
         {
@@ -121,7 +121,37 @@ describe("editor document model", () => {
         DEFAULT_DOCUMENT,
         catalog,
       ),
-    ).toEqual({ valid: false, reason: "invalid_direction" });
+    ).toEqual({ valid: true });
+  });
+
+  it("accepts output-output connections because v3 wires are undirected", () => {
+    expect(
+      validateConnection(
+        {
+          source: "input-1",
+          sourceHandle: "out",
+          target: "neg-1",
+          targetHandle: "y",
+        },
+        { ...DEFAULT_DOCUMENT, edges: [] },
+        catalog,
+      ),
+    ).toEqual({ valid: true });
+  });
+
+  it("rejects a connection from a semantic endpoint to itself", () => {
+    expect(
+      validateConnection(
+        {
+          source: "neg-1",
+          sourceHandle: "a",
+          target: "neg-1",
+          targetHandle: "a",
+        },
+        { ...DEFAULT_DOCUMENT, edges: [] },
+        catalog,
+      ),
+    ).toEqual({ valid: false, reason: "same_endpoint" });
   });
 
   it("rejects catalog-resolved width mismatches", () => {

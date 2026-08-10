@@ -1,0 +1,45 @@
+{
+  "format": "logsim-ternary",
+  "version": 3,
+  "rootCircuitId": "main",
+  "circuits": [
+    {
+      "id": "main",
+      "name": "Task 6 Undirected Interactions",
+      "kind": "main",
+      "components": [
+        {
+          "id": "input-a",
+          "typeId": "sink.probe",
+          "position": { "x": 620, "y": 80 },
+          "properties": { "label": "Input A" }
+        },
+        {
+          "id": "input-b",
+          "typeId": "sink.probe",
+          "position": { "x": 620, "y": 250 },
+          "properties": { "label": "Input B" }
+        },
+        {
+          "id": "output-a",
+          "typeId": "source.trit_input",
+          "position": { "x": 80, "y": 80 },
+          "properties": { "label": "Output A", "value": "0" }
+        },
+        {
+          "id": "output-b",
+          "typeId": "source.trit_input",
+          "position": { "x": 80, "y": 250 },
+          "properties": { "label": "Output B", "value": "1" }
+        },
+        {
+          "id": "tunnel-a",
+          "typeId": "wiring.tunnel",
+          "position": { "x": 350, "y": 420 },
+          "properties": { "label": "BUS", "width": 1 }
+        }
+      ],
+      "wires": []
+    }
+  ]
+}

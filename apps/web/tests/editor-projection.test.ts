@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ProjectSimulationSnapshot } from "../src/editor-model";
+import { editorHandleId } from "../src/editor/port-handles";
 import { edgeNetValue, projectToEditor } from "../src/project/editor-projection";
 import type { ProjectCircuitV3 } from "../src/project/project-v3";
 
@@ -40,9 +41,13 @@ describe("v3 editor projection", () => {
 
     expect(editor.edges[0]).toMatchObject({
       source: "z-source",
-      sourceHandle: "out",
+      sourceHandle: editorHandleId("out", "source"),
       target: "a-probe",
-      targetHandle: "in",
+      targetHandle: editorHandleId("in", "target"),
+      data: {
+        semanticSourcePortId: "out",
+        semanticTargetPortId: "in",
+      },
     });
   });
 
@@ -107,16 +112,16 @@ describe("v3 editor projection", () => {
       expect.objectContaining({
         id: "input-input",
         source: "a-probe",
-        sourceHandle: "in",
+        sourceHandle: editorHandleId("in", "source"),
         target: "b-probe",
-        targetHandle: "in",
+        targetHandle: editorHandleId("in", "target"),
       }),
       expect.objectContaining({
         id: "output-output",
         source: "y-source",
-        sourceHandle: "out",
+        sourceHandle: editorHandleId("out", "source"),
         target: "z-source",
-        targetHandle: "out",
+        targetHandle: editorHandleId("out", "target"),
       }),
     ]);
   });

@@ -38,6 +38,31 @@ async function connect(page: Page, sourceTestId: string, targetTestId: string) {
   await page.mouse.up();
 }
 
+async function startConnectionPreview(page: Page, handleTestId: string) {
+  const handle = page.getByTestId(handleTestId);
+  const box = await handle.boundingBox();
+  if (!box) throw new Error("Connection handle is not visible");
+  const center = {
+    x: box.x + box.width / 2,
+    y: box.y + box.height / 2,
+  };
+  await page.mouse.move(center.x, center.y);
+  await page.mouse.down();
+  await page.mouse.move(center.x, center.y + 80, { steps: 4 });
+  const origin = await page
+    .locator(".react-flow__connection-path")
+    .evaluate((element) => {
+      const path = element as SVGPathElement;
+      const point = path.getPointAtLength(0);
+      const matrix = path.getScreenCTM();
+      if (!matrix) throw new Error("Connection preview has no screen transform");
+      const screenPoint = new DOMPoint(point.x, point.y).matrixTransform(matrix);
+      return { x: screenPoint.x, y: screenPoint.y };
+    });
+  await page.mouse.up();
+  return { center, origin };
+}
+
 test("edits and simulates a ternary circuit through Rust/WASM", async ({
   page,
 }) => {
@@ -171,6 +196,62 @@ test("renders imported input-input and output-output wires on their real handles
   await expect(node(page, "a-probe").locator(".port-row")).toHaveCount(1);
   await expect(node(page, "y-source").locator(".port-row")).toHaveCount(1);
   expect(consoleErrors).toEqual([]);
+});
+
+test("creates legal input-input and output-output wires by dragging in Chromium", async ({
+  page,
+}) => {
+  const consoleErrors = watchConsoleErrors(page);
+  await waitForSimulator(page);
+  await page
+    .getByLabel("选择三进制工程文件")
+    .setInputFiles(
+      path.join(
+        import.meta.dirname,
+        "fixtures/task6-undirected-interactions-v3.json",
+      ),
+    );
+  await expect(page.getByText(/已导入工程/)).toBeVisible();
+
+  await connect(
+    page,
+    "handle-input-a-input-in",
+    "handle-input-b-input-in",
+  );
+  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
+
+  await connect(
+    page,
+    "handle-output-a-output-out",
+    "handle-output-b-output-out",
+  );
+  await expect(page.locator(".react-flow__edge")).toHaveCount(2);
+  await expect(page.getByText("2 WIRES")).toBeVisible();
+  expect(consoleErrors).toEqual([]);
+});
+
+test("starts an inout connection preview at the visible handle being dragged", async ({
+  page,
+}) => {
+  await waitForSimulator(page);
+  await page
+    .getByLabel("选择三进制工程文件")
+    .setInputFiles(
+      path.join(
+        import.meta.dirname,
+        "fixtures/task6-undirected-interactions-v3.json",
+      ),
+    );
+  await expect(page.getByText(/已导入工程/)).toBeVisible();
+
+  for (const handle of [
+    "handle-tunnel-a-input-net",
+    "handle-tunnel-a-output-net",
+  ]) {
+    const { center, origin } = await startConnectionPreview(page, handle);
+    expect(Math.hypot(origin.x - center.x, origin.y - center.y)).toBeLessThan(8);
+  }
+  await expect(page.locator(".react-flow__edge")).toHaveCount(0);
 });
 
 for (const viewport of [

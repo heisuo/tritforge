@@ -4,6 +4,7 @@ import type {
   EditorNode,
   TernaryWord,
 } from "../editor-model";
+import { semanticPortIdForHandle } from "./port-handles";
 
 export interface EditorComponent {
   id: string;
@@ -95,13 +96,25 @@ export function fromEditorDocument(
             : { value: node.data.sourceValue }),
       },
     })),
-    connections: document.edges.map((edge) => ({
-      id: edge.id,
-      sourceComponentId: edge.source,
-      sourcePortId: edge.sourceHandle ?? "",
-      targetComponentId: edge.target,
-      targetPortId: edge.targetHandle ?? "",
-    })),
+    connections: document.edges.map((edge) => {
+      const sourceNode = document.nodes.find((node) => node.id === edge.source);
+      const targetNode = document.nodes.find((node) => node.id === edge.target);
+      return {
+        id: edge.id,
+        sourceComponentId: edge.source,
+        sourcePortId:
+          semanticPortIdForHandle(
+            sourceNode?.data.ports ?? [],
+            edge.sourceHandle,
+          ) ?? edge.data?.semanticSourcePortId ?? edge.sourceHandle ?? "",
+        targetComponentId: edge.target,
+        targetPortId:
+          semanticPortIdForHandle(
+            targetNode?.data.ports ?? [],
+            edge.targetHandle,
+          ) ?? edge.data?.semanticTargetPortId ?? edge.targetHandle ?? "",
+      };
+    }),
     ...(viewport ? { viewport: { ...viewport } } : {}),
   };
 }

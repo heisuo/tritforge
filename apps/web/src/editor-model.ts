@@ -1,4 +1,8 @@
 import type { Edge, Node } from "@xyflow/react";
+import {
+  portForEditorHandle,
+  semanticPortIdForHandle,
+} from "./editor/port-handles";
 import type { WireLaneAssignment } from "./wire-routing";
 
 export type KnownTrit = "T" | "0" | "1";
@@ -84,7 +88,10 @@ export interface ComponentNodeData extends Record<string, unknown> {
 export type EditorNode = Node<ComponentNodeData, "component">;
 export interface LogicWireData
   extends Record<string, unknown>,
-    WireLaneAssignment {}
+    Partial<WireLaneAssignment> {
+  semanticSourcePortId?: string;
+  semanticTargetPortId?: string;
+}
 export type EditorEdge = Edge<LogicWireData, "logic">;
 
 export interface EditorDocument {
@@ -222,7 +229,7 @@ export function toCircuitDefinition(
 
 export type ConnectionRejection =
   | "missing_endpoint"
-  | "invalid_direction"
+  | "same_endpoint"
   | "width_mismatch"
   | "duplicate";
 
@@ -250,11 +257,15 @@ export function validateConnection(
   const targetDescriptor = catalog.find(
     (component) => component.type_id === targetNode?.data.typeId,
   );
-  const sourcePort = (sourceNode?.data.ports ?? sourceDescriptor?.ports)?.find(
-    (port) => port.id === connection.sourceHandle,
+  const sourcePorts = sourceNode?.data.ports ?? sourceDescriptor?.ports ?? [];
+  const targetPorts = targetNode?.data.ports ?? targetDescriptor?.ports ?? [];
+  const sourcePort = portForEditorHandle(
+    sourcePorts,
+    connection.sourceHandle,
   );
-  const targetPort = (targetNode?.data.ports ?? targetDescriptor?.ports)?.find(
-    (port) => port.id === connection.targetHandle,
+  const targetPort = portForEditorHandle(
+    targetPorts,
+    connection.targetHandle,
   );
 
   if (
@@ -267,37 +278,43 @@ export function validateConnection(
   ) {
     return { valid: false, reason: "missing_endpoint" };
   }
-  if (!directionsCompatible(sourcePort.direction, targetPort.direction)) {
-    return { valid: false, reason: "invalid_direction" };
+  if (
+    connection.source === connection.target &&
+    sourcePort.id === targetPort.id
+  ) {
+    return { valid: false, reason: "same_endpoint" };
   }
   if (sourcePort.width !== targetPort.width) {
     return { valid: false, reason: "width_mismatch" };
   }
 
-  const duplicate = document.edges.some(
-    (edge) =>
-      ((edge.source === connection.source &&
-        edge.sourceHandle === connection.sourceHandle &&
+  const duplicate = document.edges.some((edge) => {
+    const edgeSourceNode = document.nodes.find((node) => node.id === edge.source);
+    const edgeTargetNode = document.nodes.find((node) => node.id === edge.target);
+    const edgeSourcePort = semanticPortIdForHandle(
+      edgeSourceNode?.data.ports ?? [],
+      edge.sourceHandle,
+    ) ?? edge.data?.semanticSourcePortId ?? edge.sourceHandle;
+    const edgeTargetPort = semanticPortIdForHandle(
+      edgeTargetNode?.data.ports ?? [],
+      edge.targetHandle,
+    ) ?? edge.data?.semanticTargetPortId ?? edge.targetHandle;
+    return (
+      (edge.source === connection.source &&
+        edgeSourcePort === sourcePort.id &&
         edge.target === connection.target &&
-        edge.targetHandle === connection.targetHandle) ||
-        (edge.source === connection.target &&
-          edge.sourceHandle === connection.targetHandle &&
-          edge.target === connection.source &&
-          edge.targetHandle === connection.sourceHandle)),
-  );
+        edgeTargetPort === targetPort.id) ||
+      (edge.source === connection.target &&
+        edgeSourcePort === targetPort.id &&
+        edge.target === connection.source &&
+        edgeTargetPort === sourcePort.id)
+    );
+  });
   if (duplicate) {
     return { valid: false, reason: "duplicate" };
   }
 
   return { valid: true };
-}
-
-function directionsCompatible(
-  left: CatalogPort["direction"],
-  right: CatalogPort["direction"],
-): boolean {
-  if (left === "inout" || right === "inout") return true;
-  return left !== right;
 }
 
 export function makeComponentId(

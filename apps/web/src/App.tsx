@@ -60,6 +60,7 @@ import {
   toEditorDocument,
   type CircuitDocument,
 } from "./editor/circuit-document";
+import { semanticPortIdForHandle } from "./editor/port-handles";
 import {
   createDefaultDocument,
   cycleKnownWord,
@@ -602,8 +603,8 @@ function Workbench() {
       if (!result.valid) {
         const messages = {
           duplicate: "已拒绝完全重复的连线",
-          invalid_direction: "端口方向不兼容",
           missing_endpoint: "连线端点不存在",
+          same_endpoint: "连线失败: 不能连接同一端口",
           width_mismatch: "连线失败: 两端信号宽度不一致",
         };
         setStatusMessage(messages[result.reason]);
@@ -614,15 +615,29 @@ function Workbench() {
           setStatusMessage("连线失败: 连线端点不存在");
           return;
         }
+        const sourceNode = nodes.find((node) => node.id === connection.source);
+        const targetNode = nodes.find((node) => node.id === connection.target);
+        const sourcePortId = semanticPortIdForHandle(
+          sourceNode?.data.ports ?? [],
+          connection.sourceHandle,
+        );
+        const targetPortId = semanticPortIdForHandle(
+          targetNode?.data.ports ?? [],
+          connection.targetHandle,
+        );
+        if (!sourcePortId || !targetPortId) {
+          setStatusMessage("连线失败: 连线端点不存在");
+          return;
+        }
         store.getState().addWire(activeCircuitId, {
           id: makeConnectionId(edges),
           endpointA: {
             componentId: connection.source,
-            portId: connection.sourceHandle,
+            portId: sourcePortId,
           },
           endpointB: {
             componentId: connection.target,
-            portId: connection.targetHandle,
+            portId: targetPortId,
           },
         });
         restoreActiveCircuit();
@@ -635,7 +650,7 @@ function Workbench() {
         setStatusMessage(`连线失败${code}: ${wasmErrorMessage(error)}`);
       }
     },
-    [activeCircuitId, edges, restoreActiveCircuit, store, validateUiConnection],
+    [activeCircuitId, edges, nodes, restoreActiveCircuit, store, validateUiConnection],
   );
 
   const addBuiltin = useCallback(
@@ -1292,7 +1307,7 @@ function Workbench() {
           ))}
         </aside>
 
-        <section className="canvas" aria-label="电路画布" data-wire-state={JSON.stringify(renderedEdges.map((edge) => ({ id: edge.id, source: edge.source, sourcePort: edge.sourceHandle, target: edge.target, targetPort: edge.targetHandle, signal: edge.label })))} ref={flowRef} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }} onDrop={(event: DragEvent<HTMLDivElement>) => { event.preventDefault(); const typeId = event.dataTransfer.getData("application/logsim-component"); if (typeId && instanceRef.current) addBuiltin(typeId, instanceRef.current.screenToFlowPosition({ x: event.clientX, y: event.clientY })); }}>
+        <section className="canvas" aria-label="电路画布" data-wire-state={JSON.stringify(renderedEdges.map((edge) => ({ id: edge.id, source: edge.source, sourcePort: edge.data?.semanticSourcePortId ?? edge.sourceHandle, target: edge.target, targetPort: edge.data?.semanticTargetPortId ?? edge.targetHandle, signal: edge.label })))} ref={flowRef} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }} onDrop={(event: DragEvent<HTMLDivElement>) => { event.preventDefault(); const typeId = event.dataTransfer.getData("application/logsim-component"); if (typeId && instanceRef.current) addBuiltin(typeId, instanceRef.current.screenToFlowPosition({ x: event.clientX, y: event.clientY })); }}>
           {wasmState !== "loading" ? (
             <ReactFlow<EditorNode, EditorEdge>
               key={`${activeCircuitId}-${reloadRevision}`}
