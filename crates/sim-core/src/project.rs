@@ -45,11 +45,17 @@ pub struct ProjectDocumentV3 {
 impl ProjectDocumentV3 {
     pub fn parse_json(json: &str) -> Result<Self, ProjectDocumentV3ParseError> {
         #[derive(Deserialize)]
-        struct VersionHeader {
+        struct ProjectHeader {
+            format: String,
             version: u32,
         }
 
-        let header: VersionHeader = serde_json::from_str(json)?;
+        let header: ProjectHeader = serde_json::from_str(json)?;
+        if header.format != "logsim-ternary" {
+            return Err(ProjectDocumentV3ParseError::UnsupportedFormat(
+                header.format,
+            ));
+        }
         if header.version != 3 {
             return Err(ProjectDocumentV3ParseError::UnsupportedVersion(
                 header.version,
@@ -86,6 +92,8 @@ pub struct WireEndpoint {
 
 #[derive(Debug, Error)]
 pub enum ProjectDocumentV3ParseError {
+    #[error("unsupported project document format '{0}'; expected 'logsim-ternary'")]
+    UnsupportedFormat(String),
     #[error("unsupported project document version {0}; expected version 3")]
     UnsupportedVersion(u32),
     #[error("invalid project v3 JSON: {0}")]

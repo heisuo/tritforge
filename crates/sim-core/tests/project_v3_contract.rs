@@ -214,3 +214,29 @@ fn project_v3_checked_parser_rejects_wrong_versions_and_connections() {
     );
     assert!(ProjectDocumentV3::parse_json(&mixed_schema.to_string()).is_err());
 }
+
+#[test]
+fn project_v3_checked_parser_requires_the_format_header() {
+    let valid = serde_json::json!({
+        "format": "logsim-ternary",
+        "version": 3,
+        "rootCircuitId": "main",
+        "circuits": [{
+            "id": "main",
+            "name": "Main",
+            "kind": "main",
+            "components": [],
+            "wires": []
+        }]
+    });
+    let mut wrong_format = valid.clone();
+    wrong_format["format"] = serde_json::json!("another-format");
+
+    assert!(ProjectDocumentV3::parse_json(&valid.to_string()).is_ok());
+    assert!(
+        ProjectDocumentV3::parse_json(&wrong_format.to_string())
+            .unwrap_err()
+            .to_string()
+            .contains("another-format")
+    );
+}
