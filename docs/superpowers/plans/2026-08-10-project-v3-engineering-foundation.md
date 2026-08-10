@@ -302,13 +302,13 @@ recombines all branches into the same word.
 - Test: `crates/sim-core/tests/simulator_propagation.rs`
 - Test: `crates/sim-core/tests/project_simulation.rs`
 
-- [ ] Write RED tests for initial LowStable, rise-only DFF commit, fall-only propagation, two-phase Tick
+- [x] Write RED tests for initial LowStable, rise-only DFF commit, fall-only propagation, two-phase Tick
 compatibility, phase/cycle overflow atomicity, and sibling instance simultaneous commits.
-- [ ] Implement `ClockPhase`, `advance_phase()`, and `tick()` as two phase calls with conservative diagnostic
+- [x] Implement `ClockPhase`, `advance_phase()`, and `tick()` as two phase calls with conservative diagnostic
 aggregation.
-- [ ] Preserve existing `tickCount` JSON and add `clockPhase` without changing source-update semantics.
-- [ ] Run all sim-core tests, fmt, and Clippy.
-- [ ] Commit `feat: advance ternary simulation by clock phase`.
+- [x] Preserve existing `tickCount` JSON and add `clockPhase` without changing source-update semantics.
+- [x] Run all sim-core tests, fmt, and Clippy.
+- [x] Commit `feat: advance ternary simulation by clock phase`.
 
 ### Task 10: Add a Bounded Watched-Signal Trace Recorder
 
