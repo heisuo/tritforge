@@ -123,6 +123,27 @@ fn dff_definition(clock_through_buffer: bool) -> CircuitDefinition {
     definition(components, connections)
 }
 
+fn transient_clock_conflict_definition() -> CircuitDefinition {
+    definition(
+        vec![
+            component("clock", "source.clock"),
+            valued_component("zero", "source.constant", Trit::Zero),
+            valued_component("positive", "source.constant", Trit::Pos),
+            component("dff", "sequential.dff"),
+            component("conflict-probe", "sink.probe"),
+            component("warning-probe", "sink.probe"),
+        ],
+        vec![
+            connection("clock-probe", "clock", "out", "conflict-probe", "in"),
+            connection("zero-probe", "zero", "out", "conflict-probe", "in"),
+            connection("clock-dff", "clock", "out", "dff", "clk"),
+            connection("data-dff", "positive", "out", "dff", "d"),
+            connection("enable-dff", "positive", "out", "dff", "en"),
+            connection("reset-dff", "zero", "out", "dff", "rst"),
+        ],
+    )
+}
+
 fn run_swap(dff0_id: &str, dff1_id: &str, reverse_definition: bool) -> (Trit, Trit) {
     let mut components = vec![
         component("clock", "source.clock"),
@@ -239,6 +260,33 @@ fn tick_runs_two_transitions_and_returns_to_its_starting_phase() {
     assert_eq!(from_high.output_value("clock", "out"), Some(Trit::Pos));
     assert_eq!(from_high.output_value("dff", "q"), Some(Trit::Zero));
     assert_eq!(from_high.tick_count, 2);
+}
+
+#[test]
+fn tick_retains_transient_phase_errors_once_in_deterministic_order() {
+    let mut simulator =
+        Simulator::load(transient_clock_conflict_definition()).expect("valid conflict circuit");
+
+    let ticked = simulator.tick().expect("tick completes");
+
+    assert!(ticked.stable);
+    assert_eq!(ticked.clock_phase, ClockPhase::LowStable);
+    assert_eq!(ticked.output_value("clock", "out"), Some(Trit::Zero));
+    assert_eq!(ticked.input_value("conflict-probe", "in"), Some(Trit::Zero));
+    assert_eq!(ticked.output_value("dff", "q"), Some(Trit::Pos));
+    assert_eq!(ticked.processed_events, 7);
+    assert_eq!(
+        ticked
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "MULTIPLE_DRIVER_CONFLICT")
+            .count(),
+        1
+    );
+    assert_eq!(
+        diagnostic_codes(&ticked),
+        vec!["MULTIPLE_DRIVER_CONFLICT", "UNDRIVEN_INPUT"]
+    );
 }
 
 #[test]
@@ -677,6 +725,34 @@ fn tick_without_clocks_preserves_a_preexisting_non_convergent_failure() {
     assert_eq!(ticked.output_value("mux", "y"), Some(Trit::Error));
     assert_eq!(ticked.output_value("neg", "y"), Some(Trit::Error));
     assert_eq!(ticked.input_value("probe", "in"), Some(Trit::Error));
+}
+
+#[test]
+fn advance_phase_counts_a_preexisting_failure_once_without_new_events() {
+    let mut simulator = Simulator::load(oscillator_definition()).expect("valid oscillator");
+    let failed = simulator
+        .set_input("selector", Trit::Pos)
+        .expect("activate feedback");
+    assert!(!failed.stable);
+    assert_eq!(failed.processed_events, 1024);
+
+    let advanced = simulator.advance_phase().expect("no-clock phase advances");
+
+    assert!(!advanced.stable);
+    assert_eq!(advanced.clock_phase, ClockPhase::HighStable);
+    assert_eq!(advanced.processed_events, 1024);
+    assert_eq!(
+        diagnostic_codes(&advanced),
+        vec!["NON_CONVERGENT_COMBINATIONAL_LOOP"]
+    );
+    assert_eq!(
+        advanced
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "NON_CONVERGENT_COMBINATIONAL_LOOP")
+            .count(),
+        1
+    );
 }
 
 #[test]

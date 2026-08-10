@@ -6,7 +6,7 @@ use crate::catalog::{ComponentKind, ComponentProperties, PortDirection};
 use crate::circuit::{
     CircuitDefinition, PortRef, ValidatedCircuit, ValidationOutcome, validate_circuit,
 };
-use crate::diagnostic::Diagnostic;
+use crate::diagnostic::{Diagnostic, Severity};
 use crate::gates::evaluate;
 use crate::sequential::dff_next;
 use crate::trit::{Trit, resolve_drivers};
@@ -50,7 +50,7 @@ pub struct SimulationSnapshot {
 
 #[derive(Default)]
 struct PhaseReport {
-    failures: BTreeSet<Diagnostic>,
+    diagnostics: BTreeSet<Diagnostic>,
     processed_events: usize,
 }
 
@@ -258,7 +258,9 @@ impl Simulator {
 
     #[allow(clippy::result_large_err)]
     pub fn advance_phase(&mut self) -> Result<SimulationSnapshot, Diagnostic> {
-        let report = self.advance_phase_transaction()?;
+        let mut report = PhaseReport::default();
+        self.record_existing_state(&mut report);
+        report.merge(self.advance_phase_transaction()?);
         self.apply_phase_report(&report);
         Ok(self.snapshot())
     }
@@ -268,9 +270,7 @@ impl Simulator {
         let next_tick_count = self.checked_next_tick_count()?;
         let starting_phase = self.clock_phase;
         let mut tick_report = PhaseReport::default();
-        if !self.stable {
-            self.record_phase(&mut tick_report);
-        }
+        self.record_existing_state(&mut tick_report);
 
         let first = self.advance_phase_transaction()?;
         tick_report.merge(first);
@@ -306,7 +306,6 @@ impl Simulator {
             })
             .collect::<BTreeMap<_, _>>();
         let mut report = PhaseReport::default();
-        self.retain_current_failures(&mut report.failures);
 
         for value in self.clock_levels.values_mut() {
             *value = Trit::Pos;
@@ -354,7 +353,6 @@ impl Simulator {
         let next_tick_count = self.checked_next_tick_count()?;
         let clock_ids = self.clock_levels.keys().cloned().collect::<Vec<_>>();
         let mut report = PhaseReport::default();
-        self.retain_current_failures(&mut report.failures);
 
         for value in self.clock_levels.values_mut() {
             *value = Trit::Zero;
@@ -368,10 +366,16 @@ impl Simulator {
     }
 
     fn apply_phase_report(&mut self, report: &PhaseReport) {
-        if !report.failures.is_empty() {
+        if !report.diagnostics.is_empty() {
             let mut diagnostics = self.diagnostics.iter().cloned().collect::<BTreeSet<_>>();
-            diagnostics.extend(report.failures.iter().cloned());
+            diagnostics.extend(report.diagnostics.iter().cloned());
             self.diagnostics = diagnostics.into_iter().collect();
+        }
+        if report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "NON_CONVERGENT_COMBINATIONAL_LOOP")
+        {
             self.stable = false;
         }
         self.processed_events = report.processed_events;
@@ -407,25 +411,25 @@ impl Simulator {
         report.processed_events = report
             .processed_events
             .saturating_add(self.processed_events);
+        self.record_dynamic_errors(&mut report.diagnostics);
+    }
+
+    fn record_existing_state(&self, report: &mut PhaseReport) {
+        self.record_dynamic_errors(&mut report.diagnostics);
         if !self.stable {
-            report.failures.extend(
-                self.diagnostics
-                    .iter()
-                    .filter(|diagnostic| diagnostic.code == "NON_CONVERGENT_COMBINATIONAL_LOOP")
-                    .cloned(),
-            );
+            report.processed_events = report
+                .processed_events
+                .saturating_add(self.processed_events);
         }
     }
 
-    fn retain_current_failures(&self, failures: &mut BTreeSet<Diagnostic>) {
-        if !self.stable {
-            failures.extend(
-                self.diagnostics
-                    .iter()
-                    .filter(|diagnostic| diagnostic.code == "NON_CONVERGENT_COMBINATIONAL_LOOP")
-                    .cloned(),
-            );
-        }
+    fn record_dynamic_errors(&self, diagnostics: &mut BTreeSet<Diagnostic>) {
+        diagnostics.extend(
+            self.diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.severity == Severity::Error)
+                .cloned(),
+        );
     }
 
     fn settle(&mut self, component_ids: impl IntoIterator<Item = String>) {
@@ -688,7 +692,7 @@ impl Simulator {
 
 impl PhaseReport {
     fn merge(&mut self, other: Self) {
-        self.failures.extend(other.failures);
+        self.diagnostics.extend(other.diagnostics);
         self.processed_events = self.processed_events.saturating_add(other.processed_events);
     }
 }
