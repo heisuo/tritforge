@@ -346,12 +346,12 @@ structured unavailable-signal errors.
 - Create: `apps/web/src/app/auto-clock.ts`
 - Test: `apps/web/tests/auto-clock.test.ts`
 
-- [ ] Use fake timers to write RED tests for 0.5/1/2/5/10/20 cycles per second, two calls per cycle, no
+- [x] Use fake timers to write RED tests for 0.5/1/2/5/10/20 cycles per second, two calls per cycle, no
 reentrant WASM calls, bounded lag catch-up, pause-on-error, visibility pause, and disposal.
-- [ ] Implement one scheduler state machine with `start`, `pause`, `setRate`, and `dispose`.
-- [ ] Keep all circuit ordering in Rust; scheduler callbacks only invoke one queued `advancePhase` command.
-- [ ] Run focused tests and typecheck.
-- [ ] Commit `feat: schedule automatic ternary clocks`.
+- [x] Implement one scheduler state machine with `start`, `pause`, `setRate`, and `dispose`.
+- [x] Keep all circuit ordering in Rust; scheduler callbacks only invoke one queued `advancePhase` command.
+- [x] Run focused tests and typecheck.
+- [x] Commit `feat: schedule automatic ternary clocks`.
 
 ### Task 13: Build the Compact Chronogram
 
