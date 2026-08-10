@@ -1,5 +1,6 @@
 pub mod catalog;
 pub mod circuit;
+pub mod connectivity;
 pub mod diagnostic;
 pub mod gates;
 pub mod hierarchy;
