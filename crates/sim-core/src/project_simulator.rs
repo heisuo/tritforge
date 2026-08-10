@@ -59,6 +59,7 @@ pub struct ProjectSimulator {
     validated: Option<ValidatedProject>,
     compiled: Option<CompiledProject>,
     compiled_v3: Option<CompiledProjectV3>,
+    v3_boundary_port_origins: BTreeMap<QualifiedPortRef, QualifiedPortRef>,
     network_index: Option<FlatNetworkIndex>,
     simulator: Option<Simulator>,
     snapshot: Option<ProjectSnapshot>,
@@ -80,6 +81,7 @@ impl ProjectSimulator {
             validated: None,
             compiled: None,
             compiled_v3: None,
+            v3_boundary_port_origins: BTreeMap::new(),
             network_index: None,
             simulator: None,
             snapshot: None,
@@ -97,6 +99,7 @@ impl ProjectSimulator {
         active_circuit_id: &str,
     ) -> Result<Self, Vec<ProjectDiagnostic>> {
         let compiled_v3 = compile_project_v3(project.clone(), active_circuit_id)?;
+        let v3_boundary_port_origins = build_v3_boundary_port_origins(&compiled_v3);
         let compiled = compiled_v3.compiled.clone();
         let network_index = FlatNetworkIndex::new(&compiled);
         let simulator = Simulator::load(compiled.circuit.clone()).map_err(|diagnostics| {
@@ -118,6 +121,7 @@ impl ProjectSimulator {
             validated: None,
             compiled: Some(compiled),
             compiled_v3: Some(compiled_v3),
+            v3_boundary_port_origins,
             network_index: Some(network_index),
             simulator: Some(simulator),
             snapshot: None,
@@ -289,6 +293,7 @@ impl ProjectSimulator {
             self.project_v3 = Some(project);
             self.validated = None;
             self.compiled = Some(compiled);
+            self.v3_boundary_port_origins = build_v3_boundary_port_origins(&compiled_v3);
             self.compiled_v3 = Some(compiled_v3);
             self.network_index = Some(FlatNetworkIndex::new(
                 self.compiled
@@ -329,6 +334,7 @@ impl ProjectSimulator {
         self.project_v3 = Some(project);
         self.validated = None;
         self.compiled = Some(compiled);
+        self.v3_boundary_port_origins = build_v3_boundary_port_origins(&compiled_v3);
         self.compiled_v3 = Some(compiled_v3);
         self.network_index = Some(network_index);
         self.simulator = Some(simulator);
@@ -430,6 +436,7 @@ impl ProjectSimulator {
         self.compile_count += 1;
         self.validated = None;
         self.compiled = Some(compiled);
+        self.v3_boundary_port_origins = build_v3_boundary_port_origins(&compiled_v3);
         self.compiled_v3 = Some(compiled_v3);
         self.network_index = Some(network_index);
         self.simulator = Some(simulator);
@@ -613,6 +620,7 @@ impl ProjectSimulator {
             MODULE_INPUT => "previewValue",
             _ => return Err(invalid_source(circuit_id, component_id)),
         };
+        let include_nested_occurrences = component.type_id != MODULE_INPUT;
         let shape = resolve_project_ports(&component.type_id, &component.properties)
             .map_err(|error| {
                 project_error(
@@ -717,7 +725,13 @@ impl ProjectSimulator {
             property,
             value,
         );
-        self.synchronize_lowered_source_word(circuit_id, component_id, property, &word);
+        self.synchronize_lowered_source_word(
+            circuit_id,
+            component_id,
+            property,
+            &word,
+            include_nested_occurrences,
+        );
         self.snapshot = Some(self.project_snapshot(&flat));
         Ok(SourceUpdateOutcome {
             snapshot: self
@@ -1103,18 +1117,42 @@ impl ProjectSimulator {
             .network_index
             .as_ref()
             .expect("trace diagnostics require a cached network index");
-        flat.diagnostics
+        let boundary_conflicts = self.boundary_conflicts(flat, compiled);
+        let mut diagnostics = ProjectDiagnosticSet::new();
+        for conflict in &boundary_conflicts {
+            let diagnostic = self.compiled_v3.as_ref().map_or_else(
+                || conflict.diagnostic.clone(),
+                |compiled_v3| {
+                    remap_v3_diagnostic_with_port_origins(
+                        conflict.diagnostic.clone(),
+                        compiled_v3,
+                        &self.v3_boundary_port_origins,
+                    )
+                },
+            );
+            diagnostics.insert(diagnostic);
+        }
+        for diagnostic in flat
+            .diagnostics
             .iter()
             .filter(|diagnostic| diagnostic.severity == Severity::Error)
-            .map(|diagnostic| {
-                let diagnostic = project_flat_diagnostic(diagnostic, compiled, network_index);
-                self.compiled_v3
-                    .as_ref()
-                    .map_or(diagnostic.clone(), |compiled_v3| {
-                        remap_v3_diagnostic(diagnostic, compiled_v3)
-                    })
-            })
-            .collect()
+        {
+            if target_conflict_is_covered(diagnostic, network_index, &boundary_conflicts) {
+                continue;
+            }
+            let diagnostic = project_flat_diagnostic(diagnostic, compiled, network_index);
+            diagnostics.insert(self.compiled_v3.as_ref().map_or(
+                diagnostic.clone(),
+                |compiled_v3| {
+                    remap_v3_diagnostic_with_port_origins(
+                        diagnostic,
+                        compiled_v3,
+                        &self.v3_boundary_port_origins,
+                    )
+                },
+            ));
+        }
+        diagnostics.into_vec()
     }
 
     fn resolve_trace_bindings(
@@ -1301,6 +1339,7 @@ impl ProjectSimulator {
         ));
         self.project_v3 = None;
         self.compiled_v3 = None;
+        self.v3_boundary_port_origins.clear();
         self.simulator = Some(simulator);
         self.snapshot = Some(self.project_snapshot(&flat));
         Ok(())
@@ -1343,30 +1382,44 @@ impl ProjectSimulator {
         component_id: &str,
         property: &str,
         word: &KnownWord,
+        include_nested_occurrences: bool,
     ) {
-        let scalar_values = self
+        let compiled_v3 = self
             .compiled_v3
             .as_ref()
-            .expect("ready word source has v3 reassembly")
-            .reassembly
-            .ports
-            .iter()
-            .filter(|(reference, _)| {
-                reference.circuit_id == circuit_id
-                    && reference.instance_path.is_empty()
-                    && reference.component_id == component_id
-            })
-            .flat_map(|(_, bits)| {
-                bits.iter().enumerate().filter_map(|(bit_index, bit)| {
-                    bit.scalar_port.as_ref().map(|scalar| {
-                        (
-                            (scalar.circuit_id.clone(), scalar.component_id.clone()),
-                            word.trit(bit_index as u8),
-                        )
-                    })
-                })
-            })
-            .collect::<BTreeMap<_, _>>();
+            .expect("ready word source has v3 reassembly");
+        let mut scalar_values = BTreeMap::new();
+        for (reference, bits) in &compiled_v3.reassembly.ports {
+            if reference.circuit_id != circuit_id
+                || reference.component_id != component_id
+                || (!include_nested_occurrences && !reference.instance_path.is_empty())
+            {
+                continue;
+            }
+            for (bit_index, bit) in bits.iter().enumerate() {
+                let Some(scalar) = &bit.scalar_port else {
+                    continue;
+                };
+                let source = QualifiedComponentRef::new(
+                    &scalar.circuit_id,
+                    scalar.instance_path.iter().cloned(),
+                    &scalar.component_id,
+                );
+                if !compiled_v3
+                    .compiled
+                    .provenance
+                    .source_copies
+                    .contains_key(&source)
+                {
+                    continue;
+                }
+                let key = (scalar.circuit_id.clone(), scalar.component_id.clone());
+                let value = word.trit(bit_index as u8);
+                if let Some(previous) = scalar_values.insert(key, value) {
+                    debug_assert_eq!(previous, value);
+                }
+            }
+        }
 
         for ((scalar_circuit, scalar_component), value) in &scalar_values {
             set_document_source_value(
@@ -1392,6 +1445,7 @@ impl ProjectSimulator {
         self.validated = None;
         self.compiled = None;
         self.compiled_v3 = None;
+        self.v3_boundary_port_origins.clear();
         self.network_index = None;
         self.simulator = None;
         self.snapshot = None;
@@ -2217,6 +2271,14 @@ fn remap_v3_diagnostic(
     diagnostic: ProjectDiagnostic,
     compiled_v3: &CompiledProjectV3,
 ) -> ProjectDiagnostic {
+    remap_v3_diagnostic_with_port_origins(diagnostic, compiled_v3, &BTreeMap::new())
+}
+
+fn remap_v3_diagnostic_with_port_origins(
+    diagnostic: ProjectDiagnostic,
+    compiled_v3: &CompiledProjectV3,
+    port_origins: &BTreeMap<QualifiedPortRef, QualifiedPortRef>,
+) -> ProjectDiagnostic {
     let component_refs = diagnostic
         .component_refs
         .iter()
@@ -2228,6 +2290,9 @@ fn remap_v3_diagnostic(
         .port_refs
         .iter()
         .map(|reference| {
+            if let Some(original) = port_origins.get(reference) {
+                return original.clone();
+            }
             let component = remap_v3_component_ref(
                 &QualifiedComponentRef::new(
                     &reference.circuit_id,
@@ -2297,6 +2362,28 @@ fn remap_v3_diagnostic(
         port_refs,
         ..diagnostic
     }
+}
+
+fn build_v3_boundary_port_origins(
+    compiled_v3: &CompiledProjectV3,
+) -> BTreeMap<QualifiedPortRef, QualifiedPortRef> {
+    let mut origins = BTreeMap::new();
+    for (logical, bits) in &compiled_v3.reassembly.ports {
+        for scalar in bits.iter().filter_map(|bit| bit.scalar_port.as_ref()) {
+            if !compiled_v3
+                .compiled
+                .projection
+                .boundaries
+                .contains_key(scalar)
+            {
+                continue;
+            }
+            origins
+                .entry(scalar.clone())
+                .or_insert_with(|| logical.clone());
+        }
+    }
+    origins
 }
 
 fn remap_v3_component_ref(

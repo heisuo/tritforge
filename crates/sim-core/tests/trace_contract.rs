@@ -942,3 +942,157 @@ fn large_v2_watch_bindings_are_indexed_once_and_frames_read_only_bound_endpoints
         (4 * MAX_TRACE_WATCHES) as u64
     );
 }
+
+#[test]
+fn nested_word_source_syncs_lowered_copies_for_every_instance_before_project_update() {
+    let source_module = circuit_v3(
+        "word-source",
+        ProjectCircuitKind::Module,
+        vec![
+            component(
+                "source",
+                "source.trit_input",
+                serde_json::json!({"width": 3, "value": "000"}),
+            ),
+            component(
+                "output",
+                "project.module_output",
+                serde_json::json!({"portId": "data", "label": "Data", "width": 3}),
+            ),
+        ],
+        vec![wire("source-output", "source", "out", "output", "in")],
+    );
+    let main = circuit_v3(
+        "main",
+        ProjectCircuitKind::Main,
+        vec![
+            component(
+                "left",
+                "project.module_instance",
+                serde_json::json!({"moduleId": "word-source", "label": "Left"}),
+            ),
+            component(
+                "right",
+                "project.module_instance",
+                serde_json::json!({"moduleId": "word-source", "label": "Right"}),
+            ),
+        ],
+        vec![],
+    );
+    let initial = project_v3(vec![main, source_module]);
+    let mut simulator = ProjectSimulator::load_v3(initial.clone(), "main").unwrap();
+    simulator
+        .set_trace_watches(vec![
+            watch("left", port("word-source", &["left"], "source", "out")),
+            watch("right", port("word-source", &["right"], "source", "out")),
+        ])
+        .unwrap();
+
+    let changed = simulator
+        .set_source_word("word-source", "source", "1T0")
+        .unwrap();
+    assert_eq!(
+        changed.component_output_words["left"]["data"].to_string(),
+        "1T0"
+    );
+    assert_eq!(
+        changed.component_output_words["right"]["data"].to_string(),
+        "1T0"
+    );
+    assert_eq!(
+        trace_values(simulator.trace_frames().back().unwrap()),
+        vec![("left", "1T0".into()), ("right", "1T0".into())]
+    );
+
+    let reverted = simulator.update_project_v3(initial).unwrap();
+    assert_eq!(
+        reverted.component_output_words["left"]["data"].to_string(),
+        "000"
+    );
+    assert_eq!(
+        reverted.component_output_words["right"]["data"].to_string(),
+        "000"
+    );
+    assert_eq!(
+        trace_values(simulator.trace_frames().back().unwrap()),
+        vec![("left", "000".into()), ("right", "000".into())]
+    );
+}
+
+#[test]
+fn watched_tick_records_high_phase_v3_boundary_conflict_without_full_projection() {
+    let conflict_module = circuit_v3(
+        "conflict",
+        ProjectCircuitKind::Module,
+        vec![
+            component("clock", "source.clock", serde_json::json!({})),
+            component("zero", "source.constant", serde_json::json!({"value": "0"})),
+            component(
+                "output",
+                "project.module_output",
+                serde_json::json!({"portId": "y", "label": "Y"}),
+            ),
+        ],
+        vec![
+            wire("clock-output", "clock", "out", "output", "in"),
+            wire("zero-output", "zero", "out", "output", "in"),
+        ],
+    );
+    let main = circuit_v3(
+        "main",
+        ProjectCircuitKind::Main,
+        vec![
+            component(
+                "conflict-1",
+                "project.module_instance",
+                serde_json::json!({"moduleId": "conflict", "label": "Conflict"}),
+            ),
+            component(
+                "observer",
+                "source.constant",
+                serde_json::json!({"value": "0"}),
+            ),
+        ],
+        vec![],
+    );
+    let mut simulator =
+        ProjectSimulator::load_v3(project_v3(vec![main, conflict_module]), "main").unwrap();
+    simulator
+        .set_trace_watches(vec![watch(
+            "observer",
+            port("main", &[], "observer", "out"),
+        )])
+        .unwrap();
+    let before = simulator.trace_performance_counters();
+
+    simulator.tick().unwrap();
+
+    let frames = simulator.trace_frames();
+    assert_eq!(frames.len(), 3);
+    assert_eq!(frames[1].clock_phase, ClockPhase::HighStable);
+    assert_eq!(frames[1].reason, TraceFrameReason::Fault);
+    let conflict = frames[1]
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "MULTIPLE_DRIVER_CONFLICT")
+        .expect("high phase must retain the projected module boundary conflict");
+    assert_eq!(conflict.port_refs[0].component_id, "conflict-1");
+    assert_eq!(conflict.port_refs[0].port_id, "y");
+    assert!(conflict.component_refs.iter().all(|reference| {
+        !reference.component_id.contains("generated") && !reference.component_id.contains('/')
+    }));
+    assert_eq!(frames[2].clock_phase, ClockPhase::LowStable);
+    assert_eq!(frames[2].reason, TraceFrameReason::ClockFall);
+    assert!(
+        frames[2]
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != "MULTIPLE_DRIVER_CONFLICT")
+    );
+    let after = simulator.trace_performance_counters();
+    assert_eq!(
+        after.project_snapshot_projections - before.project_snapshot_projections,
+        1
+    );
+    assert_eq!(after.endpoint_reads - before.endpoint_reads, 2);
+}
