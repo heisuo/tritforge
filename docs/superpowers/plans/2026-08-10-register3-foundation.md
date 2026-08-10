@@ -168,7 +168,7 @@ git add README.md docs
 git commit -m "docs: complete three-trit register phase"
 ```
 
-- [ ] **Step 4: Fast-forward merge and run the main demo**
+- [x] **Step 4: Fast-forward merge and run the main demo**
 
 Require a clean feature worktree, preserve unrelated main changes before merging, fast-forward
 `feature/register3-foundation` into `main`, verify both refs match, and start the Web server from
