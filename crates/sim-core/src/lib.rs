@@ -7,6 +7,7 @@ pub mod project;
 pub mod project_simulator;
 pub mod project_validation;
 pub mod sequential;
+pub mod signal;
 pub mod simulator;
 pub mod trit;
 
