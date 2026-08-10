@@ -96,6 +96,7 @@ export interface LogicWireData
   semanticWidth?: number;
   currentWord?: TernaryWord;
   localName?: string;
+  signalColor?: string;
 }
 export type EditorEdge = Edge<LogicWireData, "logic">;
 
@@ -258,11 +259,24 @@ export interface ConnectionCandidate {
   targetHandle?: string | null;
 }
 
+export type ConnectionValidationResult =
+  | { valid: true }
+  | {
+      valid: false;
+      reason: "width_mismatch";
+      sourceWidth: number;
+      targetWidth: number;
+    }
+  | {
+      valid: false;
+      reason: Exclude<ConnectionRejection, "width_mismatch">;
+    };
+
 export function validateConnection(
   connection: ConnectionCandidate,
   document: EditorDocument,
   catalog: CatalogComponent[] = [],
-): { valid: true } | { valid: false; reason: ConnectionRejection } {
+): ConnectionValidationResult {
   const nodeById = new Map(document.nodes.map((node) => [node.id, node]));
   const sourceNode = connection.source
     ? nodeById.get(connection.source)
@@ -304,7 +318,12 @@ export function validateConnection(
     return { valid: false, reason: "same_endpoint" };
   }
   if (sourcePort.width !== targetPort.width) {
-    return { valid: false, reason: "width_mismatch" };
+    return {
+      valid: false,
+      reason: "width_mismatch",
+      sourceWidth: sourcePort.width,
+      targetWidth: targetPort.width,
+    };
   }
 
   const duplicate = document.edges.some((edge) => {

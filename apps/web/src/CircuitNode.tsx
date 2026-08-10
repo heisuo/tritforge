@@ -49,7 +49,8 @@ function signalColor(value: TernaryWord): string {
 
 function signalFontSize(value: TernaryWord, large = false): number {
   if (large) {
-    if (value.length > 18) return 10;
+    if (value.length > 24) return 7;
+    if (value.length > 18) return 8;
     if (value.length > 9) return 13;
     if (value.length > 6) return 17;
     if (value.length > 3) return 22;
@@ -58,6 +59,13 @@ function signalFontSize(value: TernaryWord, large = false): number {
   if (value.length > 18) return 6;
   if (value.length > 9) return 7;
   return 9;
+}
+
+function signalLengthClass(value: TernaryWord): string {
+  if (value.length > 24) return "signal-length-27";
+  if (value.length > 18) return "signal-length-long";
+  if (value.length > 9) return "signal-length-medium";
+  return "signal-length-short";
 }
 
 function ComponentIcon({ typeId }: { typeId: string }) {
@@ -157,7 +165,7 @@ export function CircuitNode({
         <span>{data.label}</span>
       </div>
       <strong
-        className="node-signal"
+        className={`node-signal ${signalLengthClass(displaySignal)}`}
         aria-label={`信号 ${displaySignal}`}
         style={{ fontSize: signalFontSize(displaySignal, true) }}
       >
@@ -264,6 +272,8 @@ function InOutPort({
   position: Position;
   signal: TernaryWord;
 }) {
+  const name = "label" in port ? String(port.label) : port.id;
+  const accessibleName = `${name}，双向，${port.width} trit`;
   return (
     <>
       <Handle
@@ -271,6 +281,8 @@ function InOutPort({
         data-testid={`handle-${nodeId}-input-${port.id}`}
         type="target"
         position={position}
+        aria-label={accessibleName}
+        title={accessibleName}
         style={{ backgroundColor: signalColor(signal) }}
       />
       <Handle
@@ -278,6 +290,8 @@ function InOutPort({
         data-testid={`handle-${nodeId}-output-${port.id}`}
         type="source"
         position={position}
+        aria-label={accessibleName}
+        title={accessibleName}
         style={{ backgroundColor: signalColor(signal) }}
       />
     </>
@@ -321,7 +335,10 @@ function WiringNode({
     return (
       <div
         className={`wiring-tunnel ${selected ? "is-selected" : ""}`}
-        style={{ "--signal-color": signalColor(value) } as React.CSSProperties}
+        style={{
+          "--signal-color": signalColor(value),
+          width: `${Math.max(116, 96 + width * 4)}px`,
+        } as React.CSSProperties}
       >
         <InOutPort nodeId={id} port={net} position={Position.Left} signal={value} />
         <Cable aria-hidden="true" />
@@ -332,14 +349,27 @@ function WiringNode({
     );
   }
 
+  const branchTop = 38;
+  const branchGap = 20;
+  const splitterHeight = Math.max(
+    126,
+    70 + Math.max(0, branches.length - 1) * branchGap,
+  );
+  const splitterWidth = width > 9 ? 190 + width * 4 : 178;
+  const trunkTop =
+    branchTop + (Math.max(0, branches.length - 1) * branchGap) / 2;
+
   return (
-    <div className={`wiring-splitter ${selected ? "is-selected" : ""}`}>
+    <div
+      className={`wiring-splitter ${selected ? "is-selected" : ""}`}
+      style={{ height: splitterHeight, width: splitterWidth }}
+    >
       <div className="splitter-title">
         <GitFork aria-hidden="true" />
         <strong>{label}</strong>
       </div>
       {trunk && (
-        <div className="splitter-trunk">
+        <div className="splitter-trunk" style={{ top: trunkTop }}>
           <InOutPort
             nodeId={id}
             port={trunk}
@@ -356,7 +386,7 @@ function WiringNode({
         <div
           className="splitter-branch"
           key={port.id}
-          style={{ top: `${((index + 1) / (branches.length + 1)) * 100}%` }}
+          style={{ top: branchTop + index * branchGap }}
         >
           <b style={{ fontSize: signalFontSize(signal(port)) }}>{signal(port)}</b>
           <small>{port.width}t</small>

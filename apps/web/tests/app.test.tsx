@@ -826,9 +826,11 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: /添加分线器/ }));
 
     expect(await screen.findByTestId("handle-splitter-1-output-trunk"))
-      .toBeInTheDocument();
+      .toHaveAttribute("aria-label", "trunk，双向，3 trit");
+    expect(screen.getByTestId("handle-splitter-1-output-trunk"))
+      .toHaveAttribute("title", "trunk，双向，3 trit");
     expect(screen.getByTestId("handle-splitter-1-output-branch0"))
-      .toBeInTheDocument();
+      .toHaveAttribute("aria-label", "branch0，双向，1 trit");
     expect(screen.getByTestId("handle-splitter-1-output-branch2"))
       .toBeInTheDocument();
     expect(

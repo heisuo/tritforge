@@ -209,3 +209,169 @@ test("keeps compact drawers and status controls usable at 1024x720", async ({
   expect(overflow).toEqual({ horizontal: 0, vertical: 0 });
   expect(consoleErrors).toEqual([]);
 });
+
+test("rejects a width mismatch during connection preview and reports both widths", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const consoleErrors = watchConsoleErrors(page);
+  await waitForSimulator(page);
+  await page.getByRole("button", { name: "清空" }).click();
+  await place(page, "Trit Input", { x: 180, y: 280 });
+  await place(page, "Probe", { x: 650, y: 280 });
+  await node(page, "trit-input-1").click();
+  await applyWidthAndWord(page, 3, "1T0");
+
+  const source = page.getByTestId("handle-trit-input-1-output-out");
+  const target = page.getByTestId("handle-probe-1-input-in");
+  const sourceBox = await source.boundingBox();
+  const targetBox = await target.boundingBox();
+  if (!sourceBox || !targetBox) throw new Error("Connection handle is not visible");
+  await page.mouse.move(
+    sourceBox.x + sourceBox.width / 2,
+    sourceBox.y + sourceBox.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    targetBox.x + targetBox.width / 2,
+    targetBox.y + targetBox.height / 2,
+    { steps: 8 },
+  );
+
+  await expect(target).toHaveClass(/connectingto/);
+  await expect(target).not.toHaveClass(/valid/);
+  await page.mouse.up();
+
+  await expect(page.getByText(/3 trit -> 1 trit/)).toBeVisible();
+  await expect(page.locator(".react-flow__edge")).toHaveCount(0);
+  await page.screenshot({
+    path: "test-results/bus-wiring-width-mismatch-1440x900.png",
+    fullPage: true,
+  });
+  expect(consoleErrors).toEqual([]);
+});
+
+test("keeps 27 splitter branches and a 27-trit word inside stable node bounds", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const consoleErrors = watchConsoleErrors(page);
+  await waitForSimulator(page);
+  await page.getByRole("button", { name: "清空" }).click();
+  await place(page, "Trit Input", { x: 120, y: 180 });
+  await place(page, "分线器", { x: 430, y: 110 });
+  await place(page, "Probe", { x: 820, y: 650 });
+
+  const word = "1T0".repeat(9);
+  await node(page, "trit-input-1").click();
+  await applyWidthAndWord(page, 27, word);
+  await node(page, "splitter-1").click();
+  await page.getByRole("spinbutton", { name: "信号宽度", exact: true }).fill("27");
+  await page.getByRole("spinbutton", { name: "分支数量", exact: true }).fill("27");
+  await page.getByLabel("位映射").fill(
+    Array.from({ length: 27 }, (_, index) => index).join(", "),
+  );
+  await page.getByRole("button", { name: "应用属性" }).click();
+  await expect(page.getByText("属性已更新")).toBeVisible();
+  await page.getByRole("button", { name: "适应画布" }).click();
+
+  const splitter = node(page, "splitter-1");
+  const branches = splitter.locator(".splitter-branch");
+  await expect(branches).toHaveCount(27);
+  const geometry = await splitter.evaluate((element) => {
+    const nodeRect = element.getBoundingClientRect();
+    const rows = Array.from(element.querySelectorAll<HTMLElement>(".splitter-branch"));
+    const handles = Array.from(
+      element.querySelectorAll<HTMLElement>('[data-testid*="output-branch"]'),
+    );
+    return {
+      node: { top: nodeRect.top, bottom: nodeRect.bottom },
+      rows: rows.map((row) => {
+        const rect = row.getBoundingClientRect();
+        return { top: rect.top, bottom: rect.bottom };
+      }),
+      handles: handles.map((handle) => {
+        const rect = handle.getBoundingClientRect();
+        return {
+          top: rect.top,
+          bottom: rect.bottom,
+          width: rect.width,
+          height: rect.height,
+          pointerEvents: getComputedStyle(handle).pointerEvents,
+        };
+      }),
+    };
+  });
+  expect(geometry.rows).toHaveLength(27);
+  expect(geometry.handles).toHaveLength(27);
+  for (let index = 0; index < geometry.rows.length; index += 1) {
+    expect(geometry.rows[index].top).toBeGreaterThanOrEqual(geometry.node.top - 1);
+    expect(geometry.rows[index].bottom).toBeLessThanOrEqual(geometry.node.bottom + 1);
+    if (index > 0) {
+      expect(geometry.rows[index].top).toBeGreaterThanOrEqual(
+        geometry.rows[index - 1].bottom,
+      );
+    }
+  }
+  for (const handle of geometry.handles) {
+    expect(handle.top).toBeGreaterThanOrEqual(geometry.node.top - 1);
+    expect(handle.bottom).toBeLessThanOrEqual(geometry.node.bottom + 1);
+    expect(handle.width).toBeGreaterThan(3);
+    expect(handle.height).toBeGreaterThan(3);
+    expect(handle.pointerEvents).toBe("all");
+  }
+
+  const sourceSignal = node(page, "trit-input-1").locator(".node-signal");
+  await expect(sourceSignal).toHaveText(word);
+  const containment = await sourceSignal.evaluate((element) => {
+    const signal = element as HTMLElement;
+    const parent = signal.closest<HTMLElement>(".circuit-node");
+    const signalRect = signal.getBoundingClientRect();
+    const parentRect = parent?.getBoundingClientRect();
+    return {
+      scrollWidth: signal.scrollWidth,
+      clientWidth: signal.clientWidth,
+      letterSpacing: getComputedStyle(signal).letterSpacing,
+      inside:
+        !!parentRect &&
+        signalRect.left >= parentRect.left &&
+        signalRect.right <= parentRect.right,
+    };
+  });
+  expect(containment.scrollWidth).toBeLessThanOrEqual(containment.clientWidth);
+  expect(["0px", "normal"]).toContain(containment.letterSpacing);
+  expect(containment.inside).toBe(true);
+
+  await connect(
+    page,
+    "handle-trit-input-1-output-out",
+    "handle-splitter-1-input-trunk",
+  );
+  await connect(
+    page,
+    "handle-splitter-1-output-branch26",
+    "handle-probe-1-input-in",
+  );
+  await expect(page.locator(".react-flow__edge")).toHaveCount(2);
+  await expect(node(page, "probe-1").locator(".node-signal")).toHaveText("1");
+  await expect(
+    page.locator('.react-flow__edge[data-id="wire-1"] .react-flow__edge-path'),
+  ).toHaveCSS("stroke-width", "6px");
+  await expect(
+    page.locator('.react-flow__edge[data-id="wire-1"] .react-flow__edge-path'),
+  ).toHaveCSS("stroke", "rgb(66, 106, 112)");
+  await expect(page.getByTestId("wire-label-wire-1")).toHaveCSS(
+    "border-color",
+    "rgb(66, 106, 112)",
+  );
+  await expect(page.getByTestId("wire-label-wire-1").locator("strong")).toHaveCSS(
+    "color",
+    "rgb(66, 106, 112)",
+  );
+
+  await page.screenshot({
+    path: "test-results/bus-wiring-27-limits-1440x900.png",
+    fullPage: true,
+  });
+  expect(consoleErrors).toEqual([]);
+});

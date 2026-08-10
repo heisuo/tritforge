@@ -8,7 +8,9 @@ import {
   applyNodeChanges,
   type Connection,
   type EdgeChange,
+  type IsValidConnection,
   type NodeChange,
+  type OnConnectEnd,
   type OnNodeDrag,
   type OnSelectionChangeParams,
   type ReactFlowInstance,
@@ -58,6 +60,7 @@ import { ModuleManager } from "./components/ModuleManager";
 import { PropertyEditor } from "./components/PropertyEditor";
 import { ExampleLibrary } from "./ExampleLibrary";
 import { LogicWireEdge } from "./LogicWireEdge";
+import { buildRenderedEdges, wireSignalColor } from "./edge-rendering";
 import {
   fromEditorDocument,
   toEditorDocument,
@@ -73,13 +76,13 @@ import {
   validateConnection,
   type CatalogComponent,
   type ConnectionCandidate,
+  type ConnectionValidationResult,
   type EditorDocument,
   type EditorEdge,
   type EditorNode,
   type ProjectSimulationDiagnostic,
   type ProjectSimulationSnapshot,
   type TernaryWord,
-  type TritSymbol,
 } from "./editor-model";
 import {
   EXAMPLES,
@@ -108,7 +111,7 @@ import {
   ProjectEditError,
   createProjectStore,
 } from "./project/project-store";
-import { edgeNetValue, projectToEditor } from "./project/editor-projection";
+import { projectToEditor } from "./project/editor-projection";
 import {
   createWasmRuntime,
   wasmErrorMessage,
@@ -251,14 +254,18 @@ function nextId(stem: string, used: string[]): string {
   return `${stem}-${suffix}`;
 }
 
-function wordColor(value: TernaryWord): string {
-  if (value.length === 1 && value in SIGNAL_COLORS) {
-    return SIGNAL_COLORS[value as TritSymbol];
+function connectionRejectionMessage(
+  result: Exclude<ConnectionValidationResult, { valid: true }>,
+): string {
+  if (result.reason === "width_mismatch") {
+    return `连线失败: 信号宽度不一致（${result.sourceWidth} trit -> ${result.targetWidth} trit）`;
   }
-  if (value.includes("E")) return SIGNAL_COLORS.E;
-  if (value.includes("X")) return SIGNAL_COLORS.X;
-  if (value.includes("Z")) return SIGNAL_COLORS.Z;
-  return "#315f66";
+  const messages = {
+    duplicate: "已拒绝完全重复的连线",
+    missing_endpoint: "连线失败: 连线端点不存在",
+    same_endpoint: "连线失败: 不能连接同一端口",
+  };
+  return messages[result.reason];
 }
 
 function propertyEditMessage(error: unknown): string {
@@ -643,43 +650,7 @@ function Workbench() {
   }, [edges, nodes]);
 
   const renderedEdges = useMemo(
-    () =>
-      edges.map((edge) => {
-        const signal = edgeNetValue(edge, snapshot);
-        const color = wordColor(signal);
-        const sourceNode = nodes.find((node) => node.id === edge.source);
-        const targetNode = nodes.find((node) => node.id === edge.target);
-        const sourcePortId = edge.data?.semanticSourcePortId ?? edge.sourceHandle;
-        const targetPortId = edge.data?.semanticTargetPortId ?? edge.targetHandle;
-        const width =
-          sourceNode?.data.ports?.find((port) => port.id === sourcePortId)?.width ??
-          targetNode?.data.ports?.find((port) => port.id === targetPortId)?.width ??
-          signal.length;
-        const tunnelNode = [sourceNode, targetNode].find(
-          (node) => node?.data.typeId === "wiring.tunnel",
-        );
-        const localName =
-          typeof tunnelNode?.data.properties?.label === "string"
-            ? tunnelNode.data.properties.label
-            : tunnelNode?.data.typeId === "wiring.tunnel"
-              ? tunnelNode.data.label
-              : undefined;
-        return {
-          ...edge,
-          type: "logic" as const,
-          data: {
-            ...edge.data,
-            ...wireLanes[edge.id],
-            semanticWidth: width,
-            currentWord: signal,
-            ...(localName ? { localName } : {}),
-          },
-          style: {
-            stroke: width > 1 ? "#426a70" : color,
-            strokeWidth: width > 1 ? 6 : 2,
-          },
-        };
-      }),
+    () => buildRenderedEdges(edges, nodes, snapshot, wireLanes),
     [edges, nodes, snapshot, wireLanes],
   );
 
@@ -690,17 +661,36 @@ function Workbench() {
     [edges, nodes],
   );
 
+  const isValidUiConnection = useCallback<IsValidConnection<EditorEdge>>(
+    (connection) =>
+      validateUiConnection({
+        source: connection.source,
+        sourceHandle: connection.sourceHandle ?? null,
+        target: connection.target,
+        targetHandle: connection.targetHandle ?? null,
+      }).valid,
+    [validateUiConnection],
+  );
+
+  const handleConnectEnd = useCallback<OnConnectEnd>(
+    (_event, connectionState) => {
+      if (!connectionState.fromHandle || !connectionState.toHandle) return;
+      const result = validateUiConnection({
+        source: connectionState.fromHandle.nodeId,
+        sourceHandle: connectionState.fromHandle.id,
+        target: connectionState.toHandle.nodeId,
+        targetHandle: connectionState.toHandle.id,
+      });
+      if (!result.valid) setStatusMessage(connectionRejectionMessage(result));
+    },
+    [validateUiConnection],
+  );
+
   const onConnect = useCallback(
     (connection: Connection) => {
       const result = validateUiConnection(connection);
       if (!result.valid) {
-        const messages = {
-          duplicate: "已拒绝完全重复的连线",
-          missing_endpoint: "连线端点不存在",
-          same_endpoint: "连线失败: 不能连接同一端口",
-          width_mismatch: "连线失败: 两端信号宽度不一致",
-        };
-        setStatusMessage(messages[result.reason]);
+        setStatusMessage(connectionRejectionMessage(result));
         return;
       }
       try {
@@ -1444,6 +1434,8 @@ function Workbench() {
               onNodesChange={handleNodesChange}
               onEdgesChange={handleEdgesChange}
               onConnect={onConnect}
+              onConnectEnd={handleConnectEnd}
+              isValidConnection={isValidUiConnection}
               onNodeClick={onNodeClick}
               onNodeDoubleClick={onNodeDoubleClick}
               onNodeDragStop={handleNodeDragStop}
@@ -1484,7 +1476,7 @@ function ExampleHelp({ example }: { example: TernaryExample }) {
 }
 
 function SignalRows({ title, values }: { title: string; values: Record<string, TernaryWord> }) {
-  return <div className="signal-group"><h3>{title}</h3>{Object.keys(values).length === 0 ? <span className="muted">无端口</span> : Object.entries(values).map(([port, value]) => <div className="signal-row" key={port}><code>{port}</code><strong style={{ color: wordColor(value) }}>{value}</strong></div>)}</div>;
+  return <div className="signal-group"><h3>{title}</h3>{Object.keys(values).length === 0 ? <span className="muted">无端口</span> : Object.entries(values).map(([port, value]) => <div className="signal-row" key={port}><code>{port}</code><strong style={{ color: wireSignalColor(value, value.length) }}>{value}</strong></div>)}</div>;
 }
 
 function NodeInspector({ node, descriptor, snapshot }: { node: EditorNode; descriptor: CatalogComponent; snapshot: ProjectSimulationSnapshot | null }) {

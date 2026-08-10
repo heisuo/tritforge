@@ -1,4 +1,5 @@
 import { BaseEdge, EdgeLabelRenderer, type EdgeProps } from "@xyflow/react";
+import type { CSSProperties } from "react";
 import type { EditorEdge } from "./editor-model";
 import { createLogicWirePath } from "./wire-routing";
 
@@ -40,7 +41,8 @@ export function LogicWireEdge({
           className={`wire-label ${data?.semanticWidth && data.semanticWidth > 1 ? "is-bus" : ""}`}
           style={{
             transform: `translate(-50%, -50%) translate(${route.labelX}px, ${route.labelY}px)`,
-          }}
+            "--wire-signal-color": data?.signalColor ?? "#526168",
+          } as CSSProperties}
           data-testid={`wire-label-${id}`}
         >
           {data?.localName && <span className="wire-name">{data.localName}</span>}

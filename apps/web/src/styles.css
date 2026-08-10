@@ -520,7 +520,7 @@ button {
   height: 20px;
   max-width: 150px;
   padding: 0 5px;
-  border: 1px solid #c4d0d3;
+  border: 1px solid var(--wire-signal-color, #c4d0d3);
   border-radius: 3px;
   color: #526168;
   background: rgb(255 255 255 / 94%);
@@ -532,13 +532,12 @@ button {
 }
 
 .wire-label.is-bus {
-  border-color: #86a3a6;
   background: #f6fbfa;
 }
 
 .wire-label strong {
   overflow: hidden;
-  color: #234f56;
+  color: var(--wire-signal-color, #234f56);
   font-size: 10px;
   text-overflow: ellipsis;
 }
@@ -546,7 +545,7 @@ button {
 .wire-name {
   overflow: hidden;
   max-width: 54px;
-  color: #315f66;
+  color: var(--wire-signal-color, #315f66);
   font-weight: 800;
   text-overflow: ellipsis;
 }
@@ -615,12 +614,15 @@ button {
 
 .node-signal {
   display: block;
+  width: 100%;
   margin: 6px 0 4px;
   color: var(--signal-color);
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 31px;
   line-height: 1;
+  letter-spacing: 0px;
   text-align: center;
+  white-space: nowrap;
 }
 
 .node-id {
@@ -656,6 +658,8 @@ button {
 
 .port-row b {
   font-size: 9px;
+  letter-spacing: 0px;
+  white-space: nowrap;
 }
 
 .port-row small {
@@ -769,6 +773,8 @@ button {
 
 .wiring-tunnel > b {
   color: var(--signal-color);
+  letter-spacing: 0px;
+  white-space: nowrap;
 }
 
 .wiring-tunnel .react-flow__handle {
@@ -822,11 +828,10 @@ button {
 
 .splitter-trunk b,
 .splitter-branch b {
-  max-width: 34px;
-  overflow: hidden;
   color: #315f66;
   font-size: 8px;
-  text-overflow: ellipsis;
+  letter-spacing: 0px;
+  white-space: nowrap;
 }
 
 .splitter-trunk small,

@@ -188,7 +188,12 @@ describe("editor document model", () => {
         DEFAULT_DOCUMENT,
         mismatchedCatalog,
       ),
-    ).toEqual({ valid: false, reason: "width_mismatch" });
+    ).toEqual({
+      valid: false,
+      reason: "width_mismatch",
+      sourceWidth: 3,
+      targetWidth: 1,
+    });
   });
 
   it("rejects an exact duplicate connection", () => {
