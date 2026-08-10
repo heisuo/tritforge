@@ -32,9 +32,15 @@ export function projectToEditor(
       ports: portsForComponent(node.id).map((port) => ({ ...port })),
     },
   }));
+  const portIndex = new Map(
+    nodes.map((node) => [
+      node.id,
+      new Map((node.data.ports ?? []).map((port) => [port.id, port])),
+    ]),
+  );
   return {
     nodes,
-    edges: circuit.wires.map((wire) => orientedEdge(wire, nodes)),
+    edges: circuit.wires.map((wire) => orientedEdge(wire, portIndex)),
   };
 }
 
@@ -62,13 +68,10 @@ export function edgeNetValue(
   return "Z";
 }
 
-function orientedEdge(wire: ProjectWire, nodes: ReadonlyArray<EditorNode>): EditorEdge {
-  const ports = new Map(
-    nodes.map((node) => [
-      node.id,
-      new Map((node.data.ports ?? []).map((port) => [port.id, port])),
-    ]),
-  );
+function orientedEdge(
+  wire: ProjectWire,
+  ports: ReadonlyMap<string, ReadonlyMap<string, CatalogPort>>,
+): EditorEdge {
   const direction = (endpoint: WireEndpoint) =>
     ports.get(endpoint.componentId)?.get(endpoint.portId)?.direction;
   const [source, target] = preferOrientation(

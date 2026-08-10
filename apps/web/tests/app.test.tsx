@@ -324,13 +324,66 @@ function reversedEndpointProject(width = 1) {
   };
 }
 
-async function importProject(project: object) {
+function sameDirectionProject() {
+  return {
+    format: "logsim-ternary",
+    version: 3,
+    rootCircuitId: "main",
+    circuits: [
+      {
+        id: "main",
+        name: "Main",
+        kind: "main",
+        components: [
+          {
+            id: "a-probe",
+            typeId: "sink.probe",
+            position: { x: 400, y: 80 },
+            properties: {},
+          },
+          {
+            id: "b-probe",
+            typeId: "sink.probe",
+            position: { x: 400, y: 220 },
+            properties: {},
+          },
+          {
+            id: "y-source",
+            typeId: "source.trit_input",
+            position: { x: 80, y: 80 },
+            properties: { value: "0" },
+          },
+          {
+            id: "z-source",
+            typeId: "source.trit_input",
+            position: { x: 80, y: 220 },
+            properties: { value: "1" },
+          },
+        ],
+        wires: [
+          {
+            id: "input-input",
+            endpointA: { componentId: "b-probe", portId: "in" },
+            endpointB: { componentId: "a-probe", portId: "in" },
+          },
+          {
+            id: "output-output",
+            endpointA: { componentId: "z-source", portId: "out" },
+            endpointB: { componentId: "y-source", portId: "out" },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+async function importProject(project: object, filename = "project.json") {
   const input = screen.getByLabelText("选择三进制工程文件");
-  const file = new File([JSON.stringify(project)], "project.json", {
+  const file = new File([JSON.stringify(project)], filename, {
     type: "application/json",
   });
   fireEvent.change(input, { target: { files: [file] } });
-  await screen.findByText(/已导入工程/);
+  await screen.findByText(`已导入工程: ${filename}`);
 }
 
 describe("App", () => {
@@ -391,6 +444,33 @@ describe("App", () => {
     expect(screen.getByRole("navigation", { name: "层级导航" })).toHaveTextContent(
       "Main",
     );
+  });
+
+  it("keeps UI and runtime inside a module when importing the exact same project", async () => {
+    render(<App />);
+    const base = referencedProject();
+    const project = {
+      ...base,
+      circuits: base.circuits.map((circuit) => ({
+        ...circuit,
+        viewport: { x: 0, y: 0, zoom: 1 },
+      })),
+    };
+    await importProject(project, "same-project-1.json");
+    fireEvent.click(screen.getByRole("button", { name: "编辑 Identity" }));
+    await waitFor(() =>
+      expect(screen.getByRole("navigation", { name: "层级导航" }))
+        .toHaveTextContent("Identity"),
+    );
+    const loadsBefore = runtimeMock.loadProject.mock.calls.length;
+    const switchesBefore = runtimeMock.switchActive.mock.calls.length;
+
+    await importProject(project, "same-project-2.json");
+
+    expect(screen.getByRole("navigation", { name: "层级导航" }))
+      .toHaveTextContent("Identity");
+    expect(runtimeMock.loadProject).toHaveBeenCalledTimes(loadsBefore);
+    expect(runtimeMock.switchActive).toHaveBeenCalledTimes(switchesBefore);
   });
 
   it("reports connected-port and referenced-module deletion locations", async () => {
@@ -550,8 +630,12 @@ describe("App", () => {
     });
     const { container } = render(<App />);
     await screen.findByText(/层级模拟器已就绪/);
-    const input = container.querySelector('.react-flow__node[data-id="input-1"]');
-    fireEvent.click(input!);
+    const input = await waitFor(() => {
+      const node = container.querySelector('.react-flow__node[data-id="input-1"]');
+      expect(node).not.toBeNull();
+      return node!;
+    });
+    fireEvent.click(input);
 
     expect(await screen.findByText(/source blocked/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "撤销" })).toBeDisabled();
@@ -596,8 +680,58 @@ describe("App", () => {
     runtimeMock.updateProject.mockClear();
     fireEvent.click(container.querySelector('.react-flow__node[data-id="z-source"]')!);
     await waitFor(() => expect(runtimeMock.updateProject).toHaveBeenCalledTimes(1));
+    await screen.findByText(/输入 z-source:/);
     fireEvent.click(screen.getByRole("button", { name: "撤销" }));
     await waitFor(() => assertWire("wire-reversed"));
+  });
+
+  it("renders imported same-direction wires with both handle roles on one port row", async () => {
+    const { container } = render(<App />);
+    await importProject(sameDirectionProject());
+
+    expect(screen.getByTestId("handle-a-probe-input-in")).toBeInTheDocument();
+    expect(screen.getByTestId("handle-a-probe-output-in")).toBeInTheDocument();
+    expect(screen.getByTestId("handle-y-source-output-out")).toBeInTheDocument();
+    expect(screen.getByTestId("handle-y-source-input-out")).toBeInTheDocument();
+    expect(
+      container.querySelectorAll('.react-flow__node[data-id="a-probe"] .port-row'),
+    ).toHaveLength(1);
+    expect(
+      container.querySelectorAll('.react-flow__node[data-id="y-source"] .port-row'),
+    ).toHaveLength(1);
+    const wires = JSON.parse(
+      screen.getByRole("region", { name: "电路画布" }).getAttribute("data-wire-state") ?? "[]",
+    ) as Array<Record<string, string>>;
+    expect(wires).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "input-input",
+          source: "a-probe",
+          sourcePort: "in",
+          target: "b-probe",
+          targetPort: "in",
+        }),
+        expect.objectContaining({
+          id: "output-output",
+          source: "y-source",
+          sourcePort: "out",
+          target: "z-source",
+          targetPort: "out",
+        }),
+      ]),
+    );
+  });
+
+  it("clears local node and wire selection when clearing the circuit", async () => {
+    const { container } = render(<App />);
+    await screen.findByText(/层级模拟器已就绪/);
+    fireEvent.click(container.querySelector('.react-flow__node[data-id="input-1"]')!);
+    expect(screen.getByRole("button", { name: "删除所选" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "清空" }));
+
+    expect(container.querySelectorAll(".react-flow__node")).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "删除所选" })).toBeDisabled();
   });
 
   it("keeps width-3 source words valid when clicking the scalar-compatible source UI", async () => {

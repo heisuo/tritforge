@@ -135,6 +135,19 @@ export function CircuitNode({
               position={Position.Left}
               style={{ backgroundColor: SIGNAL_COLORS[signal] }}
             />
+            {port.direction === "input" && (
+              <Handle
+                id={port.id}
+                data-testid={`handle-${id}-output-${port.id}`}
+                type="source"
+                position={Position.Left}
+                style={{
+                  backgroundColor: SIGNAL_COLORS[signal],
+                  opacity: 0,
+                  pointerEvents: "none",
+                }}
+              />
+            )}
             <span>{"label" in port ? String(port.label) : port.id}</span>
             <b style={{ color: SIGNAL_COLORS[signal] }}>{signal}</b>
           </div>
@@ -160,6 +173,19 @@ export function CircuitNode({
               position={Position.Right}
               style={{ backgroundColor: SIGNAL_COLORS[signal] }}
             />
+            {port.direction === "output" && (
+              <Handle
+                id={port.id}
+                data-testid={`handle-${id}-input-${port.id}`}
+                type="target"
+                position={Position.Right}
+                style={{
+                  backgroundColor: SIGNAL_COLORS[signal],
+                  opacity: 0,
+                  pointerEvents: "none",
+                }}
+              />
+            )}
           </div>
         );
       })}

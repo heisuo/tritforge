@@ -140,7 +140,7 @@ export function createProjectStore(
       typeId: string,
       properties: Record<string, unknown>,
     ): ResolvedProjectPort[] => {
-      const key = `${typeId}\0${stableStringify(portShapeProperties(properties))}`;
+      const key = `${typeId}\0${stableStringify(properties)}`;
       const cached = portShapeCache.get(key);
       if (cached) return cached.map((port) => ({ ...port }));
       try {
@@ -337,6 +337,7 @@ export function createProjectStore(
       },
       replaceProject: (project) => {
         const normalized = cloneProject(project);
+        if (documentsEqual(get().project, normalized)) return;
         if (portResolver && !applyProject) validateProjectSemantics(normalized);
         commit(normalized);
         set({ activePath: initialPath(normalized), selectionByCircuit: {} });
@@ -1035,22 +1036,9 @@ function moduleInterfaceFingerprint(project: ProjectDocumentV3): string {
         .map((component) => ({
           id: component.id,
           typeId: component.typeId,
-          properties:
-            component.typeId === "project.module_instance"
-              ? { moduleId: component.properties.moduleId }
-              : portShapeProperties(component.properties),
+          properties: component.properties,
         })),
     })),
-  );
-}
-
-function portShapeProperties(
-  properties: Record<string, unknown>,
-): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(properties).filter(
-      ([key]) => key !== "value" && key !== "previewValue",
-    ),
   );
 }
 

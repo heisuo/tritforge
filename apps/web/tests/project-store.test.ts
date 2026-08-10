@@ -130,6 +130,33 @@ function resolver(): ProjectStorePortResolver {
   };
 }
 
+function wordValidatingResolver(): ProjectStorePortResolver {
+  const base = resolver();
+  return {
+    resolvePorts: vi.fn((typeId, properties) => {
+      const width = Number(properties.width ?? 1);
+      const value =
+        typeId === "project.module_input"
+          ? properties.previewValue
+          : typeId === "source.constant" || typeId === "source.trit_input"
+            ? properties.value
+            : undefined;
+      if (
+        value !== undefined &&
+        (typeof value !== "string" ||
+          !/^[T01]+$/.test(value) ||
+          value.length !== width)
+      ) {
+        throw Object.assign(new Error("invalid known word"), {
+          code: "INVALID_WORD",
+        });
+      }
+      return base.resolvePorts(typeId, properties);
+    }),
+    resolveModuleInterfaces: base.resolveModuleInterfaces,
+  };
+}
+
 function component(
   id: string,
   typeId: string,
@@ -214,6 +241,76 @@ describe("project v3 store", () => {
       "main",
       "half-adder-1",
     ]);
+  });
+
+  it("preserves a valid module path when replacing with the exact current project", () => {
+    const applyProject = vi.fn();
+    const store = createProjectStore(emptyProject(), {
+      portResolver: resolver(),
+      applyProject,
+    });
+    const moduleId = store.getState().createModule("Identity");
+    store.getState().addComponent("main", instance("identity-1", moduleId));
+    store.getState().enterInstance("main", "identity-1");
+    const beforePath = structuredClone(store.getState().activePath);
+    const beforePast = structuredClone(store.getState().past);
+    applyProject.mockClear();
+
+    store.getState().replaceProject(structuredClone(store.getState().project));
+
+    expect(store.getState().activePath).toEqual(beforePath);
+    expect(store.getState().past).toEqual(beforePast);
+    expect(applyProject).not.toHaveBeenCalled();
+  });
+
+  it("does not reuse a cached source shape before Rust validates a changed value", () => {
+    const validating = wordValidatingResolver();
+    const store = createProjectStore(emptyProject(), {
+      portResolver: validating,
+    });
+    store.getState().addComponent(
+      "main",
+      component("source", "source.constant", { width: 3, value: "1T0" }),
+    );
+    const before = structuredClone(store.getState().project);
+
+    expect(() =>
+      store.getState().setComponentProperties("main", "source", {
+        width: 3,
+        value: "XXX",
+      }),
+    ).toThrowError(expect.objectContaining({ code: "INVALID_WORD" }));
+    expect(store.getState().project).toEqual(before);
+    expect(validating.resolvePorts).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not reuse a cached module-input shape before Rust validates previewValue", () => {
+    const validating = wordValidatingResolver();
+    const store = createProjectStore(emptyProject(), {
+      portResolver: validating,
+    });
+    const moduleId = store.getState().createModule("Identity");
+    store.getState().addComponent(
+      moduleId,
+      component("input", "project.module_input", {
+        portId: "a",
+        label: "A",
+        width: 1,
+        previewValue: "0",
+      }),
+    );
+    const before = structuredClone(store.getState().project);
+
+    expect(() =>
+      store.getState().setComponentProperties(moduleId, "input", {
+        portId: "a",
+        label: "A",
+        width: 1,
+        previewValue: "X",
+      }),
+    ).toThrowError(expect.objectContaining({ code: "INVALID_WORD" }));
+    expect(store.getState().project).toEqual(before);
+    expect(validating.resolvePorts).toHaveBeenCalledTimes(2);
   });
 
   it("stores only v3 documents and creates the same normalized wire in either endpoint order", () => {

@@ -150,6 +150,29 @@ test("validates width-aware and inout connections through the production editor 
   expect(consoleErrors).toEqual([]);
 });
 
+test("renders imported input-input and output-output wires on their real handles", async ({
+  page,
+}) => {
+  const consoleErrors = watchConsoleErrors(page);
+  await waitForSimulator(page);
+  await page
+    .getByLabel("选择三进制工程文件")
+    .setInputFiles(path.join(import.meta.dirname, "fixtures/task6-same-direction-v3.json"));
+  await expect(page.getByText(/已导入工程/)).toBeVisible();
+
+  await expect(page.locator(".react-flow__edge")).toHaveCount(2);
+  for (const id of ["input-input", "output-output"]) {
+    await expect(
+      page.locator(`.react-flow__edge[data-id="${id}"] .react-flow__edge-path`),
+    ).toHaveAttribute("d", /.+/);
+  }
+  await expect(page.getByTestId("handle-a-probe-output-in")).toBeAttached();
+  await expect(page.getByTestId("handle-y-source-input-out")).toBeAttached();
+  await expect(node(page, "a-probe").locator(".port-row")).toHaveCount(1);
+  await expect(node(page, "y-source").locator(".port-row")).toHaveCount(1);
+  expect(consoleErrors).toEqual([]);
+});
+
 for (const viewport of [
   { name: "desktop", width: 1440, height: 900, drawers: false },
   { name: "compact", width: 900, height: 700, drawers: true },

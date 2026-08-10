@@ -1,0 +1,50 @@
+{
+  "format": "logsim-ternary",
+  "version": 3,
+  "rootCircuitId": "main",
+  "circuits": [
+    {
+      "id": "main",
+      "name": "Task 6 Same-Direction Wires",
+      "kind": "main",
+      "components": [
+        {
+          "id": "a-probe",
+          "typeId": "sink.probe",
+          "position": { "x": 620, "y": 100 },
+          "properties": { "label": "Probe A" }
+        },
+        {
+          "id": "b-probe",
+          "typeId": "sink.probe",
+          "position": { "x": 620, "y": 320 },
+          "properties": { "label": "Probe B" }
+        },
+        {
+          "id": "y-source",
+          "typeId": "source.trit_input",
+          "position": { "x": 100, "y": 100 },
+          "properties": { "label": "Source Y", "value": "0" }
+        },
+        {
+          "id": "z-source",
+          "typeId": "source.trit_input",
+          "position": { "x": 100, "y": 320 },
+          "properties": { "label": "Source Z", "value": "1" }
+        }
+      ],
+      "wires": [
+        {
+          "id": "input-input",
+          "endpointA": { "componentId": "b-probe", "portId": "in" },
+          "endpointB": { "componentId": "a-probe", "portId": "in" }
+        },
+        {
+          "id": "output-output",
+          "endpointA": { "componentId": "z-source", "portId": "out" },
+          "endpointB": { "componentId": "y-source", "portId": "out" }
+        }
+      ]
+    }
+  ]
+}

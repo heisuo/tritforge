@@ -1,6 +1,7 @@
 import {
   Background,
   BackgroundVariant,
+  ConnectionMode,
   ReactFlow,
   ReactFlowProvider,
   applyEdgeChanges,
@@ -1039,6 +1040,8 @@ function Workbench() {
       });
       setNodes([]);
       setEdges([]);
+      setSelectedNodeId(null);
+      setSelectedEdgeIds([]);
       setStatusMessage("画布已清空");
     } catch (error) {
       editFailure("清空失败", error);
@@ -1305,6 +1308,7 @@ function Workbench() {
               onNodeDoubleClick={onNodeDoubleClick}
               onNodeDragStop={handleNodeDragStop}
               onSelectionChange={handleSelectionChange}
+              connectionMode={ConnectionMode.Loose}
               onKeyDown={handleFlowKeyDown}
               deleteKeyCode={null}
               fitView
