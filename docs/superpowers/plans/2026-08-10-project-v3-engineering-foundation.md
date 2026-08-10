@@ -99,7 +99,7 @@ Commit `feat: define width-aware ternary signals`.
 
 **Files:**
 - Modify: `crates/sim-core/src/project.rs`
-- Modify: `apps/web/src/project/project-document.ts`
+- Modify: `apps/web/src/project/project-document.ts` (compatibility re-exports only until Task 5)
 - Create: `apps/web/src/project/project-v3.ts`
 - Test: `crates/sim-core/tests/project_v3_contract.rs`
 - Test: `apps/web/tests/project-v3.test.ts`
@@ -107,7 +107,8 @@ Commit `feat: define width-aware ternary signals`.
 - [ ] **Step 1: Write failing migration tests**
 
 Freeze `WireEndpoint { componentId, portId }`, undirected `ProjectWire { endpointA, endpointB }`, v3-only
-serialization, and exact v1/v2 migration preserving IDs, positions, properties, viewports, and hierarchy.
+serialization, and exact v1/v2 migration preserving IDs, positions, properties, viewports, and hierarchy. Add
+the v3 DTO beside the current v2 runtime contract; Task 5 switches the application after Rust lowering exists.
 
 - [ ] **Step 2: Run RED**
 
@@ -118,7 +119,8 @@ Expected: v3 is unsupported and `connections` are still required.
 - [ ] **Step 3: Implement parser and deterministic migration**
 
 Use discriminated document interfaces for v1/v2/v3. Convert every v2 connection to one v3 wire without
-sorting user arrays; default all legacy widths to 1. Reject mixed `connections` and `wires` in v3.
+sorting user arrays; default all legacy widths to 1. Reject mixed `connections` and `wires` in v3. Keep the
+existing v2 parser callable as a temporary compatibility adapter so every intermediate commit still builds.
 
 - [ ] **Step 4: Prove round-trip stability**
 
