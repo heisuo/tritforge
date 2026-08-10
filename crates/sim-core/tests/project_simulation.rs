@@ -140,6 +140,158 @@ fn sequential_project() -> ProjectDocument {
     project(vec![main, bit_cell_module(), spare])
 }
 
+fn register3_module() -> ProjectCircuit {
+    let mut components = vec![
+        module_input("input-d2", "d2"),
+        module_input("input-d1", "d1"),
+        module_input("input-d0", "d0"),
+        module_input("input-clk", "clk"),
+        module_input("input-en", "en"),
+        module_input("input-rst", "rst"),
+    ];
+    for lane in ["2", "1", "0"] {
+        components.push(component(
+            &format!("dff-{lane}"),
+            "sequential.dff",
+            serde_json::json!({}),
+        ));
+    }
+    components.extend([
+        module_output("output-q2", "q2"),
+        module_output("output-q1", "q1"),
+        module_output("output-q0", "q0"),
+    ]);
+
+    let mut connections = Vec::new();
+    for lane in ["2", "1", "0"] {
+        connections.push(connection(
+            format!("d{lane}"),
+            format!("input-d{lane}"),
+            "out",
+            format!("dff-{lane}"),
+            "d",
+        ));
+        for control in ["clk", "en", "rst"] {
+            connections.push(connection(
+                format!("{control}-{lane}"),
+                format!("input-{control}"),
+                "out",
+                format!("dff-{lane}"),
+                control,
+            ));
+        }
+        connections.push(connection(
+            format!("q{lane}"),
+            format!("dff-{lane}"),
+            "q",
+            format!("output-q{lane}"),
+            "in",
+        ));
+    }
+
+    circuit(
+        "register3",
+        ProjectCircuitKind::Module,
+        components,
+        connections,
+    )
+}
+
+fn register3_project() -> ProjectDocument {
+    let main = circuit(
+        "main",
+        ProjectCircuitKind::Main,
+        vec![
+            component("a2", "source.trit_input", serde_json::json!({"value": "1"})),
+            component("a1", "source.trit_input", serde_json::json!({"value": "T"})),
+            component("a0", "source.trit_input", serde_json::json!({"value": "0"})),
+            component("b2", "source.trit_input", serde_json::json!({"value": "T"})),
+            component("b1", "source.trit_input", serde_json::json!({"value": "0"})),
+            component("b0", "source.trit_input", serde_json::json!({"value": "1"})),
+            component("en", "source.trit_input", serde_json::json!({"value": "1"})),
+            component(
+                "rst",
+                "source.trit_input",
+                serde_json::json!({"value": "0"}),
+            ),
+            component("clock", "source.clock", serde_json::json!({})),
+            module_instance("register-a", "register3"),
+            module_instance("register-b", "register3"),
+        ],
+        vec![
+            connection("a2", "a2", "out", "register-a", "d2"),
+            connection("a1", "a1", "out", "register-a", "d1"),
+            connection("a0", "a0", "out", "register-a", "d0"),
+            connection("b2", "b2", "out", "register-b", "d2"),
+            connection("b1", "b1", "out", "register-b", "d1"),
+            connection("b0", "b0", "out", "register-b", "d0"),
+            connection("clk-a", "clock", "out", "register-a", "clk"),
+            connection("clk-b", "clock", "out", "register-b", "clk"),
+            connection("en-a", "en", "out", "register-a", "en"),
+            connection("en-b", "en", "out", "register-b", "en"),
+            connection("rst-a", "rst", "out", "register-a", "rst"),
+            connection("rst-b", "rst", "out", "register-b", "rst"),
+        ],
+    );
+    project(vec![main, register3_module()])
+}
+
+fn register_word(
+    snapshot: &sim_core::project_simulator::ProjectSnapshot,
+    component_id: &str,
+) -> [Trit; 3] {
+    [
+        snapshot.component_outputs[component_id]["q2"],
+        snapshot.component_outputs[component_id]["q1"],
+        snapshot.component_outputs[component_id]["q0"],
+    ]
+}
+
+#[test]
+fn register3_instances_capture_hold_and_reset_parallel_words_independently() {
+    let mut simulator = ProjectSimulator::load(register3_project(), "main").unwrap();
+
+    let captured = simulator.tick().unwrap();
+    assert_eq!(
+        register_word(&captured, "register-a"),
+        [Trit::Pos, Trit::Neg, Trit::Zero]
+    );
+    assert_eq!(
+        register_word(&captured, "register-b"),
+        [Trit::Neg, Trit::Zero, Trit::Pos]
+    );
+    assert_eq!(captured.tick_count, 1);
+    assert_eq!(captured.compile_count, 1);
+
+    let disabled = simulator.set_source("main", "en", Trit::Zero).unwrap();
+    assert_eq!(
+        register_word(&disabled, "register-a"),
+        register_word(&captured, "register-a")
+    );
+    simulator.set_source("main", "a2", Trit::Neg).unwrap();
+    simulator.set_source("main", "a1", Trit::Pos).unwrap();
+    simulator.set_source("main", "a0", Trit::Pos).unwrap();
+
+    let held = simulator.tick().unwrap();
+    assert_eq!(
+        register_word(&held, "register-a"),
+        register_word(&captured, "register-a")
+    );
+    assert_eq!(
+        register_word(&held, "register-b"),
+        register_word(&captured, "register-b")
+    );
+    assert_eq!(held.tick_count, 2);
+    assert_eq!(held.compile_count, 1);
+
+    simulator.set_source("main", "rst", Trit::Pos).unwrap();
+    let reset = simulator.tick().unwrap();
+    assert_eq!(register_word(&reset, "register-a"), [Trit::Zero; 3]);
+    assert_eq!(register_word(&reset, "register-b"), [Trit::Zero; 3]);
+    assert_eq!(reset.tick_count, 3);
+    assert_eq!(reset.compile_count, 1);
+}
+
 #[test]
 fn ticks_shared_dff_instances_independently_and_retains_state_for_value_updates() {
     let initial = sequential_project();

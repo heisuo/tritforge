@@ -61,18 +61,18 @@ git commit -m "feat: add editable three-trit register module"
 **Files:**
 - Modify: `crates/sim-core/tests/project_simulation.rs`
 
-- [ ] **Step 1: Add the Register3 project builders**
+- [x] **Step 1: Add the Register3 project builders**
 
 Build a `register3` module with six module inputs, three DFFs, and three module outputs. Build a
 main circuit with two instances, different data words, and shared Clock/EN/RST sources.
 
-- [ ] **Step 2: Add the behavioral acceptance test**
+- [x] **Step 2: Add the behavioral acceptance test**
 
 Assert one tick captures `1T0` in instance A and `T01` in instance B, source changes do not alter
 Q before a tick, `EN=0` holds both words, and `RST=1` clears both to `000`. Assert tick changes do
 not increase compile count.
 
-- [ ] **Step 3: Run the focused and full core tests**
+- [x] **Step 3: Run the focused and full core tests**
 
 ```bash
 cargo test -p sim-core --test project_simulation register3
@@ -82,7 +82,7 @@ cargo test -p sim-core
 The new test is a characterization of already implemented hierarchy/DFF composition, so it may
 be GREEN immediately; no production Rust change is permitted unless it exposes a real defect.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add crates/sim-core/tests/project_simulation.rs
