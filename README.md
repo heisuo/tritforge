@@ -6,6 +6,8 @@ Logsim Ternary 是一个以 Rust/WebAssembly 为仿真内核、在浏览器中�
 
 ![Logsim Ternary 单 trit DFF 演示](docs/images/phase3a-dff.png)
 
+![Logsim Ternary 3-trit 并行寄存器演示](docs/images/phase3b-register3.png)
+
 ## 前置环境
 
 - Rust stable，包含 `rustfmt`、`clippy` 和 `wasm32-unknown-unknown` target。
@@ -22,6 +24,7 @@ Logsim Ternary 是一个以 Rust/WebAssembly 为仿真内核、在浏览器中�
 - 重复放置模块实例，支持多层无环嵌套，并通过双击和面包屑进入或返回定义。
 - 放置 Clock 和单-trit DFF，通过“单步 Tick”执行完整的 `0 → 1 → 0` 时钟周期。
 - DFF 支持同步复位和写使能；状态栏显示 tick count，层级模块实例拥有独立状态。
+- 载入由三个 DFF 组成的可编辑 3-trit 并行寄存器，观察整字捕获、保持和同步复位。
 - 导入和导出 Project v2 工程；旧版 v1 单电路文件会无损迁移为 `Main`。
 - 在桌面三栏工作台和窄屏抽屉布局中编辑同一电路。
 
@@ -129,6 +132,20 @@ DFF 端口为 `d/clk/en/rst/q`。`rst=1` 优先同步清零，`en=1` 捕获 `d`�
 结构重编译、切换活动根或重新载入工程会恢复 `Q=0` 和 `0 TICKS`。示例库中的
 “单 trit DFF”可以直接编辑和单步运行。
 
+## 3-trit 并行寄存器
+
+示例库中的“3-trit 并行寄存器”不是新的内建元件，而是一个普通 Project v2
+模块。双击 `Register3` 实例可以看到 `dff-2/dff-1/dff-0` 三个 DFF；它们分别
+保存 `Q2/Q1/Q0`，共享同一组 `CLK/EN/RST`，所以在一个上升沿并行更新。
+
+三位字按 `Q2Q1Q0` 书写，`Q2` 是最高位，数值为
+`9 × Q2 + 3 × Q1 + Q0`，已知值范围是 `-13..13`。例如 `1T0` 表示
+`9 - 3 + 0 = 6`。默认示例的 `D=1T0`、初始 `Q=000`，单步一次后得到
+`Q=1T0`；`EN=T/0` 时保持，`RST=1` 时在下一次 Tick 同步清零。
+
+模块中央显示的三字符字只是把 Rust/WASM 快照中的 `q2/q1/q0` 依次拼接，三个
+Probe 和内部 DFF 才是可检查的逐 trit 信号与状态来源。
+
 ## 架构
 
 ```text
@@ -165,7 +182,7 @@ Logsim Ternary 是面向原生三进制语义的独立 Rust/React 实现，不�
 
 ## 当前不做
 
-- 3-trit 寄存器、波形面板、自动连续时钟、物理传播延迟和多时钟域。
+- 波形面板、自动连续时钟、物理传播延迟和多时钟域。
 - 多-trit 总线、分线器和任意导线分叉点。
 - 递归模块、参数化模块和模块接口版本管理。
 - 框选电路后一键封装为模块。

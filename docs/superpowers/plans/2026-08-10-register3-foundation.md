@@ -141,12 +141,12 @@ git commit -m "test: demonstrate the three-trit register"
 - Modify: `docs/superpowers/specs/2026-08-10-register3-foundation-design.md`
 - Modify: this plan
 
-- [ ] **Step 1: Document usage and boundaries**
+- [x] **Step 1: Document usage and boundaries**
 
 Describe trit order, decimal formula, shared controls, module composition, state lifecycle,
 desktop example, screenshot, and deferred buses/waveforms/automatic clocks.
 
-- [ ] **Step 2: Run the fast-track verification chain**
+- [x] **Step 2: Run the fast-track verification chain**
 
 ```bash
 cargo fmt --all -- --check
@@ -159,7 +159,7 @@ npm --prefix apps/web run test:e2e -- tests/register3.spec.ts
 git diff --check
 ```
 
-- [ ] **Step 3: Record exact results and commit**
+- [x] **Step 3: Record exact results and commit**
 
 Append exact Rust/WASM/Vitest/Playwright counts and residual tool warnings to the design. Commit:
 

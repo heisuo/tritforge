@@ -1,6 +1,6 @@
 # Phase 3B: 3-trit Parallel Register Design
 
-**Status:** Approved for implementation on 2026-08-10  
+**Status:** Completed and accepted on 2026-08-10
 **Audience:** Logsim Ternary developers and hardware-learning users  
 **Depends on:** Phase 2A hierarchy and Phase 3A Clock/DFF tick semantics
 
@@ -98,8 +98,10 @@ reload             Q = 000, ticks = 0
 ## 6. Web Presentation
 
 The example remains a normal editable Project v2 clone. Three existing Probe nodes display the
-word; Phase 3B does not add a word probe or calculate a second semantic value in TypeScript. The
-right-hand example help states the trit order, decimal interpretation, and control priority.
+individual trits; the Register3 node concatenates the projected Rust outputs as `q2q1q0` for a
+compact word label. This is presentation only: Phase 3B does not add a word probe, word state, or
+second semantic calculation in TypeScript. The right-hand example help states the trit order,
+decimal interpretation, and control priority.
 
 The header phase badge becomes `PHASE 3B`. Desktop Chromium at 1440x900 is the blocking browser
 viewport, following the user-approved fast-track policy from Phase 3A.
@@ -129,3 +131,23 @@ kind. Those features build on this module after its parallel storage behavior is
 - The example is editable, exportable, and openable through hierarchy navigation.
 - Rust, WASM, Web unit, production build, and desktop Playwright checks pass.
 
+## 10. Acceptance Record
+
+The completed Phase 3B implementation passed the following fresh checks on 2026-08-10:
+
+- `cargo fmt --all -- --check` passed.
+- `cargo clippy --workspace --all-targets -- -D warnings` passed with no diagnostics.
+- `cargo test --workspace` passed 149 native tests: 147 in `sim-core` and 2 in `sim-wasm`.
+- `wasm-pack test --node crates/sim-wasm` passed 11 real WASM tests: 6 project API and 5 flat API.
+- `npm --prefix apps/web test` passed 106 tests in 14 files.
+- `npm --prefix apps/web run build` passed TypeScript and the Vite production build.
+- `npm --prefix apps/web run test:e2e -- tests/register3.spec.ts` passed one desktop Chromium flow.
+- `git diff --check` passed.
+
+The inspected 1440x900 screenshot is `docs/images/phase3b-register3.png`. It shows `D=1T0`,
+`Q=1T0`, Clock returned to `0`, all three probes, and the phase badge without horizontal page
+overflow or clipped controls. Browser acceptance also reported no console or page errors.
+
+Residual non-blocking tool messages were limited to `wasm-pack` recommending optional Cargo
+description/repository and a detected Cargo license without a crate-local license file, plus
+Playwright's Node process noting that `FORCE_COLOR` overrides `NO_COLOR`.
