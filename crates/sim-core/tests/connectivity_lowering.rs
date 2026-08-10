@@ -1,7 +1,6 @@
 use sim_core::connectivity::{
     CompiledProjectV3, QualifiedWireBitRef, ScalarBitEndpoint, compile_project_v3, lower_project_v3,
 };
-use sim_core::hierarchy::FlatPortRef;
 use sim_core::project::{
     ProjectCircuitKind, ProjectCircuitV3, ProjectComponent, ProjectDocumentV3, ProjectWire,
     QualifiedPortRef, WireEndpoint,
@@ -81,7 +80,7 @@ fn probe_word(result: &CompiledProjectV3, component_id: &str) -> Vec<Trit> {
     result.reassembly.ports[&logical]
         .iter()
         .map(|bit| {
-            let flat = bit.flat_endpoints.first().unwrap();
+            let flat = result.reassembly.observable_endpoints(bit).first().unwrap();
             snapshot
                 .input_value(&flat.component_id, &flat.port_id)
                 .unwrap()
@@ -91,14 +90,9 @@ fn probe_word(result: &CompiledProjectV3, component_id: &str) -> Vec<Trit> {
 
 fn helper_endpoints<'a>(
     result: &'a CompiledProjectV3,
-    bit: &ScalarBitEndpoint,
-) -> &'a [FlatPortRef] {
-    let net = &result.reassembly.nets[bit.scalar_net.as_ref().unwrap()];
-    if net.flat_consumers.is_empty() {
-        &net.flat_drivers
-    } else {
-        &net.flat_consumers
-    }
+    bit: &'a ScalarBitEndpoint,
+) -> &'a [sim_core::hierarchy::FlatPortRef] {
+    result.reassembly.observable_endpoints(bit)
 }
 
 fn diagnostics(project: ProjectDocumentV3) -> Vec<sim_core::project::ProjectDiagnostic> {
@@ -395,6 +389,7 @@ fn helper_bits_reassemble_from_compiled_driver_or_consumer_nets() {
         .unwrap();
     assert!(isolated_bit.flat_endpoints.is_empty());
     assert!(isolated_net.flat_drivers.is_empty());
+    assert!(helper_endpoints(&result, isolated_bit).is_empty());
     assert_eq!(resolve_drivers(&[]), Trit::HighZ);
 }
 
@@ -1251,6 +1246,96 @@ fn hierarchy_multiplied_provenance_amplification_is_bounded() {
     assert!(limit.message.contains("provenance reference"));
     assert_eq!(limit.component_refs[0].circuit_id, "main");
     assert!(limit.component_refs[0].component_id.starts_with("fanout-"));
+}
+
+#[test]
+fn disconnected_parent_and_child_provenance_is_not_cross_multiplied() {
+    let mut child_components = vec![
+        component(
+            "child-source",
+            "source.constant",
+            serde_json::json!({"value": "0"}),
+        ),
+        component("child-junction", "wiring.junction", serde_json::json!({})),
+    ];
+    let mut child_wires = vec![wire(
+        "child-source-wire",
+        "child-source",
+        "out",
+        "child-junction",
+        "net",
+    )];
+    for index in 0..33 {
+        child_components.push(component(
+            &format!("child-probe-{index:02}"),
+            "sink.probe",
+            serde_json::json!({}),
+        ));
+        child_wires.push(wire(
+            &format!("child-probe-wire-{index:02}"),
+            "child-junction",
+            "net",
+            &format!("child-probe-{index:02}"),
+            "in",
+        ));
+    }
+    let child = circuit(
+        "disconnected-child",
+        ProjectCircuitKind::Module,
+        child_components,
+        child_wires,
+    );
+
+    let mut main_components = vec![
+        component("main-junction", "wiring.junction", serde_json::json!({})),
+        component(
+            "unused-child",
+            "project.module_instance",
+            serde_json::json!({"moduleId": "disconnected-child", "label": "Unused"}),
+        ),
+    ];
+    let mut main_wires = Vec::new();
+    for index in 0..20 {
+        main_components.push(component(
+            &format!("main-source-{index:02}"),
+            "source.constant",
+            serde_json::json!({"value": "0"}),
+        ));
+        main_wires.push(wire(
+            &format!("main-source-wire-{index:02}"),
+            &format!("main-source-{index:02}"),
+            "out",
+            "main-junction",
+            "net",
+        ));
+    }
+    for index in 0..100 {
+        main_components.push(component(
+            &format!("main-probe-{index:03}"),
+            "sink.probe",
+            serde_json::json!({}),
+        ));
+        main_wires.push(wire(
+            &format!("main-probe-wire-{index:03}"),
+            "main-junction",
+            "net",
+            &format!("main-probe-{index:03}"),
+            "in",
+        ));
+    }
+    let main = circuit(
+        "main",
+        ProjectCircuitKind::Main,
+        main_components,
+        main_wires,
+    );
+
+    let result = compile_project_v3(project(vec![main, child]), "main").unwrap();
+    assert_eq!(result.compiled.circuit.connections.len(), 2_033);
+    assert_eq!(
+        result.wire_provenance.values().map(Vec::len).sum::<usize>(),
+        241_122
+    );
 }
 
 #[test]

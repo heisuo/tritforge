@@ -7,7 +7,8 @@ use crate::catalog::PortDirection;
 use crate::diagnostic::Severity;
 use crate::hierarchy::{
     CompiledProject, FlatPortRef, MAX_ANALYSIS_EDGES, MAX_EXPANDED_COMPONENTS,
-    MAX_EXPANDED_CONNECTIONS, MAX_PROJECTION_ENDPOINTS, MAX_PROVENANCE_REFERENCES, compile_project,
+    MAX_EXPANDED_CONNECTIONS, MAX_PROJECTION_ENDPOINTS, MAX_PROVENANCE_REFERENCES,
+    compile_project_with_reference_origins,
 };
 use crate::project::{
     ProjectCircuit, ProjectCircuitKind, ProjectComponent, ProjectConnection, ProjectDiagnostic,
@@ -67,6 +68,28 @@ pub struct ReassemblyNet {
 pub struct ReassemblyMetadata {
     pub ports: BTreeMap<QualifiedPortRef, Vec<ScalarBitEndpoint>>,
     pub nets: BTreeMap<QualifiedNetRef, ReassemblyNet>,
+}
+
+impl ReassemblyMetadata {
+    /// Returns the compiled endpoints from which a logical bit can be observed.
+    ///
+    /// Scalar-backed bits own their direct endpoints. Compile-time helper bits
+    /// intentionally leave `flat_endpoints` empty and share endpoint storage
+    /// through `scalar_net`: consumers are preferred, with all drivers used
+    /// when a net has no consumers. An empty result represents HighZ.
+    pub fn observable_endpoints<'a>(&'a self, bit: &'a ScalarBitEndpoint) -> &'a [FlatPortRef] {
+        if !bit.flat_endpoints.is_empty() {
+            return &bit.flat_endpoints;
+        }
+        let Some(net) = bit.scalar_net.as_ref().and_then(|net| self.nets.get(net)) else {
+            return &[];
+        };
+        if net.flat_consumers.is_empty() {
+            &net.flat_drivers
+        } else {
+            &net.flat_consumers
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -202,6 +225,114 @@ struct CircuitLowering {
     circuit: ProjectCircuit,
     reassembly: ReassemblyMetadata,
     provenance: ConnectivityProvenance,
+}
+
+struct ConnectivityIndexes<'a> {
+    nets_by_circuit: BTreeMap<&'a str, Vec<(&'a QualifiedNetRef, &'a ReassemblyNet)>>,
+    ports_by_circuit: BTreeMap<&'a str, Vec<(&'a QualifiedPortRef, &'a [ScalarBitEndpoint])>>,
+    wire_bits_by_circuit:
+        BTreeMap<&'a str, Vec<(&'a QualifiedWireBitRef, &'a [QualifiedConnectionRef])>>,
+    instances_by_circuit: BTreeMap<&'a str, Vec<(&'a str, &'a str)>>,
+    boundary_ports_by_circuit: BTreeMap<&'a str, BTreeMap<&'a str, &'a str>>,
+    flat_components: BTreeSet<&'a str>,
+}
+
+impl<'a> ConnectivityIndexes<'a> {
+    fn new(lowered: &'a LoweredProjectV3, compiled: &'a CompiledProject) -> Self {
+        let mut nets_by_circuit = BTreeMap::<_, Vec<_>>::new();
+        for (net, metadata) in &lowered.reassembly.nets {
+            nets_by_circuit
+                .entry(net.circuit_id.as_str())
+                .or_default()
+                .push((net, metadata));
+        }
+        let mut ports_by_circuit = BTreeMap::<_, Vec<_>>::new();
+        for (port, bits) in &lowered.reassembly.ports {
+            ports_by_circuit
+                .entry(port.circuit_id.as_str())
+                .or_default()
+                .push((port, bits.as_slice()));
+        }
+        let mut wire_bits_by_circuit = BTreeMap::<_, Vec<_>>::new();
+        for (wire_bit, connections) in &lowered.provenance.wire_bits {
+            wire_bits_by_circuit
+                .entry(wire_bit.circuit_id.as_str())
+                .or_default()
+                .push((wire_bit, connections.as_slice()));
+        }
+        let mut instances_by_circuit = BTreeMap::<_, Vec<_>>::new();
+        let mut boundary_ports_by_circuit = BTreeMap::<_, BTreeMap<_, _>>::new();
+        for circuit in &lowered.project.circuits {
+            for component in &circuit.components {
+                if component.type_id == MODULE_INSTANCE {
+                    if let Some(module_id) = component.properties.module_id() {
+                        instances_by_circuit
+                            .entry(circuit.id.as_str())
+                            .or_default()
+                            .push((component.id.as_str(), module_id));
+                    }
+                } else if matches!(component.type_id.as_str(), MODULE_INPUT | MODULE_OUTPUT)
+                    && let Some(port_id) = component.properties.port_id()
+                {
+                    boundary_ports_by_circuit
+                        .entry(circuit.id.as_str())
+                        .or_default()
+                        .insert(component.id.as_str(), port_id);
+                }
+            }
+        }
+        Self {
+            nets_by_circuit,
+            ports_by_circuit,
+            wire_bits_by_circuit,
+            instances_by_circuit,
+            boundary_ports_by_circuit,
+            flat_components: compiled
+                .circuit
+                .components
+                .iter()
+                .map(|component| component.id.as_str())
+                .collect(),
+        }
+    }
+
+    fn nets(&self, circuit_id: &str) -> &[(&'a QualifiedNetRef, &'a ReassemblyNet)] {
+        self.nets_by_circuit
+            .get(circuit_id)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    fn ports(&self, circuit_id: &str) -> &[(&'a QualifiedPortRef, &'a [ScalarBitEndpoint])] {
+        self.ports_by_circuit
+            .get(circuit_id)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    fn wire_bits(
+        &self,
+        circuit_id: &str,
+    ) -> &[(&'a QualifiedWireBitRef, &'a [QualifiedConnectionRef])] {
+        self.wire_bits_by_circuit
+            .get(circuit_id)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    fn instances(&self, circuit_id: &str) -> &[(&'a str, &'a str)] {
+        self.instances_by_circuit
+            .get(circuit_id)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    fn boundary_port(&self, circuit_id: &str, component_id: &str) -> Option<&'a str> {
+        self.boundary_ports_by_circuit
+            .get(circuit_id)
+            .and_then(|ports| ports.get(component_id))
+            .copied()
+    }
 }
 
 pub fn lower_project_v3(
@@ -362,13 +493,18 @@ pub fn compile_project_v3(
     let lowered = lower_project_v3_for_active(project, active_circuit_id)?;
     let validated = validate_project(lowered.project.clone())
         .map_err(|errors| remap_diagnostics(&errors, &lowered.provenance, &lowered.reassembly))?;
-    let compiled = compile_project(&validated, active_circuit_id)
-        .map_err(|errors| remap_diagnostics(&errors, &lowered.provenance, &lowered.reassembly))?;
+    let compiled = compile_project_with_reference_origins(
+        &validated,
+        active_circuit_id,
+        &lowered.provenance.connections,
+    )
+    .map_err(|errors| remap_diagnostics(&errors, &lowered.provenance, &lowered.reassembly))?;
     check_compiled_provenance_amplification(&lowered.provenance, &compiled)?;
-    let reassembly = expand_reassembly(&lowered, &compiled, active_circuit_id);
+    let indexes = ConnectivityIndexes::new(&lowered, &compiled);
+    let reassembly = expand_reassembly(&compiled, active_circuit_id, &indexes);
     let wire_provenance = compose_wire_provenance(&lowered.provenance, &compiled);
     let reverse_wire_provenance =
-        compose_reverse_wire_provenance(&lowered, &compiled, active_circuit_id);
+        compose_reverse_wire_provenance(&compiled, active_circuit_id, &indexes);
     Ok(CompiledProjectV3 {
         lowered,
         compiled,
@@ -826,7 +962,6 @@ impl ConnectivityMetrics {
             ConnectivityMetric::ReassemblyEndpoints => self.reassembly_endpoints,
             ConnectivityMetric::WireBitEdges => self.wire_bit_edges,
             ConnectivityMetric::GeneratedConnections => self.generated_connections,
-            ConnectivityMetric::ProvenanceReferences => self.provenance_references,
         }
     }
 }
@@ -837,7 +972,6 @@ enum ConnectivityMetric {
     ReassemblyEndpoints,
     WireBitEdges,
     GeneratedConnections,
-    ProvenanceReferences,
 }
 
 fn preflight_connectivity(
@@ -866,8 +1000,6 @@ fn preflight_connectivity(
             .get(&circuit_id)
             .unwrap_or(&ConnectivityMetrics::default());
         let mut total = local;
-        let mut children = ConnectivityMetrics::default();
-        let mut growth_instance = None;
         let mut instances = circuit
             .components
             .iter()
@@ -881,14 +1013,6 @@ fn preflight_connectivity(
             let Some(child) = expanded.get(module_id).copied() else {
                 continue;
             };
-            growth_instance = Some(instance);
-            children = children.checked_add(child).ok_or_else(|| {
-                vec![hierarchy_connectivity_limit(
-                    circuit,
-                    instance,
-                    "hierarchy connectivity count overflowed usize",
-                )]
-            })?;
             total = total.checked_add(child).ok_or_else(|| {
                 vec![hierarchy_connectivity_limit(
                     circuit,
@@ -897,32 +1021,6 @@ fn preflight_connectivity(
                 )]
             })?;
         }
-        let cross_references = local
-            .generated_connections
-            .checked_mul(children.provenance_references)
-            .and_then(|left| {
-                local
-                    .provenance_references
-                    .checked_mul(children.generated_connections)
-                    .and_then(|right| left.checked_add(right))
-            })
-            .ok_or_else(|| {
-                vec![connectivity_cross_limit(
-                    circuit,
-                    growth_instance,
-                    "hierarchy provenance amplification overflowed usize",
-                )]
-            })?;
-        total.provenance_references = total
-            .provenance_references
-            .checked_add(cross_references)
-            .ok_or_else(|| {
-                vec![connectivity_cross_limit(
-                    circuit,
-                    growth_instance,
-                    "hierarchy provenance amplification overflowed usize",
-                )]
-            })?;
         expanded.insert(circuit_id, total);
     }
     let Some(active_metrics) = expanded.get(active_circuit_id).copied() else {
@@ -965,28 +1063,7 @@ fn preflight_connectivity(
         circuits,
         &expanded,
     )?;
-    check_expanded_metric(
-        active_metrics,
-        ConnectivityMetric::ProvenanceReferences,
-        MAX_PROVENANCE_REFERENCES,
-        "expanded provenance reference count",
-        active_circuit_id,
-        circuits,
-        &expanded,
-    )?;
     Ok(())
-}
-
-fn connectivity_cross_limit(
-    circuit: &crate::project::ProjectCircuitV3,
-    instance: Option<&ProjectComponent>,
-    message: impl Into<String>,
-) -> ProjectDiagnostic {
-    let message = message.into();
-    match instance {
-        Some(instance) => hierarchy_connectivity_limit(circuit, instance, message),
-        None => connectivity_local_limit(circuit, message),
-    }
 }
 
 fn count_local_connectivity_shape(
@@ -1894,16 +1971,10 @@ fn union_splitters(circuit: &crate::project::ProjectCircuitV3, unions: &mut Unio
 }
 
 fn expand_reassembly(
-    lowered: &LoweredProjectV3,
     compiled: &CompiledProject,
     active_circuit_id: &str,
+    indexes: &ConnectivityIndexes<'_>,
 ) -> ReassemblyMetadata {
-    let circuits: BTreeMap<_, _> = lowered
-        .project
-        .circuits
-        .iter()
-        .map(|circuit| (circuit.id.as_str(), circuit))
-        .collect();
     let mut result = ReassemblyMetadata::default();
     let mut stack = vec![(
         active_circuit_id.to_owned(),
@@ -1911,15 +1982,7 @@ fn expand_reassembly(
         None::<(String, Vec<String>, String)>,
     )];
     while let Some((circuit_id, path, parent_instance)) = stack.pop() {
-        let Some(circuit) = circuits.get(circuit_id.as_str()) else {
-            continue;
-        };
-        for (net_ref, net) in lowered
-            .reassembly
-            .nets
-            .iter()
-            .filter(|(net_ref, _)| net_ref.circuit_id == circuit_id)
-        {
+        for &(net_ref, net) in indexes.nets(&circuit_id) {
             let qualified_net =
                 QualifiedNetRef::new(&net_ref.circuit_id, path.iter().cloned(), &net_ref.net_id);
             let scalar_drivers = qualify_ports(&net.scalar_drivers, &path);
@@ -1929,9 +1992,9 @@ fn expand_reassembly(
                 .flat_map(|port| {
                     flat_endpoints_with_boundary_alias(
                         port,
-                        circuit,
                         parent_instance.as_ref(),
                         compiled,
+                        indexes,
                     )
                 })
                 .collect::<BTreeSet<_>>()
@@ -1942,9 +2005,9 @@ fn expand_reassembly(
                 .flat_map(|port| {
                     flat_endpoints_with_boundary_alias(
                         port,
-                        circuit,
                         parent_instance.as_ref(),
                         compiled,
+                        indexes,
                     )
                 })
                 .collect::<BTreeSet<_>>()
@@ -1960,12 +2023,7 @@ fn expand_reassembly(
                 },
             );
         }
-        for (logical, bits) in lowered
-            .reassembly
-            .ports
-            .iter()
-            .filter(|(logical, _)| logical.circuit_id == circuit_id)
-        {
+        for &(logical, bits) in indexes.ports(&circuit_id) {
             let qualified_logical = QualifiedPortRef::new(
                 &logical.circuit_id,
                 path.iter().cloned(),
@@ -1991,9 +2049,9 @@ fn expand_reassembly(
                         .map(|port| {
                             flat_endpoints_with_boundary_alias(
                                 port,
-                                circuit,
                                 parent_instance.as_ref(),
                                 compiled,
+                                indexes,
                             )
                         })
                         .unwrap_or_default();
@@ -2006,18 +2064,14 @@ fn expand_reassembly(
                 .collect();
             result.ports.insert(qualified_logical, qualified_bits);
         }
-        for component in circuit.components.iter().rev() {
-            if component.type_id == MODULE_INSTANCE
-                && let Some(module_id) = component.properties.module_id()
-            {
-                let mut child_path = path.clone();
-                child_path.push(component.id.clone());
-                stack.push((
-                    module_id.to_owned(),
-                    child_path,
-                    Some((circuit_id.clone(), path.clone(), component.id.clone())),
-                ));
-            }
+        for &(instance_id, module_id) in indexes.instances(&circuit_id).iter().rev() {
+            let mut child_path = path.clone();
+            child_path.push(instance_id.to_owned());
+            stack.push((
+                module_id.to_owned(),
+                child_path,
+                Some((circuit_id.clone(), path.clone(), instance_id.to_owned())),
+            ));
         }
     }
     result
@@ -2039,19 +2093,14 @@ fn qualify_ports(ports: &[QualifiedPortRef], path: &[String]) -> Vec<QualifiedPo
 
 fn flat_endpoints_with_boundary_alias(
     port: &QualifiedPortRef,
-    circuit: &ProjectCircuit,
     parent_instance: Option<&(String, Vec<String>, String)>,
     compiled: &CompiledProject,
+    indexes: &ConnectivityIndexes<'_>,
 ) -> Vec<FlatPortRef> {
-    let mut endpoints = flat_endpoints_for(port, compiled);
+    let mut endpoints = flat_endpoints_for(port, compiled, indexes);
     if endpoints.is_empty()
         && let Some((parent_circuit, parent_path, instance_id)) = parent_instance
-        && let Some(boundary) = circuit
-            .components
-            .iter()
-            .find(|component| component.id == port.component_id)
-        && matches!(boundary.type_id.as_str(), MODULE_INPUT | MODULE_OUTPUT)
-        && let Some(interface_port_id) = boundary.properties.port_id()
+        && let Some(interface_port_id) = indexes.boundary_port(&port.circuit_id, &port.component_id)
     {
         let instance_port = QualifiedPortRef::new(
             parent_circuit,
@@ -2059,19 +2108,18 @@ fn flat_endpoints_with_boundary_alias(
             instance_id,
             interface_port_id,
         );
-        endpoints = flat_endpoints_for(&instance_port, compiled);
+        endpoints = flat_endpoints_for(&instance_port, compiled, indexes);
     }
     endpoints
 }
 
-fn flat_endpoints_for(port: &QualifiedPortRef, compiled: &CompiledProject) -> Vec<FlatPortRef> {
+fn flat_endpoints_for(
+    port: &QualifiedPortRef,
+    compiled: &CompiledProject,
+    indexes: &ConnectivityIndexes<'_>,
+) -> Vec<FlatPortRef> {
     let flat_id = flat_component_id(&port.instance_path, &port.component_id);
-    if compiled
-        .circuit
-        .components
-        .iter()
-        .any(|component| component.id == flat_id)
-    {
+    if indexes.flat_components.contains(flat_id.as_str()) {
         return vec![FlatPortRef {
             component_id: flat_id,
             port_id: port.port_id.clone(),
@@ -2126,9 +2174,9 @@ fn compose_wire_provenance(
 }
 
 fn compose_reverse_wire_provenance(
-    lowered: &LoweredProjectV3,
     compiled: &CompiledProject,
     active_circuit_id: &str,
+    indexes: &ConnectivityIndexes<'_>,
 ) -> BTreeMap<QualifiedWireBitRef, Vec<String>> {
     let mut flat_connections_by_scalar = BTreeMap::<QualifiedConnectionRef, Vec<String>>::new();
     for (flat_connection_id, scalar_connections) in &compiled.provenance.connections {
@@ -2145,13 +2193,8 @@ fn compose_reverse_wire_provenance(
     }
 
     let mut result = BTreeMap::new();
-    for (circuit_id, path) in active_circuit_occurrences(&lowered.project, active_circuit_id) {
-        for (wire_bit, scalar_connections) in lowered
-            .provenance
-            .wire_bits
-            .iter()
-            .filter(|(wire_bit, _)| wire_bit.circuit_id == circuit_id)
-        {
+    for (circuit_id, path) in active_circuit_occurrences(indexes, active_circuit_id) {
+        for &(wire_bit, scalar_connections) in indexes.wire_bits(&circuit_id) {
             let qualified_wire_bit = QualifiedWireBitRef::new(
                 &wire_bit.circuit_id,
                 path.iter().cloned(),
@@ -2176,29 +2219,17 @@ fn compose_reverse_wire_provenance(
 }
 
 fn active_circuit_occurrences(
-    project: &ProjectDocument,
+    indexes: &ConnectivityIndexes<'_>,
     active_circuit_id: &str,
 ) -> Vec<(String, Vec<String>)> {
-    let circuits = project
-        .circuits
-        .iter()
-        .map(|circuit| (circuit.id.as_str(), circuit))
-        .collect::<BTreeMap<_, _>>();
     let mut occurrences = Vec::new();
     let mut stack = vec![(active_circuit_id.to_owned(), Vec::<String>::new())];
     while let Some((circuit_id, path)) = stack.pop() {
-        let Some(circuit) = circuits.get(circuit_id.as_str()) else {
-            continue;
-        };
         occurrences.push((circuit_id.clone(), path.clone()));
-        for component in circuit.components.iter().rev() {
-            if component.type_id == MODULE_INSTANCE
-                && let Some(module_id) = component.properties.module_id()
-            {
-                let mut child_path = path.clone();
-                child_path.push(component.id.clone());
-                stack.push((module_id.to_owned(), child_path));
-            }
+        for &(instance_id, module_id) in indexes.instances(&circuit_id).iter().rev() {
+            let mut child_path = path.clone();
+            child_path.push(instance_id.to_owned());
+            stack.push((module_id.to_owned(), child_path));
         }
     }
     occurrences

@@ -68,6 +68,26 @@ pub fn compile_project(
     project: &ValidatedProject,
     active_circuit_id: &str,
 ) -> Result<CompiledProject, Vec<ProjectDiagnostic>> {
+    compile_project_with_optional_reference_origins(project, active_circuit_id, None)
+}
+
+pub(crate) fn compile_project_with_reference_origins(
+    project: &ValidatedProject,
+    active_circuit_id: &str,
+    reference_origins: &BTreeMap<QualifiedConnectionRef, Vec<QualifiedConnectionRef>>,
+) -> Result<CompiledProject, Vec<ProjectDiagnostic>> {
+    compile_project_with_optional_reference_origins(
+        project,
+        active_circuit_id,
+        Some(reference_origins),
+    )
+}
+
+fn compile_project_with_optional_reference_origins<'a>(
+    project: &'a ValidatedProject,
+    active_circuit_id: &str,
+    reference_origins: Option<&'a BTreeMap<QualifiedConnectionRef, Vec<QualifiedConnectionRef>>>,
+) -> Result<CompiledProject, Vec<ProjectDiagnostic>> {
     let Some(active) = project
         .project
         .circuits
@@ -179,6 +199,7 @@ pub fn compile_project(
         edges: BTreeMap::new(),
         active_ports: Vec::new(),
         boundary_ports: Vec::new(),
+        reference_origins,
         growth_location: budget_growth_location(
             project,
             &active.id,
@@ -470,6 +491,7 @@ struct HierarchyAnalyzer<'a> {
     edges: BTreeMap<NodeKey, BTreeMap<NodeKey, BTreeSet<QualifiedConnectionRef>>>,
     active_ports: Vec<ActivePort>,
     boundary_ports: Vec<ActivePort>,
+    reference_origins: Option<&'a BTreeMap<QualifiedConnectionRef, Vec<QualifiedConnectionRef>>>,
     growth_location: Option<QualifiedComponentRef>,
 }
 
@@ -961,6 +983,7 @@ impl HierarchyAnalyzer<'_> {
             })
             .collect();
         let mut provenance_items = 0_usize;
+        let mut weighted_provenance_items = 0_usize;
         for source in primitive_outputs {
             let source_port = match self.nodes.get(&source) {
                 Some(NodeRole::PrimitiveOutput(port)) => port.clone(),
@@ -981,6 +1004,7 @@ impl HierarchyAnalyzer<'_> {
                     &reachable,
                     &reverse,
                     &mut provenance_items,
+                    &mut weighted_provenance_items,
                 )?;
                 let id = format!("flat-wire-{:05}", flat_connections.len());
                 connection_provenance.insert(id.clone(), references.into_iter().collect());
@@ -1083,6 +1107,7 @@ impl HierarchyAnalyzer<'_> {
         reachable: &BTreeSet<NodeKey>,
         reverse: &BTreeMap<NodeKey, BTreeMap<NodeKey, BTreeSet<QualifiedConnectionRef>>>,
         provenance_items: &mut usize,
+        weighted_provenance_items: &mut usize,
     ) -> Result<BTreeSet<QualifiedConnectionRef>, Vec<ProjectDiagnostic>> {
         let mut visited = BTreeSet::from([target.clone()]);
         let mut queue = VecDeque::from([target.clone()]);
@@ -1109,7 +1134,51 @@ impl HierarchyAnalyzer<'_> {
         if *provenance_items > MAX_PROVENANCE_REFERENCES {
             return Err(vec![self.provenance_limit_error(source, *provenance_items)]);
         }
+        let weighted =
+            self.expanded_reference_count(source, &references, *weighted_provenance_items)?;
+        *weighted_provenance_items = weighted_provenance_items
+            .checked_add(weighted)
+            .ok_or_else(|| vec![self.provenance_limit_error(source, usize::MAX)])?;
+        if *weighted_provenance_items > MAX_PROVENANCE_REFERENCES {
+            return Err(vec![
+                self.provenance_limit_error(source, *weighted_provenance_items),
+            ]);
+        }
         Ok(references)
+    }
+
+    fn expanded_reference_count(
+        &self,
+        source: &NodeKey,
+        references: &BTreeSet<QualifiedConnectionRef>,
+        accumulated: usize,
+    ) -> Result<usize, Vec<ProjectDiagnostic>> {
+        let Some(origins_by_reference) = self.reference_origins else {
+            return Ok(references.len());
+        };
+        let remaining = MAX_PROVENANCE_REFERENCES.saturating_sub(accumulated);
+        let mut expanded = BTreeSet::new();
+        for reference in references {
+            let static_reference = QualifiedConnectionRef::new(
+                &reference.circuit_id,
+                [] as [&str; 0],
+                &reference.connection_id,
+            );
+            if let Some(origins) = origins_by_reference.get(&static_reference) {
+                expanded.extend(origins.iter().map(|origin| {
+                    (
+                        origin.circuit_id.as_str(),
+                        reference.instance_path.as_slice(),
+                        origin.connection_id.as_str(),
+                    )
+                }));
+            }
+            if expanded.len() > remaining {
+                let count = accumulated.saturating_add(expanded.len());
+                return Err(vec![self.provenance_limit_error(source, count)]);
+            }
+        }
+        Ok(expanded.len())
     }
 
     fn reachable_from(&self, source: &NodeKey) -> BTreeSet<NodeKey> {
