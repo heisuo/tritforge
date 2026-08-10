@@ -317,13 +317,13 @@ aggregation.
 - Modify: `crates/sim-core/src/project_simulator.rs`
 - Test: `crates/sim-core/tests/trace_contract.rs`
 
-- [ ] Write RED tests for stable qualified watches, initial/input/rise/fall/fault reasons, scalar and bus values,
+- [x] Write RED tests for stable qualified watches, initial/input/rise/fall/fault reasons, scalar and bus values,
 512-frame eviction, unavailable-watch removal, reset/recompile clearing, and no full-snapshot retention.
-- [ ] Implement `TraceRecorder` separately from `Simulator`; store only selected values and immutable frame
+- [x] Implement `TraceRecorder` separately from `Simulator`; store only selected values and immutable frame
 metadata.
-- [ ] Append fault frames before returning errors and leave them queryable.
-- [ ] Run trace, project, and full core tests.
-- [ ] Commit `feat: record bounded watched-signal traces`.
+- [x] Append fault frames before returning errors and leave them queryable.
+- [x] Run trace, project, and full core tests.
+- [x] Commit `feat: record bounded watched-signal traces`.
 
 ### Task 11: Expose Phase and Trace Through WASM
 
