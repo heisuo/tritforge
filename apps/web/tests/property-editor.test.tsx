@@ -55,6 +55,46 @@ describe("PropertyEditor", () => {
     });
   });
 
+  it("extends a splitter mapping when its width preset grows", () => {
+    const onCommit = vi.fn(() => undefined);
+    render(
+      <PropertyEditor
+        typeId="wiring.splitter"
+        properties={{ width: 3, branchCount: 3, mapping: [0, 1, 2] }}
+        onCommit={onCommit}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "宽度 6 trit" }));
+    fireEvent.click(screen.getByRole("button", { name: "应用属性" }));
+
+    expect(onCommit).toHaveBeenCalledWith({
+      width: 6,
+      branchCount: 3,
+      mapping: [0, 1, 2, 0, 1, 2],
+    });
+  });
+
+  it("shrinks the splitter branch count with its width", () => {
+    const onCommit = vi.fn(() => undefined);
+    render(
+      <PropertyEditor
+        typeId="wiring.splitter"
+        properties={{ width: 3, branchCount: 3, mapping: [0, 1, 2] }}
+        onCommit={onCommit}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "宽度 1 trit" }));
+    fireEvent.click(screen.getByRole("button", { name: "应用属性" }));
+
+    expect(onCommit).toHaveBeenCalledWith({
+      width: 1,
+      branchCount: 1,
+      mapping: [0],
+    });
+  });
+
   it("offers one branch menu for every displayed trunk bit", () => {
     const onCommit = vi.fn(() => undefined);
     render(

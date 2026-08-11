@@ -38,6 +38,7 @@ const ENDPOINT_STUB = 28;
 const LANE_SPACING = 14;
 const CORNER_RADIUS = 6;
 const MIN_MIDDLE_TRACK = 24;
+const BACKWARD_CLEARANCE = 72;
 
 function endpointKey(nodeId: string, handleId?: string | null): string {
   return `${nodeId}\u0000${handleId ?? ""}`;
@@ -183,19 +184,23 @@ export function createLogicWirePath(
     targetLane,
     targetLaneCount,
   } = args;
-  const direction = targetX >= sourceX ? 1 : -1;
+  const isBackward = targetX < sourceX;
   const horizontalDistance = Math.abs(targetX - sourceX);
   const sourceDepth = ENDPOINT_STUB + sourceLane * LANE_SPACING;
   const targetDepth = ENDPOINT_STUB + targetLane * LANE_SPACING;
   const lanesFit =
     horizontalDistance >= sourceDepth + targetDepth + MIN_MIDDLE_TRACK;
 
-  const sourceTurnX = lanesFit
-    ? sourceX + direction * sourceDepth
-    : (sourceX + targetX) / 2;
-  const targetTurnX = lanesFit
-    ? targetX - direction * targetDepth
-    : (sourceX + targetX) / 2;
+  const sourceTurnX = isBackward
+    ? sourceX + sourceDepth
+    : lanesFit
+      ? sourceX + sourceDepth
+      : (sourceX + targetX) / 2;
+  const targetTurnX = isBackward
+    ? targetX - targetDepth
+    : lanesFit
+      ? targetX - targetDepth
+      : (sourceX + targetX) / 2;
 
   const activeLane =
     sourceLaneCount > 1
@@ -203,8 +208,11 @@ export function createLogicWirePath(
       : targetLaneCount > 1
         ? targetLane - (targetLaneCount - 1) / 2
         : 0;
-  const middleY =
-    (sourceY + targetY) / 2 + activeLane * LANE_SPACING;
+  const middleY = isBackward
+    ? Math.min(sourceY, targetY) -
+      BACKWARD_CLEARANCE -
+      Math.max(sourceLane, targetLane) * LANE_SPACING
+    : (sourceY + targetY) / 2 + activeLane * LANE_SPACING;
 
   const points = removeConsecutiveDuplicates([
     { x: sourceX, y: sourceY },

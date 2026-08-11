@@ -251,6 +251,32 @@ test("rejects a width mismatch during connection preview and reports both widths
   expect(consoleErrors).toEqual([]);
 });
 
+test("resizes a splitter mapping together with its trunk width", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const consoleErrors = watchConsoleErrors(page);
+  await waitForSimulator(page);
+  await page.getByRole("button", { name: "清空" }).click();
+  await place(page, "分线器", { x: 480, y: 260 });
+  await node(page, "splitter-1").click();
+
+  await page.getByRole("button", { name: "宽度 6 trit" }).click();
+  await expect(page.getByLabel("位映射")).toHaveValue("0, 1, 2, 0, 1, 2");
+  await page.getByRole("button", { name: "应用属性" }).click();
+  await expect(page.getByText("属性已更新")).toBeVisible();
+  await expect(node(page, "splitter-1").locator(".splitter-trunk small")).toHaveText(
+    "6t",
+  );
+
+  await page.getByRole("button", { name: "宽度 1 trit" }).click();
+  await expect(page.getByLabel("分支数量")).toHaveValue("1");
+  await expect(page.getByLabel("位映射")).toHaveValue("0");
+  await page.getByRole("button", { name: "应用属性" }).click();
+  await expect(page.getByText("属性已更新")).toBeVisible();
+  expect(consoleErrors).toEqual([]);
+});
+
 test("keeps 27 splitter branches and a 27-trit word inside stable node bounds", async ({
   page,
 }) => {

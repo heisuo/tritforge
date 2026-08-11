@@ -84,6 +84,61 @@ function parseMapping(value: string): number[] {
   return value.split(",").map((entry) => Number(entry.trim()));
 }
 
+function resizeSplitterDraft(
+  draft: DraftProperties,
+  widthValue: string,
+): DraftProperties {
+  const width = Number(widthValue);
+  const currentBranchCount = Number(draft.branchCount);
+  if (
+    !Number.isInteger(width) ||
+    width < 1 ||
+    width > 27 ||
+    !Number.isInteger(currentBranchCount) ||
+    currentBranchCount < 1
+  ) {
+    return { ...draft, width: widthValue };
+  }
+
+  const branchCount = Math.min(currentBranchCount, width);
+  const previous = draft.mapping
+    .split(",")
+    .map((entry) => Number(entry.trim()));
+  const mapping = Array.from({ length: width }, (_, bit) => {
+    const branch = previous[bit];
+    return Number.isInteger(branch) && branch >= 0 && branch < branchCount
+      ? branch
+      : bit % branchCount;
+  });
+
+  const counts = Array<number>(branchCount).fill(0);
+  mapping.forEach((branch) => {
+    counts[branch] += 1;
+  });
+  for (let branch = 0; branch < branchCount; branch += 1) {
+    if (counts[branch] > 0) continue;
+    let replacement = -1;
+    for (let bit = mapping.length - 1; bit >= 0; bit -= 1) {
+      if (counts[mapping[bit]] > 1) {
+        replacement = bit;
+        break;
+      }
+    }
+    if (replacement >= 0) {
+      counts[mapping[replacement]] -= 1;
+      mapping[replacement] = branch;
+      counts[branch] += 1;
+    }
+  }
+
+  return {
+    ...draft,
+    width: widthValue,
+    branchCount: String(branchCount),
+    mapping: mapping.join(", "),
+  };
+}
+
 function isSource(typeId: string): boolean {
   return (
     typeId === "source.trit_input" ||
@@ -269,10 +324,11 @@ export function PropertyEditor({
                 step="1"
                 value={draft.width}
                 onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    width: event.target.value,
-                  }))
+                  setDraft((current) =>
+                    typeId === "wiring.splitter"
+                      ? resizeSplitterDraft(current, event.target.value)
+                      : { ...current, width: event.target.value },
+                  )
                 }
               />
             </label>
@@ -288,10 +344,11 @@ export function PropertyEditor({
                   aria-label={`宽度 ${width} trit`}
                   className={draft.width === String(width) ? "is-active" : ""}
                   onClick={() =>
-                    setDraft((current) => ({
-                      ...current,
-                      width: String(width),
-                    }))
+                    setDraft((current) =>
+                      typeId === "wiring.splitter"
+                        ? resizeSplitterDraft(current, String(width))
+                        : { ...current, width: String(width) },
+                    )
                   }
                 >
                   {width}

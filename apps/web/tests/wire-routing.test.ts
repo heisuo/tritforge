@@ -121,4 +121,21 @@ describe("orthogonal logic wire paths", () => {
     expect(upper.path).not.toBe(lower.path);
     expect(upper.labelY).not.toBe(lower.labelY);
   });
+
+  it("routes a backward wire outside both endpoint modules", () => {
+    const route = createLogicWirePath({
+      sourceX: 500,
+      sourceY: 240,
+      targetX: 180,
+      targetY: 200,
+      sourceLane: 0,
+      sourceLaneCount: 1,
+      targetLane: 0,
+      targetLaneCount: 1,
+    });
+
+    expect(route.points[1].x).toBeGreaterThan(500);
+    expect(route.points.at(-2)?.x).toBeLessThan(180);
+    expect(route.points.some((point) => point.y < 140)).toBe(true);
+  });
 });
