@@ -11,7 +11,10 @@ fn component(id: &str, type_id: &str, value: Option<Trit>) -> ComponentInstance 
     ComponentInstance {
         id: id.to_owned(),
         type_id: type_id.to_owned(),
-        properties: ComponentProperties { value },
+        properties: ComponentProperties {
+            value,
+            ..ComponentProperties::default()
+        },
     }
 }
 

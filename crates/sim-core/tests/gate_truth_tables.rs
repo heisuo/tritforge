@@ -386,7 +386,10 @@ fn sources_use_default_or_configured_values_and_probe_has_no_outputs() {
             Trit::HighZ,
             Trit::Error,
         ] {
-            let properties = ComponentProperties { value: Some(value) };
+            let properties = ComponentProperties {
+                value: Some(value),
+                ..ComponentProperties::default()
+            };
             assert_eq!(
                 evaluate(kind, &properties, &BTreeMap::new()).get("out"),
                 Some(&value)

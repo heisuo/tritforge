@@ -18,7 +18,10 @@ fn component_with_value(id: &str, type_id: &str, value: Option<Trit>) -> Compone
     ComponentInstance {
         id: id.to_owned(),
         type_id: type_id.to_owned(),
-        properties: ComponentProperties { value },
+        properties: ComponentProperties {
+            value,
+            ..ComponentProperties::default()
+        },
     }
 }
 

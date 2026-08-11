@@ -40,11 +40,23 @@ pub enum ComponentKind {
     Clock,
     Dff,
     Register,
+    Rom,
+    Ram,
+    InternalRomCell,
+    InternalRamCell,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComponentProperties {
     pub value: Option<Trit>,
+    #[serde(
+        default,
+        rename = "addressWidth",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub address_width: Option<u8>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contents: Vec<Trit>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -85,6 +97,10 @@ impl ComponentKind {
             Self::Clock => "source.clock",
             Self::Dff => "sequential.dff",
             Self::Register => "sequential.register",
+            Self::Rom => "memory.rom",
+            Self::Ram => "memory.ram",
+            Self::InternalRomCell => "internal.rom_cell",
+            Self::InternalRamCell => "internal.ram_cell",
         }
     }
 
@@ -109,6 +125,10 @@ impl ComponentKind {
             "source.clock" => Some(Self::Clock),
             "sequential.dff" => Some(Self::Dff),
             "sequential.register" => Some(Self::Register),
+            "memory.rom" => Some(Self::Rom),
+            "memory.ram" => Some(Self::Ram),
+            "internal.rom_cell" => Some(Self::InternalRomCell),
+            "internal.ram_cell" => Some(Self::InternalRamCell),
             _ => None,
         }
     }
@@ -158,6 +178,34 @@ impl ComponentKind {
                 port("d", PortDirection::Input),
                 port("clk", PortDirection::Input),
                 port("en", PortDirection::Input),
+                port("rst", PortDirection::Input),
+                port("q", PortDirection::Output),
+            ],
+            Self::Rom => vec![
+                port("addr", PortDirection::Input),
+                port("data", PortDirection::Output),
+            ],
+            Self::Ram => vec![
+                port("addr", PortDirection::Input),
+                port("din", PortDirection::Input),
+                port("we", PortDirection::Input),
+                port("clk", PortDirection::Input),
+                port("rst", PortDirection::Input),
+                port("dout", PortDirection::Output),
+            ],
+            Self::InternalRomCell => vec![
+                port("addr0", PortDirection::Input),
+                port("addr1", PortDirection::Input),
+                port("addr2", PortDirection::Input),
+                port("q", PortDirection::Output),
+            ],
+            Self::InternalRamCell => vec![
+                port("addr0", PortDirection::Input),
+                port("addr1", PortDirection::Input),
+                port("addr2", PortDirection::Input),
+                port("d", PortDirection::Input),
+                port("we", PortDirection::Input),
+                port("clk", PortDirection::Input),
                 port("rst", PortDirection::Input),
                 port("q", PortDirection::Output),
             ],

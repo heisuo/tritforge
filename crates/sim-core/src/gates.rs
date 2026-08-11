@@ -28,7 +28,13 @@ pub fn evaluate(
         ComponentKind::Mux3 => gate_output(mux3(inputs)),
         ComponentKind::HalfAdder => adder_outputs(inputs, &["a", "b"]),
         ComponentKind::FullAdder => adder_outputs(inputs, &["a", "b", "cin"]),
-        ComponentKind::Clock | ComponentKind::Dff | ComponentKind::Register => BTreeMap::new(),
+        ComponentKind::Clock
+        | ComponentKind::Dff
+        | ComponentKind::Register
+        | ComponentKind::Rom
+        | ComponentKind::Ram
+        | ComponentKind::InternalRomCell
+        | ComponentKind::InternalRamCell => BTreeMap::new(),
     }
 }
 

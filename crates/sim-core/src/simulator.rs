@@ -8,6 +8,10 @@ use crate::circuit::{
 };
 use crate::diagnostic::{Diagnostic, Severity};
 use crate::gates::evaluate;
+use crate::memory::{
+    DecodedAddress, UnsafeRamWrite, decode_balanced_address, depth_for_address_width,
+    ram_next_state, read_cell,
+};
 use crate::sequential::dff_next;
 use crate::trit::{Trit, resolve_drivers};
 
@@ -24,6 +28,21 @@ pub struct Simulator {
     tick_count: u64,
     clock_phase: ClockPhase,
     dff_outputs: BTreeMap<String, Trit>,
+    ram_cells: BTreeMap<String, Vec<Trit>>,
+    clock_levels: BTreeMap<String, Trit>,
+}
+
+#[derive(Clone)]
+struct RuntimeCheckpoint {
+    component_outputs: BTreeMap<PortRef, Trit>,
+    input_nets: BTreeMap<PortRef, Trit>,
+    diagnostics: Vec<Diagnostic>,
+    processed_events: usize,
+    stable: bool,
+    tick_count: u64,
+    clock_phase: ClockPhase,
+    dff_outputs: BTreeMap<String, Trit>,
+    ram_cells: BTreeMap<String, Vec<Trit>>,
     clock_levels: BTreeMap<String, Trit>,
 }
 
@@ -93,6 +112,21 @@ impl Simulator {
             .filter(|component| circuit.component_kind(&component.id) == Some(ComponentKind::Dff))
             .map(|component| (component.id.clone(), Trit::Zero))
             .collect();
+        let ram_cells = circuit
+            .components()
+            .iter()
+            .filter(|component| {
+                circuit.component_kind(&component.id) == Some(ComponentKind::InternalRamCell)
+            })
+            .map(|component| {
+                let depth = component
+                    .properties
+                    .address_width
+                    .and_then(depth_for_address_width)
+                    .expect("validated RAM cell address width");
+                (component.id.clone(), vec![Trit::Zero; depth])
+            })
+            .collect();
         let clock_levels = circuit
             .components()
             .iter()
@@ -110,6 +144,8 @@ impl Simulator {
                             | ComponentKind::Constant
                             | ComponentKind::Clock
                             | ComponentKind::Dff
+                            | ComponentKind::InternalRomCell
+                            | ComponentKind::InternalRamCell
                     )
                 )
             })
@@ -129,6 +165,7 @@ impl Simulator {
             tick_count: 0,
             clock_phase: ClockPhase::LowStable,
             dff_outputs,
+            ram_cells,
             clock_levels,
         };
         simulator.settle(component_ids);
@@ -237,6 +274,9 @@ impl Simulator {
         for value in self.dff_outputs.values_mut() {
             *value = Trit::Zero;
         }
+        for contents in self.ram_cells.values_mut() {
+            contents.fill(Trit::Zero);
+        }
         for value in self.clock_levels.values_mut() {
             *value = Trit::Zero;
         }
@@ -255,6 +295,8 @@ impl Simulator {
                             | ComponentKind::Constant
                             | ComponentKind::Clock
                             | ComponentKind::Dff
+                            | ComponentKind::InternalRomCell
+                            | ComponentKind::InternalRamCell
                     )
                 )
             })
@@ -266,22 +308,43 @@ impl Simulator {
 
     #[allow(clippy::result_large_err)]
     pub fn advance_phase(&mut self) -> Result<SimulationSnapshot, Diagnostic> {
+        let checkpoint = self.memory_runtime_checkpoint();
         let mut report = PhaseReport::default();
         self.record_existing_state(&mut report);
-        report.merge(self.advance_phase_transaction()?);
-        self.apply_phase_report(&report);
-        Ok(self.snapshot())
+        match self.advance_phase_transaction() {
+            Ok(phase) => {
+                report.merge(phase);
+                self.apply_phase_report(&report);
+                Ok(self.snapshot())
+            }
+            Err(diagnostic) => {
+                if let Some(checkpoint) = checkpoint {
+                    self.restore_runtime(checkpoint);
+                }
+                Err(diagnostic)
+            }
+        }
     }
 
     #[allow(clippy::result_large_err)]
     pub fn tick(&mut self) -> Result<SimulationSnapshot, Diagnostic> {
         let next_tick_count = self.checked_next_tick_count()?;
+        let checkpoint = self.memory_runtime_checkpoint();
         let starting_phase = self.clock_phase;
         let mut tick_report = PhaseReport::default();
         self.record_existing_state(&mut tick_report);
 
-        tick_report.merge(self.advance_phase_transaction()?);
-        tick_report.merge(self.advance_phase_transaction()?);
+        let transaction = (|| {
+            tick_report.merge(self.advance_phase_transaction()?);
+            tick_report.merge(self.advance_phase_transaction()?);
+            Ok::<(), Diagnostic>(())
+        })();
+        if let Err(diagnostic) = transaction {
+            if let Some(checkpoint) = checkpoint {
+                self.restore_runtime(checkpoint);
+            }
+            return Err(diagnostic);
+        }
 
         debug_assert_eq!(self.clock_phase, starting_phase);
         debug_assert_eq!(self.tick_count, next_tick_count);
@@ -294,15 +357,32 @@ impl Simulator {
         &mut self,
     ) -> Result<(SimulationSnapshot, SimulationSnapshot), Diagnostic> {
         let next_tick_count = self.checked_next_tick_count()?;
+        let checkpoint = self.memory_runtime_checkpoint();
         let starting_phase = self.clock_phase;
         let mut tick_report = PhaseReport::default();
         self.record_existing_state(&mut tick_report);
 
-        let first = self.advance_phase_transaction()?;
+        let first = match self.advance_phase_transaction() {
+            Ok(first) => first,
+            Err(diagnostic) => {
+                if let Some(checkpoint) = checkpoint {
+                    self.restore_runtime(checkpoint);
+                }
+                return Err(diagnostic);
+            }
+        };
         tick_report.merge(first);
         self.apply_phase_report(&tick_report);
         let first_snapshot = self.snapshot();
-        let second = self.advance_phase_transaction()?;
+        let second = match self.advance_phase_transaction() {
+            Ok(second) => second,
+            Err(diagnostic) => {
+                if let Some(checkpoint) = checkpoint {
+                    self.restore_runtime(checkpoint);
+                }
+                return Err(diagnostic);
+            }
+        };
         tick_report.merge(second);
 
         debug_assert_eq!(self.clock_phase, starting_phase);
@@ -314,22 +394,25 @@ impl Simulator {
     #[allow(clippy::result_large_err)]
     fn advance_phase_transaction(&mut self) -> Result<PhaseReport, Diagnostic> {
         match self.clock_phase {
-            ClockPhase::LowStable => Ok(self.advance_rising_phase()),
+            ClockPhase::LowStable => self.advance_rising_phase(),
             ClockPhase::HighStable => self.advance_falling_phase(),
         }
     }
 
-    fn advance_rising_phase(&mut self) -> PhaseReport {
+    #[allow(clippy::result_large_err)]
+    fn advance_rising_phase(&mut self) -> Result<PhaseReport, Diagnostic> {
         let dff_ids = self.dff_outputs.keys().cloned().collect::<Vec<_>>();
+        let ram_ids = self.ram_cells.keys().cloned().collect::<Vec<_>>();
         let clock_ids = self.clock_levels.keys().cloned().collect::<Vec<_>>();
         let clock_inputs_before_rise = dff_ids
             .iter()
+            .chain(&ram_ids)
             .map(|component_id| {
                 let value = self
                     .input_nets
                     .get(&PortRef::new(component_id, "clk"))
                     .copied()
-                    .expect("DFF clock input has a signal");
+                    .expect("sequential clock input has a signal");
                 (component_id.clone(), value)
             })
             .collect::<BTreeMap<_, _>>();
@@ -363,17 +446,52 @@ impl Simulator {
             next_dff_outputs.insert(component_id.clone(), dff_next(current, d, en, rst));
         }
 
+        let mut next_ram_cells = self.ram_cells.clone();
+        let mut unsafe_writes = Vec::new();
+        for component_id in &ram_ids {
+            let clock_before = clock_inputs_before_rise
+                .get(component_id)
+                .copied()
+                .expect("captured every RAM clock input");
+            let clock_after = self.input_nets[&PortRef::new(component_id, "clk")];
+            if clock_before == Trit::Pos || clock_after != Trit::Pos {
+                continue;
+            }
+
+            let current = &self.ram_cells[component_id];
+            let address = self.memory_address(component_id);
+            let data = self.input_nets[&PortRef::new(component_id, "d")];
+            let write_enable = self.input_nets[&PortRef::new(component_id, "we")];
+            let reset = self.input_nets[&PortRef::new(component_id, "rst")];
+            match ram_next_state(current, address, data, write_enable, reset) {
+                Ok(next) => {
+                    next_ram_cells.insert(component_id.clone(), next);
+                }
+                Err(reason) => unsafe_writes.push((component_id.clone(), reason)),
+            }
+        }
+
+        if !unsafe_writes.is_empty() {
+            return Err(self.unsafe_ram_write_diagnostic(&unsafe_writes));
+        }
+
         let changed_dffs = next_dff_outputs
             .iter()
             .filter(|(component_id, value)| self.dff_outputs.get(*component_id) != Some(*value))
             .map(|(component_id, _)| component_id.clone())
             .collect::<Vec<_>>();
+        let changed_ram_cells = next_ram_cells
+            .iter()
+            .filter(|(component_id, value)| self.ram_cells.get(*component_id) != Some(*value))
+            .map(|(component_id, _)| component_id.clone())
+            .collect::<Vec<_>>();
         self.dff_outputs = next_dff_outputs;
-        self.settle(changed_dffs);
+        self.ram_cells = next_ram_cells;
+        self.settle(changed_dffs.into_iter().chain(changed_ram_cells));
         self.record_phase(&mut report);
 
         self.clock_phase = ClockPhase::HighStable;
-        report
+        Ok(report)
     }
 
     #[allow(clippy::result_large_err)]
@@ -420,6 +538,82 @@ impl Simulator {
                 vec![],
             )
         })
+    }
+
+    fn memory_runtime_checkpoint(&self) -> Option<RuntimeCheckpoint> {
+        (!self.ram_cells.is_empty()).then(|| RuntimeCheckpoint {
+            component_outputs: self.component_outputs.clone(),
+            input_nets: self.input_nets.clone(),
+            diagnostics: self.diagnostics.clone(),
+            processed_events: self.processed_events,
+            stable: self.stable,
+            tick_count: self.tick_count,
+            clock_phase: self.clock_phase,
+            dff_outputs: self.dff_outputs.clone(),
+            ram_cells: self.ram_cells.clone(),
+            clock_levels: self.clock_levels.clone(),
+        })
+    }
+
+    fn restore_runtime(&mut self, checkpoint: RuntimeCheckpoint) {
+        self.component_outputs = checkpoint.component_outputs;
+        self.input_nets = checkpoint.input_nets;
+        self.diagnostics = checkpoint.diagnostics;
+        self.processed_events = checkpoint.processed_events;
+        self.stable = checkpoint.stable;
+        self.tick_count = checkpoint.tick_count;
+        self.clock_phase = checkpoint.clock_phase;
+        self.dff_outputs = checkpoint.dff_outputs;
+        self.ram_cells = checkpoint.ram_cells;
+        self.clock_levels = checkpoint.clock_levels;
+    }
+
+    fn memory_address(&self, component_id: &str) -> DecodedAddress {
+        let component = self
+            .circuit
+            .component(component_id)
+            .expect("validated memory cell exists");
+        let width = component
+            .properties
+            .address_width
+            .expect("validated memory cell address width");
+        let bits = (0..width)
+            .map(|index| self.input_nets[&PortRef::new(component_id, format!("addr{index}"))])
+            .collect::<Vec<_>>();
+        decode_balanced_address(&bits, width)
+    }
+
+    fn unsafe_ram_write_diagnostic(&self, failures: &[(String, UnsafeRamWrite)]) -> Diagnostic {
+        let component_ids = failures
+            .iter()
+            .map(|(component_id, _)| component_id.clone())
+            .collect::<Vec<_>>();
+        let mut port_ids = failures
+            .iter()
+            .flat_map(|(component_id, reason)| match reason {
+                UnsafeRamWrite::Reset => vec!["rst".to_owned()],
+                UnsafeRamWrite::WriteEnable => vec!["we".to_owned()],
+                UnsafeRamWrite::Address => {
+                    let width = self
+                        .circuit
+                        .component(component_id)
+                        .and_then(|component| component.properties.address_width)
+                        .expect("validated RAM address width");
+                    (0..width).map(|index| format!("addr{index}")).collect()
+                }
+            })
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        port_ids.sort();
+
+        Diagnostic::error(
+            "UNSAFE_RAM_WRITE",
+            "RAM write/reset controls are not known; no RAM state was changed".to_owned(),
+            component_ids,
+            vec![],
+            port_ids,
+        )
     }
 
     pub fn snapshot(&self) -> SimulationSnapshot {
@@ -538,6 +732,24 @@ impl Simulator {
                     .copied()
                     .expect("validated DFF has runtime state"),
             )]),
+            ComponentKind::InternalRomCell => {
+                let width = properties
+                    .address_width
+                    .expect("validated ROM cell address width");
+                let address = memory_address_from_inputs(&inputs, width);
+                BTreeMap::from([("q".to_owned(), read_cell(&properties.contents, address))])
+            }
+            ComponentKind::InternalRamCell => {
+                let width = properties
+                    .address_width
+                    .expect("validated RAM cell address width");
+                let address = memory_address_from_inputs(&inputs, width);
+                let contents = self
+                    .ram_cells
+                    .get(component_id)
+                    .expect("validated RAM cell has runtime state");
+                BTreeMap::from([("q".to_owned(), read_cell(contents, address))])
+            }
             _ => evaluate(kind, properties, &inputs),
         };
 
@@ -723,6 +935,21 @@ impl PhaseReport {
         self.diagnostics.extend(other.diagnostics);
         self.processed_events = self.processed_events.saturating_add(other.processed_events);
     }
+}
+
+fn memory_address_from_inputs(
+    inputs: &BTreeMap<String, Trit>,
+    address_width: u8,
+) -> DecodedAddress {
+    let bits = (0..address_width)
+        .map(|index| {
+            inputs
+                .get(&format!("addr{index}"))
+                .copied()
+                .expect("declared memory address input")
+        })
+        .collect::<Vec<_>>();
+    decode_balanced_address(&bits, address_width)
 }
 
 fn signal_maps(circuit: &ValidatedCircuit) -> (BTreeMap<PortRef, Trit>, BTreeMap<PortRef, Trit>) {

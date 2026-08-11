@@ -16,7 +16,10 @@ fn valued_component(id: &str, type_id: &str, value: Trit) -> ComponentInstance {
     ComponentInstance {
         id: id.to_owned(),
         type_id: type_id.to_owned(),
-        properties: ComponentProperties { value: Some(value) },
+        properties: ComponentProperties {
+            value: Some(value),
+            ..ComponentProperties::default()
+        },
     }
 }
 

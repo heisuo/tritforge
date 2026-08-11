@@ -1312,6 +1312,7 @@ fn materialize_project(
                             type_id: "source.trit_input".into(),
                             properties: ComponentProperties {
                                 value: component.properties.preview_value(),
+                                ..ComponentProperties::default()
                             },
                         },
                     );
@@ -1352,6 +1353,7 @@ fn materialize_project(
                             type_id: component.type_id.clone(),
                             properties: ComponentProperties {
                                 value: component.properties.known_value(),
+                                ..ComponentProperties::default()
                             },
                         },
                     );

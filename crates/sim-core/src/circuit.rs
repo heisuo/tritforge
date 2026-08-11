@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::catalog::{ComponentKind, ComponentProperties, PortDirection};
 use crate::diagnostic::{Diagnostic, Severity};
+use crate::memory::depth_for_address_width;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComponentInstance {
@@ -126,11 +127,20 @@ pub fn validate_circuit(
     let mut diagnostics = BTreeSet::new();
     let mut components = definition.components;
     components.sort_by(|left, right| {
-        (&left.id, &left.type_id, left.properties.value).cmp(&(
-            &right.id,
-            &right.type_id,
-            right.properties.value,
-        ))
+        (
+            &left.id,
+            &left.type_id,
+            left.properties.value,
+            left.properties.address_width,
+            &left.properties.contents,
+        )
+            .cmp(&(
+                &right.id,
+                &right.type_id,
+                right.properties.value,
+                right.properties.address_width,
+                &right.properties.contents,
+            ))
     });
 
     let component_counts = components
@@ -172,7 +182,10 @@ pub fn validate_circuit(
             component_kinds.insert(component.id.clone(), kind);
         }
 
-        if kind == ComponentKind::Register {
+        if matches!(
+            kind,
+            ComponentKind::Register | ComponentKind::Rom | ComponentKind::Ram
+        ) {
             diagnostics.insert(Diagnostic::error(
                 "STRUCTURAL_COMPONENT_REQUIRES_PROJECT_V3",
                 format!(
@@ -292,7 +305,28 @@ fn property_is_valid(kind: ComponentKind, properties: &ComponentProperties) -> b
         | ComponentKind::FullAdder
         | ComponentKind::Clock
         | ComponentKind::Dff
-        | ComponentKind::Register => properties.value.is_none(),
+        | ComponentKind::Register => {
+            properties.value.is_none()
+                && properties.address_width.is_none()
+                && properties.contents.is_empty()
+        }
+        ComponentKind::Rom | ComponentKind::Ram => true,
+        ComponentKind::InternalRomCell => {
+            let Some(depth) = properties.address_width.and_then(depth_for_address_width) else {
+                return false;
+            };
+            properties.value.is_none()
+                && properties.contents.len() <= depth
+                && properties.contents.iter().all(|value| value.is_known())
+        }
+        ComponentKind::InternalRamCell => {
+            properties.value.is_none()
+                && properties
+                    .address_width
+                    .and_then(depth_for_address_width)
+                    .is_some()
+                && properties.contents.is_empty()
+        }
     }
 }
 
