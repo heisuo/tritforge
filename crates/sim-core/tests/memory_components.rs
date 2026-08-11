@@ -76,6 +76,109 @@ fn definition(
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum RuntimeWriteInput {
+    Known(Trit),
+    Meta(Trit),
+}
+
+fn drive_runtime_write_input(
+    id: &str,
+    target_port: &str,
+    value: RuntimeWriteInput,
+    components: &mut Vec<ComponentInstance>,
+    connections: &mut Vec<Connection>,
+) {
+    match value {
+        RuntimeWriteInput::Known(value) => {
+            components.push(source(id, value));
+            connections.push(wire(id, "fault-ram", target_port));
+        }
+        RuntimeWriteInput::Meta(Trit::Unknown) => {
+            components.push(component(id, "gate.buf"));
+            connections.push(connection(
+                &format!("{id}-fault-ram-{target_port}"),
+                id,
+                "y",
+                "fault-ram",
+                target_port,
+            ));
+        }
+        RuntimeWriteInput::Meta(Trit::HighZ) => {}
+        RuntimeWriteInput::Meta(Trit::Error) => {
+            let neg_id = format!("{id}-neg");
+            let pos_id = format!("{id}-pos");
+            components.push(source(&neg_id, Trit::Neg));
+            components.push(source(&pos_id, Trit::Pos));
+            connections.push(wire(&neg_id, "fault-ram", target_port));
+            connections.push(wire(&pos_id, "fault-ram", target_port));
+        }
+        RuntimeWriteInput::Meta(value) => panic!("{value:?} is not a meta value"),
+    }
+}
+
+fn unsafe_runtime_write_definition(
+    address: RuntimeWriteInput,
+    write_enable: RuntimeWriteInput,
+    reset: RuntimeWriteInput,
+) -> CircuitDefinition {
+    let mut components = vec![
+        source("victim-addr", Trit::Zero),
+        source("victim-data", Trit::Pos),
+        source("victim-we", Trit::Pos),
+        source("victim-rst", Trit::Zero),
+        source("dff-data", Trit::Pos),
+        source("dff-enable", Trit::Pos),
+        source("dff-reset", Trit::Zero),
+        source("fault-data", Trit::Zero),
+        source("clock-zero", Trit::Zero),
+        source("fault-clock-select", Trit::Neg),
+        component("clock", "source.clock"),
+        component("fault-clock-mux", "gate.mux2"),
+        component("dff", "sequential.dff"),
+        memory_cell("victim-ram", "internal.ram_cell", 1, vec![]),
+        memory_cell("fault-ram", "internal.ram_cell", 1, vec![]),
+    ];
+    let mut connections = vec![
+        wire("victim-addr", "victim-ram", "addr0"),
+        wire("victim-data", "victim-ram", "d"),
+        wire("victim-we", "victim-ram", "we"),
+        wire("victim-rst", "victim-ram", "rst"),
+        wire("clock", "victim-ram", "clk"),
+        wire("dff-data", "dff", "d"),
+        wire("dff-enable", "dff", "en"),
+        wire("dff-reset", "dff", "rst"),
+        wire("clock", "dff", "clk"),
+        wire("clock-zero", "fault-clock-mux", "a"),
+        wire("clock", "fault-clock-mux", "b"),
+        wire("fault-clock-select", "fault-clock-mux", "s"),
+        connection(
+            "fault-clock-mux-fault-ram-clk",
+            "fault-clock-mux",
+            "y",
+            "fault-ram",
+            "clk",
+        ),
+        wire("fault-data", "fault-ram", "d"),
+    ];
+    drive_runtime_write_input(
+        "fault-addr",
+        "addr0",
+        address,
+        &mut components,
+        &mut connections,
+    );
+    drive_runtime_write_input(
+        "fault-we",
+        "we",
+        write_enable,
+        &mut components,
+        &mut connections,
+    );
+    drive_runtime_write_input("fault-rst", "rst", reset, &mut components, &mut connections);
+    definition(components, connections)
+}
+
 #[test]
 fn balanced_addresses_are_decoded_ms_first_with_a_centered_offset() {
     fn known_trits(width: usize) -> Vec<Vec<Trit>> {
@@ -420,6 +523,106 @@ fn unsafe_rising_write_faults_atomically_across_all_ram_cells() {
     let restored = simulator.snapshot();
     assert_eq!(restored.output_value("ram0", "q"), Some(Trit::Pos));
     assert_eq!(restored.output_value("ram1", "q"), Some(Trit::Neg));
+}
+
+#[test]
+fn every_meta_runtime_write_input_faults_even_when_control_priority_would_mask_it() {
+    #[derive(Debug)]
+    struct Case {
+        name: String,
+        address: RuntimeWriteInput,
+        write_enable: RuntimeWriteInput,
+        reset: RuntimeWriteInput,
+    }
+
+    let known_address = RuntimeWriteInput::Known(Trit::Zero);
+    let asserted = RuntimeWriteInput::Known(Trit::Pos);
+    let deasserted = RuntimeWriteInput::Known(Trit::Zero);
+    let mut cases = Vec::new();
+    for (symbol, meta) in [("X", Trit::Unknown), ("Z", Trit::HighZ), ("E", Trit::Error)] {
+        let meta = RuntimeWriteInput::Meta(meta);
+        cases.extend([
+            Case {
+                name: format!("rst={symbol}"),
+                address: known_address,
+                write_enable: asserted,
+                reset: meta,
+            },
+            Case {
+                name: format!("we={symbol}"),
+                address: known_address,
+                write_enable: meta,
+                reset: deasserted,
+            },
+            Case {
+                name: format!("addr={symbol}"),
+                address: meta,
+                write_enable: asserted,
+                reset: deasserted,
+            },
+            Case {
+                name: format!("rst=1 masks we={symbol}"),
+                address: known_address,
+                write_enable: meta,
+                reset: asserted,
+            },
+            Case {
+                name: format!("we=0 masks addr={symbol}"),
+                address: meta,
+                write_enable: deasserted,
+                reset: deasserted,
+            },
+            Case {
+                name: format!("rst=1 masks addr={symbol}"),
+                address: meta,
+                write_enable: asserted,
+                reset: asserted,
+            },
+        ]);
+    }
+
+    let mut failures = Vec::new();
+    for case in cases {
+        let mut simulator = Simulator::load(unsafe_runtime_write_definition(
+            case.address,
+            case.write_enable,
+            case.reset,
+        ))
+        .unwrap_or_else(|diagnostics| panic!("{} failed to load: {diagnostics:?}", case.name));
+        simulator
+            .tick()
+            .expect("seed RAM and DFF with fault clock gated");
+        simulator
+            .set_sources([
+                ("victim-data", Trit::Neg),
+                ("dff-data", Trit::Neg),
+                ("fault-clock-select", Trit::Pos),
+            ])
+            .expect("stage state changes and enable the faulting clock");
+        let before = simulator.snapshot();
+        assert_eq!(before.clock_phase, ClockPhase::LowStable, "{}", case.name);
+        assert_eq!(before.tick_count, 1, "{}", case.name);
+        assert_eq!(before.output_value("clock", "out"), Some(Trit::Zero));
+        assert_eq!(before.output_value("victim-ram", "q"), Some(Trit::Pos));
+        assert_eq!(before.output_value("dff", "q"), Some(Trit::Pos));
+
+        match simulator.tick() {
+            Err(diagnostic) if diagnostic.code == "UNSAFE_RAM_WRITE" => {}
+            Err(diagnostic) => failures.push(format!(
+                "{} returned {}, expected UNSAFE_RAM_WRITE",
+                case.name, diagnostic.code
+            )),
+            Ok(_) => failures.push(format!("{} committed instead of faulting", case.name)),
+        }
+        if simulator.snapshot() != before {
+            failures.push(format!(
+                "{} did not restore the complete runtime",
+                case.name
+            ));
+        }
+    }
+
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 #[test]

@@ -64,22 +64,23 @@ pub(crate) fn ram_next_state(
     write_enable: Trit,
     reset: Trit,
 ) -> Result<Vec<Trit>, UnsafeRamWrite> {
-    match reset {
-        Trit::Pos => return Ok(vec![Trit::Zero; current.len()]),
-        Trit::Neg | Trit::Zero => {}
-        Trit::Unknown | Trit::HighZ | Trit::Error => return Err(UnsafeRamWrite::Reset),
+    if !reset.is_known() {
+        return Err(UnsafeRamWrite::Reset);
     }
+    if !write_enable.is_known() {
+        return Err(UnsafeRamWrite::WriteEnable);
+    }
+    let DecodedAddress::Known(index) = address else {
+        return Err(UnsafeRamWrite::Address);
+    };
 
-    match write_enable {
-        Trit::Neg | Trit::Zero => Ok(current.to_vec()),
-        Trit::Pos => match address {
-            DecodedAddress::Known(index) => {
-                let mut next = current.to_vec();
-                next[index] = data;
-                Ok(next)
-            }
-            DecodedAddress::Unknown | DecodedAddress::Error => Err(UnsafeRamWrite::Address),
-        },
-        Trit::Unknown | Trit::HighZ | Trit::Error => Err(UnsafeRamWrite::WriteEnable),
+    if reset == Trit::Pos {
+        Ok(vec![Trit::Zero; current.len()])
+    } else if write_enable == Trit::Pos {
+        let mut next = current.to_vec();
+        next[index] = data;
+        Ok(next)
+    } else {
+        Ok(current.to_vec())
     }
 }
