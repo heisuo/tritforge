@@ -8,6 +8,14 @@
 
 **Tech Stack:** Rust 2024, serde, sim-core event simulation, wasm-bindgen, React 19, TypeScript 7, Vitest, Playwright.
 
+## 2026-08-11 Demo Milestone
+
+- Complete: scalar ROM/RAM semantics, transactional unsafe-write rollback, Project v3 dynamic ports, W-lane lowering, balanced-address mapping, provenance, state-preserving label edits, and structural rebuild lifecycle.
+- Complete: Web catalog entries, ROM contents editor, Chinese help, live `data`/`dout` display, 27-word Memory Lab, production WASM build, and desktop write/hold/reset acceptance.
+- Verified: all 209 Web unit tests, all sim-core tests, production build, strict sim-core Clippy/fmt, and the real Chromium Memory Lab scenario pass.
+- Follow-up hardening: dedicated sim-wasm memory test matrix, nested-memory browser coverage, and the full five-signal Chronogram screenshot remain useful but do not block the local demo.
+- Demo URL: `http://127.0.0.1:5175/`; load `三进制 Memory Lab` from the example library.
+
 ---
 
 ## File Map
