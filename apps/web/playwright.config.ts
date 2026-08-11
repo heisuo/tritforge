@@ -11,6 +11,7 @@ export default defineConfig({
     "bus-teaching-example.spec.ts",
     "chronogram.spec.ts",
     "memory-lab.spec.ts",
+    "counter3.spec.ts",
   ],
   fullyParallel: false,
   workers: 1,

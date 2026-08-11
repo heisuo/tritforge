@@ -43,6 +43,7 @@ describe("example library", () => {
       "sequential-dff",
       "register3",
       "memory-lab",
+      "counter3",
     ]);
   });
 
@@ -80,6 +81,42 @@ describe("example library", () => {
       "000",
       "1T0",
     ]);
+  });
+
+  it("builds a 3-trit synchronous counter from a register and ripple incrementer", () => {
+    const project = cloneExampleProject("counter3")!;
+    const circuit = project.circuits.find((item) => item.id === "counter3")!;
+    const typeIds = circuit.components.map((component) => component.typeId);
+    const wires = "wires" in circuit ? circuit.wires : [];
+
+    expect(project).toMatchObject({ version: 3, rootCircuitId: "main" });
+    expect(
+      typeIds.filter((typeId) => typeId === "sequential.register"),
+    ).toHaveLength(1);
+    expect(
+      typeIds.filter((typeId) => typeId === "module.full_adder"),
+    ).toHaveLength(3);
+    expect(
+      typeIds.filter((typeId) => typeId === "wiring.splitter"),
+    ).toHaveLength(2);
+    expect(
+      circuit.components.find((component) => component.id === "increment-one"),
+    ).toMatchObject({
+      typeId: "source.constant",
+      properties: { value: "1" },
+    });
+    expect(wires).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          endpointA: { componentId: "register", portId: "q" },
+          endpointB: { componentId: "current-splitter", portId: "trunk" },
+        }),
+        expect.objectContaining({
+          endpointA: { componentId: "next-splitter", portId: "trunk" },
+          endpointB: { componentId: "register", portId: "d" },
+        }),
+      ]),
+    );
   });
 
   it.each(EXAMPLES)(

@@ -6,6 +6,7 @@ import type {
 } from "./editor-model";
 import { toEditorDocument } from "./editor/circuit-document";
 import { cloneBusWiringProject } from "./examples/bus-wiring";
+import { cloneCounter3Project } from "./examples/counter3";
 import { cloneHierarchicalAdderProject } from "./examples/hierarchical-adder";
 import { cloneMemoryLabProject } from "./examples/memory-lab";
 import { cloneRegister3Project } from "./examples/register3";
@@ -26,7 +27,8 @@ export type ExampleId =
   | "driver-conflict"
   | "sequential-dff"
   | "register3"
-  | "memory-lab";
+  | "memory-lab"
+  | "counter3";
 
 export interface TernaryExample {
   id: ExampleId;
@@ -144,6 +146,33 @@ const memoryLabDocument: EditorDocument = {
     };
   }),
   edges: memoryLabRoot.wires.map((item) => ({
+    id: item.id,
+    source: item.endpointA.componentId,
+    sourceHandle: item.endpointA.portId,
+    target: item.endpointB.componentId,
+    targetHandle: item.endpointB.portId,
+  })),
+};
+const counter3Project = cloneCounter3Project();
+const counter3Root = counter3Project.circuits[0];
+const counter3Document: EditorDocument = {
+  nodes: counter3Root.components.map((item) => {
+    const { label, value, ...properties } = item.properties;
+    return {
+      id: item.id,
+      type: "component",
+      position: { ...item.position },
+      data: {
+        typeId: item.typeId,
+        label: typeof label === "string" ? label : item.typeId,
+        ...(typeof value === "string" ? { sourceValue: value } : {}),
+        ...(Object.keys(properties).length > 0
+          ? { properties: structuredClone(properties) }
+          : {}),
+      },
+    };
+  }),
+  edges: counter3Root.wires.map((item) => ({
     id: item.id,
     source: item.endpointA.componentId,
     sourceHandle: item.endpointA.portId,
@@ -446,6 +475,19 @@ export const EXAMPLES: TernaryExample[] = [
     document: memoryLabDocument,
     project: cloneMemoryLabProject(),
   },
+  {
+    id: "counter3",
+    name: "3-trit 同步计数器",
+    category: "时序系统",
+    description:
+      "用 Register[3] 保存当前计数，用三个全加器组成 +1 行波进位器；每次 Tick 递增一次。",
+    composition:
+      "Register[3] → Splitter → 3 × Full Adder (+001) → Splitter → D",
+    expected:
+      "默认从 000 开始；连续 Tick 得到 001、01T、010……十进制为 1、2、3……",
+    document: counter3Document,
+    project: cloneCounter3Project(),
+  },
 ];
 
 export function cloneExampleDocument(id: ExampleId): EditorDocument {
@@ -464,7 +506,7 @@ export function cloneExampleDocument(id: ExampleId): EditorDocument {
 }
 
 type V2ProjectExampleId = "hierarchical-adder" | "sequential-dff" | "register3";
-type V3ProjectExampleId = "bus-tunnel-3" | "memory-lab";
+type V3ProjectExampleId = "bus-tunnel-3" | "memory-lab" | "counter3";
 type DocumentOnlyExampleId = Exclude<
   ExampleId,
   V2ProjectExampleId | V3ProjectExampleId
@@ -484,5 +526,6 @@ export function cloneExampleProject(
   if (id === "sequential-dff") return cloneSequentialDffProject();
   if (id === "register3") return cloneRegister3Project();
   if (id === "memory-lab") return cloneMemoryLabProject();
+  if (id === "counter3") return cloneCounter3Project();
   return null;
 }
