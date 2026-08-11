@@ -41,6 +41,13 @@ export function buildRenderedEdges(
   displayMode: CanvasDisplayMode = "balanced",
 ): EditorEdge[] {
   const nodeById = new Map<string, NodeRenderIndex>();
+  const routeObstacles = nodes.map((node) => ({
+    id: node.id,
+    x: node.position.x,
+    y: node.position.y,
+    width: node.measured?.width ?? node.width ?? 180,
+    height: node.measured?.height ?? node.height ?? 120,
+  }));
   for (const node of nodes) {
     nodeById.set(node.id, {
       node,
@@ -84,6 +91,7 @@ export function buildRenderedEdges(
         currentWord: signal,
         displayWord: formatCanvasWord(signal, displayMode),
         signalColor,
+        routeObstacles,
         ...(localName ? { localName } : {}),
       },
       style: {

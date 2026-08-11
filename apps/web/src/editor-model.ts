@@ -3,7 +3,7 @@ import {
   portForEditorHandle,
   semanticPortIdForHandle,
 } from "./editor/port-handles";
-import type { WireLaneAssignment } from "./wire-routing";
+import type { WireLaneAssignment, WireObstacle } from "./wire-routing";
 import type { CanvasDisplayMode } from "./canvas-display";
 
 export type KnownTrit = "T" | "0" | "1";
@@ -101,6 +101,7 @@ export interface LogicWireData
   displayWord?: string;
   localName?: string;
   signalColor?: string;
+  routeObstacles?: WireObstacle[];
 }
 export type EditorEdge = Edge<LogicWireData, "logic">;
 

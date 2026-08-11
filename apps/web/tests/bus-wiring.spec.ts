@@ -144,6 +144,9 @@ test("places, configures, and simulates a split bus with junction and tunnels", 
   await expect(
     page.locator('.react-flow__edge[data-id="wire-2"] .react-flow__edge-path'),
   ).toHaveCSS("stroke-width", "2px");
+  await expect(
+    page.locator('.react-flow__edge[data-id="wire-2"] .wire-bridge-gap'),
+  ).toHaveCSS("stroke-width", "7px");
   const selectedPath = page.locator(
     '.react-flow__edge[data-id="wire-2"] .react-flow__edge-path',
   );

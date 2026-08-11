@@ -815,6 +815,14 @@ button {
   transition: stroke 120ms ease;
 }
 
+.wire-bridge-gap {
+  fill: none;
+  stroke: #eef2f3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
 .react-flow__edge.selected .react-flow__edge-path {
   stroke: #1867d2 !important;
   filter: drop-shadow(0 0 2px rgb(22 70 76 / 42%));

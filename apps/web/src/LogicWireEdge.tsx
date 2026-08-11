@@ -10,6 +10,8 @@ import { createLogicWirePath } from "./wire-routing";
 
 export function LogicWireEdge({
   id,
+  source,
+  target,
   sourceX,
   sourceY,
   targetX,
@@ -30,6 +32,9 @@ export function LogicWireEdge({
     targetY,
     sourceSide: sourcePosition === Position.Left ? "left" : "right",
     targetSide: targetPosition === Position.Right ? "right" : "left",
+    sourceNodeId: source,
+    targetNodeId: target,
+    obstacles: data?.routeObstacles,
     sourceLane: data?.sourceLane ?? 0,
     sourceLaneCount: data?.sourceLaneCount ?? 1,
     targetLane: data?.targetLane ?? 0,
@@ -38,6 +43,14 @@ export function LogicWireEdge({
 
   return (
     <>
+      <path
+        d={route.path}
+        className="wire-bridge-gap"
+        style={{
+          strokeWidth:
+            (typeof style?.strokeWidth === "number" ? style.strokeWidth : 2) + 5,
+        }}
+      />
       <BaseEdge
         id={id}
         path={route.path}

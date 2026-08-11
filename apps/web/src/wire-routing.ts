@@ -3,6 +3,12 @@ export interface WirePoint {
   y: number;
 }
 
+export interface WireObstacle extends WirePoint {
+  id: string;
+  width: number;
+  height: number;
+}
+
 export interface WireGeometry {
   id: string;
   source: string;
@@ -27,6 +33,9 @@ export interface LogicWirePathArgs extends WireLaneAssignment {
   targetY: number;
   sourceSide?: "left" | "right";
   targetSide?: "left" | "right";
+  sourceNodeId?: string;
+  targetNodeId?: string;
+  obstacles?: WireObstacle[];
 }
 
 export interface LogicWireRoute {
@@ -36,15 +45,12 @@ export interface LogicWireRoute {
   points: WirePoint[];
 }
 
-const ENDPOINT_STUB = 28;
+const ENDPOINT_STUB = 38;
 const LANE_SPACING = 14;
 const CORNER_RADIUS = 6;
 const MIN_MIDDLE_TRACK = 24;
-const BACKWARD_CLEARANCE = 72;
-
-function endpointKey(nodeId: string, handleId?: string | null): string {
-  return `${nodeId}\u0000${handleId ?? ""}`;
-}
+const BACKWARD_CLEARANCE = 96;
+const NODE_CLEARANCE = 28;
 
 function compareText(left: string, right: string): number {
   return left.localeCompare(right);
@@ -82,9 +88,7 @@ export function assignWireLanes(
     ]),
   ) as Record<string, WireLaneAssignment>;
 
-  const sourceGroups = groupWires(wires, (wire) =>
-    endpointKey(wire.source, wire.sourceHandle),
-  );
+  const sourceGroups = groupWires(wires, (wire) => wire.source);
   for (const group of sourceGroups.values()) {
     const ordered = [...group].sort(
       (left, right) =>
@@ -100,9 +104,7 @@ export function assignWireLanes(
     });
   }
 
-  const targetGroups = groupWires(wires, (wire) =>
-    endpointKey(wire.target, wire.targetHandle),
-  );
+  const targetGroups = groupWires(wires, (wire) => wire.target);
   for (const group of targetGroups.values()) {
     const ordered = [...group].sort(
       (left, right) =>
@@ -173,6 +175,54 @@ function removeConsecutiveDuplicates(points: WirePoint[]): WirePoint[] {
   );
 }
 
+function pathLength(points: WirePoint[]): number {
+  let length = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    length += distance(points[index - 1], points[index]);
+  }
+  return length;
+}
+
+function segmentIntersectsObstacle(
+  start: WirePoint,
+  end: WirePoint,
+  obstacle: WireObstacle,
+): boolean {
+  const left = obstacle.x - NODE_CLEARANCE;
+  const right = obstacle.x + obstacle.width + NODE_CLEARANCE;
+  const top = obstacle.y - NODE_CLEARANCE;
+  const bottom = obstacle.y + obstacle.height + NODE_CLEARANCE;
+
+  if (start.y === end.y) {
+    const segmentLeft = Math.min(start.x, end.x);
+    const segmentRight = Math.max(start.x, end.x);
+    return start.y > top && start.y < bottom && segmentRight > left && segmentLeft < right;
+  }
+  if (start.x === end.x) {
+    const segmentTop = Math.min(start.y, end.y);
+    const segmentBottom = Math.max(start.y, end.y);
+    return start.x > left && start.x < right && segmentBottom > top && segmentTop < bottom;
+  }
+  return false;
+}
+
+function collisionCount(
+  points: WirePoint[],
+  obstacles: WireObstacle[],
+  ignoredNodeIds: Set<string>,
+): number {
+  let collisions = 0;
+  for (const obstacle of obstacles) {
+    if (ignoredNodeIds.has(obstacle.id)) continue;
+    for (let index = 1; index < points.length; index += 1) {
+      if (segmentIntersectsObstacle(points[index - 1], points[index], obstacle)) {
+        collisions += 1;
+      }
+    }
+  }
+  return collisions;
+}
+
 export function createLogicWirePath(
   args: LogicWirePathArgs,
 ): LogicWireRoute {
@@ -183,6 +233,9 @@ export function createLogicWirePath(
     targetY,
     sourceSide = "right",
     targetSide = "left",
+    sourceNodeId,
+    targetNodeId,
+    obstacles = [],
     sourceLane,
     sourceLaneCount,
     targetLane,
@@ -213,11 +266,51 @@ export function createLogicWirePath(
       : targetLaneCount > 1
         ? targetLane - (targetLaneCount - 1) / 2
         : 0;
-  const middleY = !endpointsFaceEachOther
+  const preferredMiddleY = !endpointsFaceEachOther
     ? Math.min(sourceY, targetY) -
       BACKWARD_CLEARANCE -
       Math.max(sourceLane, targetLane) * LANE_SPACING
     : (sourceY + targetY) / 2 + activeLane * LANE_SPACING;
+
+  const candidateTracks = [
+    preferredMiddleY,
+    ...obstacles.flatMap((obstacle) => [
+      obstacle.y - NODE_CLEARANCE,
+      obstacle.y + obstacle.height + NODE_CLEARANCE,
+    ]),
+  ].filter((track, index, tracks) => tracks.indexOf(track) === index);
+  const ignoredNodeIds = new Set(
+    [sourceNodeId, targetNodeId].filter(
+      (nodeId): nodeId is string => typeof nodeId === "string",
+    ),
+  );
+  const middleY = candidateTracks.reduce((best, candidate) => {
+    const candidatePoints = [
+      { x: sourceX, y: sourceY },
+      { x: sourceTurnX, y: sourceY },
+      { x: sourceTurnX, y: candidate },
+      { x: targetTurnX, y: candidate },
+      { x: targetTurnX, y: targetY },
+      { x: targetX, y: targetY },
+    ];
+    const bestPoints = [
+      { x: sourceX, y: sourceY },
+      { x: sourceTurnX, y: sourceY },
+      { x: sourceTurnX, y: best },
+      { x: targetTurnX, y: best },
+      { x: targetTurnX, y: targetY },
+      { x: targetX, y: targetY },
+    ];
+    const candidateScore =
+      collisionCount(candidatePoints, obstacles, ignoredNodeIds) * 1_000_000 +
+      pathLength(candidatePoints) +
+      Math.abs(candidate - preferredMiddleY) * 0.1;
+    const bestScore =
+      collisionCount(bestPoints, obstacles, ignoredNodeIds) * 1_000_000 +
+      pathLength(bestPoints) +
+      Math.abs(best - preferredMiddleY) * 0.1;
+    return candidateScore < bestScore ? candidate : best;
+  }, preferredMiddleY);
 
   const points = removeConsecutiveDuplicates([
     { x: sourceX, y: sourceY },

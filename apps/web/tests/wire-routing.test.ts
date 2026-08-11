@@ -90,6 +90,38 @@ describe("stable wire lane assignment", () => {
       targetLaneCount: 2,
     });
   });
+
+  it("separates wires using different ports on the same module", () => {
+    const lanes = assignWireLanes([
+      {
+        id: "branch-0",
+        source: "splitter",
+        sourceHandle: "branch0",
+        target: "upper",
+        targetHandle: "in",
+        sourcePosition: { x: 200, y: 200 },
+        targetPosition: { x: 500, y: 100 },
+      },
+      {
+        id: "branch-1",
+        source: "splitter",
+        sourceHandle: "branch1",
+        target: "lower",
+        targetHandle: "in",
+        sourcePosition: { x: 200, y: 200 },
+        targetPosition: { x: 500, y: 300 },
+      },
+    ]);
+
+    expect(lanes["branch-0"]).toMatchObject({
+      sourceLane: 0,
+      sourceLaneCount: 2,
+    });
+    expect(lanes["branch-1"]).toMatchObject({
+      sourceLane: 1,
+      sourceLaneCount: 2,
+    });
+  });
 });
 
 describe("orthogonal logic wire paths", () => {
@@ -116,8 +148,8 @@ describe("orthogonal logic wire paths", () => {
     });
 
     expect(upper.points[0]).toEqual({ x: 100, y: 200 });
-    expect(upper.points[1]).toEqual({ x: 128, y: 200 });
-    expect(lower.points[1]).toEqual({ x: 142, y: 200 });
+    expect(upper.points[1]).toEqual({ x: 138, y: 200 });
+    expect(lower.points[1]).toEqual({ x: 152, y: 200 });
     expect(upper.path).not.toBe(lower.path);
     expect(upper.labelY).not.toBe(lower.labelY);
   });
@@ -156,5 +188,52 @@ describe("orthogonal logic wire paths", () => {
     expect(route.points[1].x).toBeGreaterThan(120);
     expect(route.points.at(-2)?.x).toBeGreaterThan(420);
     expect(route.points.some((point) => point.y < 20)).toBe(true);
+  });
+
+  it("moves its middle track outside an intervening module clearance", () => {
+    const route = createLogicWirePath({
+      sourceX: 100,
+      sourceY: 180,
+      targetX: 500,
+      targetY: 180,
+      sourceSide: "right",
+      targetSide: "left",
+      sourceNodeId: "source",
+      targetNodeId: "target",
+      obstacles: [
+        { id: "source", x: 20, y: 130, width: 80, height: 100 },
+        { id: "middle", x: 240, y: 120, width: 120, height: 120 },
+        { id: "target", x: 500, y: 130, width: 80, height: 100 },
+      ],
+      sourceLane: 0,
+      sourceLaneCount: 1,
+      targetLane: 0,
+      targetLaneCount: 1,
+    });
+
+    expect(route.labelY <= 102 || route.labelY >= 258).toBe(true);
+  });
+
+  it("keeps obstacle detours on separate module lanes", () => {
+    const common = {
+      sourceX: 100,
+      sourceY: 180,
+      targetX: 500,
+      targetY: 180,
+      sourceSide: "right" as const,
+      targetSide: "left" as const,
+      sourceNodeId: "source",
+      targetNodeId: "target",
+      obstacles: [
+        { id: "middle", x: 240, y: 120, width: 120, height: 120 },
+      ],
+      sourceLane: 0,
+      sourceLaneCount: 1,
+      targetLaneCount: 2,
+    };
+    const upper = createLogicWirePath({ ...common, targetLane: 0 });
+    const lower = createLogicWirePath({ ...common, targetLane: 1 });
+
+    expect(upper.labelY).not.toBe(lower.labelY);
   });
 });
