@@ -39,15 +39,19 @@ export function LogicWireEdge({
       <EdgeLabelRenderer>
         <div
           className={`wire-label ${data?.semanticWidth && data.semanticWidth > 1 ? "is-bus" : ""}`}
-          style={{
-            transform: `translate(-50%, -50%) translate(${route.labelX}px, ${route.labelY}px)`,
-            "--wire-signal-color": data?.signalColor ?? "#526168",
-          } as CSSProperties}
+          style={
+            {
+              transform: `translate(-50%, -50%) translate(${route.labelX}px, ${route.labelY}px)`,
+              "--wire-signal-color": data?.signalColor ?? "#526168",
+            } as CSSProperties
+          }
           data-testid={`wire-label-${id}`}
         >
-          {data?.localName && <span className="wire-name">{data.localName}</span>}
+          {data?.localName && (
+            <span className="wire-name">{data.localName}</span>
+          )}
           <span className="wire-width">{data?.semanticWidth ?? 1}t</span>
-          <strong>{data?.currentWord ?? "Z"}</strong>
+          <strong>{data?.displayWord ?? data?.currentWord ?? "Z"}</strong>
         </div>
       </EdgeLabelRenderer>
     </>

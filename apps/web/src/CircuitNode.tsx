@@ -21,6 +21,7 @@ import type {
   TritSymbol,
 } from "./editor-model";
 import { editorHandleId } from "./editor/port-handles";
+import { formatCanvasWord, type CanvasDisplayMode } from "./canvas-display";
 
 const SIGNAL_COLORS: Record<TritSymbol, string> = {
   T: "#246b9a",
@@ -111,6 +112,7 @@ function ComponentIcon({ typeId }: { typeId: string }) {
 }
 
 export function CircuitNode({ id, data, selected }: NodeProps<EditorNode>) {
+  const displayMode = data.canvasDisplayMode ?? "balanced";
   const inputs: Record<string, TernaryWord> = {
     ...(data.inputSignals ?? {}),
     ...(data.inputWords ?? {}),
@@ -130,6 +132,7 @@ export function CircuitNode({ id, data, selected }: NodeProps<EditorNode>) {
         ports={ports}
         inputs={inputs}
         outputs={outputs}
+        displayMode={displayMode}
         selected={selected}
       />
     );
@@ -160,6 +163,7 @@ export function CircuitNode({ id, data, selected }: NodeProps<EditorNode>) {
   const primarySignal: TritSymbol = isTritSymbol(displaySignal)
     ? displaySignal
     : "X";
+  const shownSignal = formatCanvasWord(displaySignal, displayMode);
 
   return (
     <div
@@ -179,16 +183,17 @@ export function CircuitNode({ id, data, selected }: NodeProps<EditorNode>) {
         <span>{data.label}</span>
       </div>
       <strong
-        className={`node-signal ${signalLengthClass(displaySignal)}`}
-        aria-label={`信号 ${displaySignal}`}
-        style={{ fontSize: signalFontSize(displaySignal, true) }}
+        className={`node-signal ${signalLengthClass(shownSignal)}`}
+        aria-label={`信号 ${shownSignal}`}
+        style={{ fontSize: signalFontSize(shownSignal, true) }}
       >
-        {displaySignal}
+        {shownSignal}
       </strong>
       <div className="node-id">{data.typeId}</div>
 
       {inputPorts.map((port, index) => {
         const signal = signalForPort(port, inputs, outputs);
+        const shown = formatCanvasWord(signal, displayMode);
         return (
           <div
             className="port-row port-row-input"
@@ -222,10 +227,10 @@ export function CircuitNode({ id, data, selected }: NodeProps<EditorNode>) {
             <b
               style={{
                 color: signalColor(signal),
-                fontSize: signalFontSize(signal),
+                fontSize: signalFontSize(shown),
               }}
             >
-              {signal}
+              {shown}
             </b>
           </div>
         );
@@ -233,6 +238,7 @@ export function CircuitNode({ id, data, selected }: NodeProps<EditorNode>) {
 
       {outputPorts.map((port, index) => {
         const signal = signalForPort(port, inputs, outputs);
+        const shown = formatCanvasWord(signal, displayMode);
         return (
           <div
             className="port-row port-row-output"
@@ -244,10 +250,10 @@ export function CircuitNode({ id, data, selected }: NodeProps<EditorNode>) {
             <b
               style={{
                 color: signalColor(signal),
-                fontSize: signalFontSize(signal),
+                fontSize: signalFontSize(shown),
               }}
             >
-              {signal}
+              {shown}
             </b>
             <small>{port.width}t</small>
             <span>{"label" in port ? String(port.label) : port.id}</span>
@@ -286,6 +292,7 @@ interface WiringNodeProps {
   ports: CatalogPort[];
   inputs: Record<string, TernaryWord>;
   outputs: Record<string, TernaryWord>;
+  displayMode: CanvasDisplayMode;
   selected: boolean;
 }
 
@@ -334,6 +341,7 @@ function WiringNode({
   ports,
   inputs,
   outputs,
+  displayMode,
   selected,
 }: WiringNodeProps) {
   const signal = (port: CatalogPort) => signalForPort(port, inputs, outputs);
@@ -384,7 +392,13 @@ function WiringNode({
         <Cable aria-hidden="true" />
         <strong>{tunnelLabel}</strong>
         <span>{width}t</span>
-        <b style={{ fontSize: signalFontSize(value) }}>{value}</b>
+        <b
+          style={{
+            fontSize: signalFontSize(formatCanvasWord(value, displayMode)),
+          }}
+        >
+          {formatCanvasWord(value, displayMode)}
+        </b>
       </div>
     );
   }
@@ -418,8 +432,14 @@ function WiringNode({
           />
           <span>trunk</span>
           <small>{trunk.width}t</small>
-          <b style={{ fontSize: signalFontSize(signal(trunk)) }}>
-            {signal(trunk)}
+          <b
+            style={{
+              fontSize: signalFontSize(
+                formatCanvasWord(signal(trunk), displayMode),
+              ),
+            }}
+          >
+            {formatCanvasWord(signal(trunk), displayMode)}
           </b>
         </div>
       )}
@@ -430,8 +450,14 @@ function WiringNode({
           key={port.id}
           style={{ top: branchTop + index * branchGap }}
         >
-          <b style={{ fontSize: signalFontSize(signal(port)) }}>
-            {signal(port)}
+          <b
+            style={{
+              fontSize: signalFontSize(
+                formatCanvasWord(signal(port), displayMode),
+              ),
+            }}
+          >
+            {formatCanvasWord(signal(port), displayMode)}
           </b>
           <small>{port.width}t</small>
           <span>{port.id}</span>

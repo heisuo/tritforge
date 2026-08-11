@@ -4,6 +4,7 @@ import {
   semanticPortIdForHandle,
 } from "./editor/port-handles";
 import type { WireLaneAssignment } from "./wire-routing";
+import type { CanvasDisplayMode } from "./canvas-display";
 
 export type KnownTrit = "T" | "0" | "1";
 export type TritSymbol = KnownTrit | "X" | "Z" | "E";
@@ -87,16 +88,17 @@ export interface ComponentNodeData extends Record<string, unknown> {
   outputSignals?: Record<string, TritSymbol>;
   inputWords?: Record<string, TernaryWord>;
   outputWords?: Record<string, TernaryWord>;
+  canvasDisplayMode?: CanvasDisplayMode;
 }
 
 export type EditorNode = Node<ComponentNodeData, "component">;
 export interface LogicWireData
-  extends Record<string, unknown>,
-    Partial<WireLaneAssignment> {
+  extends Record<string, unknown>, Partial<WireLaneAssignment> {
   semanticSourcePortId?: string;
   semanticTargetPortId?: string;
   semanticWidth?: number;
   currentWord?: TernaryWord;
+  displayWord?: string;
   localName?: string;
   signalColor?: string;
 }
@@ -236,23 +238,26 @@ export function toCircuitDefinition(
           semanticPortIdForHandle(
             sourceNode?.data.ports ?? [],
             edge.sourceHandle,
-          ) ?? edge.data?.semanticSourcePortId ?? edge.sourceHandle ?? "",
+          ) ??
+          edge.data?.semanticSourcePortId ??
+          edge.sourceHandle ??
+          "",
         target_component_id: edge.target,
         target_port_id:
           semanticPortIdForHandle(
             targetNode?.data.ports ?? [],
             edge.targetHandle,
-          ) ?? edge.data?.semanticTargetPortId ?? edge.targetHandle ?? "",
+          ) ??
+          edge.data?.semanticTargetPortId ??
+          edge.targetHandle ??
+          "",
       };
     }),
   };
 }
 
 export type ConnectionRejection =
-  | "missing_endpoint"
-  | "same_endpoint"
-  | "width_mismatch"
-  | "duplicate";
+  "missing_endpoint" | "same_endpoint" | "width_mismatch" | "duplicate";
 
 export interface ConnectionCandidate {
   source: string | null;
@@ -294,14 +299,8 @@ export function validateConnection(
   );
   const sourcePorts = sourceNode?.data.ports ?? sourceDescriptor?.ports ?? [];
   const targetPorts = targetNode?.data.ports ?? targetDescriptor?.ports ?? [];
-  const sourcePort = portForEditorHandle(
-    sourcePorts,
-    connection.sourceHandle,
-  );
-  const targetPort = portForEditorHandle(
-    targetPorts,
-    connection.targetHandle,
-  );
+  const sourcePort = portForEditorHandle(sourcePorts, connection.sourceHandle);
+  const targetPort = portForEditorHandle(targetPorts, connection.targetHandle);
 
   if (
     !connection.source ||
@@ -331,14 +330,20 @@ export function validateConnection(
   const duplicate = document.edges.some((edge) => {
     const edgeSourceNode = nodeById.get(edge.source);
     const edgeTargetNode = nodeById.get(edge.target);
-    const edgeSourcePort = semanticPortIdForHandle(
-      edgeSourceNode?.data.ports ?? [],
-      edge.sourceHandle,
-    ) ?? edge.data?.semanticSourcePortId ?? edge.sourceHandle;
-    const edgeTargetPort = semanticPortIdForHandle(
-      edgeTargetNode?.data.ports ?? [],
-      edge.targetHandle,
-    ) ?? edge.data?.semanticTargetPortId ?? edge.targetHandle;
+    const edgeSourcePort =
+      semanticPortIdForHandle(
+        edgeSourceNode?.data.ports ?? [],
+        edge.sourceHandle,
+      ) ??
+      edge.data?.semanticSourcePortId ??
+      edge.sourceHandle;
+    const edgeTargetPort =
+      semanticPortIdForHandle(
+        edgeTargetNode?.data.ports ?? [],
+        edge.targetHandle,
+      ) ??
+      edge.data?.semanticTargetPortId ??
+      edge.targetHandle;
     return (
       (edge.source === connection.source &&
         edgeSourcePort === sourcePort.id &&
@@ -357,10 +362,7 @@ export function validateConnection(
   return { valid: true };
 }
 
-export function makeComponentId(
-  typeId: string,
-  nodes: EditorNode[],
-): string {
+export function makeComponentId(typeId: string, nodes: EditorNode[]): string {
   const stem = typeId.split(".").at(-1)?.replaceAll("_", "-") ?? "component";
   const used = new Set(nodes.map((node) => node.id));
   let suffix = 1;

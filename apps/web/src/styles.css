@@ -165,6 +165,33 @@ button {
   align-items: center;
 }
 
+.canvas-display-select {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  height: 28px;
+  padding: 0 5px 0 7px;
+  border: 1px solid #c9d4d7;
+  border-radius: 4px;
+  color: #66747a;
+  background: #f7f9f9;
+  font-size: 9px;
+}
+
+.canvas-display-select select {
+  height: 22px;
+  padding: 0 18px 0 5px;
+  border: 0;
+  color: #25343a;
+  background: #ffffff;
+  font-size: 10px;
+}
+
+.canvas-display-select select:focus-visible {
+  outline: 2px solid #237066;
+  outline-offset: 1px;
+}
+
 .mobile-only,
 .toolbar .mobile-only {
   display: none;
@@ -1986,6 +2013,13 @@ button {
     min-width: 0;
     padding: 0 4px;
     font-size: 10px;
+  }
+
+  .canvas-display-select {
+    justify-content: center;
+    width: 100%;
+    min-width: 0;
+    padding: 0 4px;
   }
 
   .toolbar-divider {

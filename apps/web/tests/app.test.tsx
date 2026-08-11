@@ -8,7 +8,10 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectSimulationSnapshot } from "../src/editor-model";
-import type { TraceFrame, WasmProjectSimulatorBinding } from "../src/wasm-client";
+import type {
+  TraceFrame,
+  WasmProjectSimulatorBinding,
+} from "../src/wasm-client";
 
 const runtimeMock = vi.hoisted(() => {
   const snapshot = (): ProjectSimulationSnapshot => ({
@@ -65,16 +68,20 @@ const runtimeMock = vi.hoisted(() => {
       },
     ],
   });
-  const resolveProjectModulePorts = vi.fn((_project: unknown, moduleId: string) => {
-    if (moduleId === "loop") {
-      throw dependencyCycleError();
-    }
-    return [];
-  });
+  const resolveProjectModulePorts = vi.fn(
+    (_project: unknown, moduleId: string) => {
+      if (moduleId === "loop") {
+        throw dependencyCycleError();
+      }
+      return [];
+    },
+  );
   const resolveProjectModuleInterfaces = vi.fn((project: unknown) => {
-    const circuits = (project as {
-      circuits: Array<{ id: string; kind: "main" | "module" }>;
-    }).circuits;
+    const circuits = (
+      project as {
+        circuits: Array<{ id: string; kind: "main" | "module" }>;
+      }
+    ).circuits;
     if (circuits.some((circuit) => circuit.id === "loop")) {
       throw dependencyCycleError();
     }
@@ -96,7 +103,10 @@ const runtimeMock = vi.hoisted(() => {
 vi.mock("../src/wasm-client", () => ({
   createWasmRuntime: vi.fn(async () => ({
     apiVersion: 3,
-    resolveProjectPorts: (typeId: string, properties: Record<string, unknown>) => {
+    resolveProjectPorts: (
+      typeId: string,
+      properties: Record<string, unknown>,
+    ) => {
       const width = typeof properties.width === "number" ? properties.width : 1;
       if (typeId === "gate.neg") {
         return [
@@ -192,7 +202,9 @@ vi.mock("../src/wasm-client", () => ({
         name: "SimulationError",
         code: String(error.code),
         message:
-          "message" in error ? String(error.message) : "Project simulation failed",
+          "message" in error
+            ? String(error.message)
+            : "Project simulation failed",
         diagnostics:
           "diagnostics" in error && Array.isArray(error.diagnostics)
             ? error.diagnostics
@@ -453,8 +465,9 @@ describe("App", () => {
 
   it("opens directly into the editor shell", () => {
     render(<App />);
-    expect(screen.getByRole("main", { name: "Logsim Ternary 编辑器" }))
-      .toBeInTheDocument();
+    expect(
+      screen.getByRole("main", { name: "Logsim Ternary 编辑器" }),
+    ).toBeInTheDocument();
   });
 
   it("creates and enters a module, then adds fixed boundary handles", async () => {
@@ -463,15 +476,17 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "新建模块" }));
 
-    expect(screen.getByRole("navigation", { name: "层级导航" })).toHaveTextContent(
-      "Demo Module",
-    );
+    expect(
+      screen.getByRole("navigation", { name: "层级导航" }),
+    ).toHaveTextContent("Demo Module");
     fireEvent.click(screen.getByRole("button", { name: "添加模块输入" }));
     fireEvent.click(screen.getByRole("button", { name: "添加模块输出" }));
-    expect(await screen.findByTestId("handle-module-input-1-output-out"))
-      .toBeInTheDocument();
-    expect(screen.getByTestId("handle-module-output-1-input-in"))
-      .toBeInTheDocument();
+    expect(
+      await screen.findByTestId("handle-module-input-1-output-out"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("handle-module-output-1-input-in"),
+    ).toBeInTheDocument();
   });
 
   it("offers place/edit tools, enters instances on double click, and returns by breadcrumb", async () => {
@@ -491,13 +506,13 @@ describe("App", () => {
     expect(instanceNode).not.toBeNull();
 
     fireEvent.doubleClick(instanceNode!);
-    expect(screen.getByRole("navigation", { name: "层级导航" })).toHaveTextContent(
-      "Reusable",
-    );
+    expect(
+      screen.getByRole("navigation", { name: "层级导航" }),
+    ).toHaveTextContent("Reusable");
     fireEvent.click(screen.getByRole("button", { name: "返回上级" }));
-    expect(screen.getByRole("navigation", { name: "层级导航" })).toHaveTextContent(
-      "Main",
-    );
+    expect(
+      screen.getByRole("navigation", { name: "层级导航" }),
+    ).toHaveTextContent("Main");
   });
 
   it("keeps UI and runtime inside a module when importing the exact same project", async () => {
@@ -513,16 +528,18 @@ describe("App", () => {
     await importProject(project, "same-project-1.json");
     fireEvent.click(screen.getByRole("button", { name: "编辑 Identity" }));
     await waitFor(() =>
-      expect(screen.getByRole("navigation", { name: "层级导航" }))
-        .toHaveTextContent("Identity"),
+      expect(
+        screen.getByRole("navigation", { name: "层级导航" }),
+      ).toHaveTextContent("Identity"),
     );
     const loadsBefore = runtimeMock.loadProject.mock.calls.length;
     const switchesBefore = runtimeMock.switchActive.mock.calls.length;
 
     await importProject(project, "same-project-2.json");
 
-    expect(screen.getByRole("navigation", { name: "层级导航" }))
-      .toHaveTextContent("Identity");
+    expect(
+      screen.getByRole("navigation", { name: "层级导航" }),
+    ).toHaveTextContent("Identity");
     expect(runtimeMock.loadProject).toHaveBeenCalledTimes(loadsBefore);
     expect(runtimeMock.switchActive).toHaveBeenCalledTimes(switchesBefore);
   });
@@ -541,7 +558,9 @@ describe("App", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "返回上级" }));
     fireEvent.click(screen.getByRole("button", { name: "删除 Identity" }));
-    expect(await screen.findByText(/1 个引用.*main\/identity-1/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/1 个引用.*main\/identity-1/),
+    ).toBeInTheDocument();
   });
 
   it("keeps module controls inside the mobile palette drawer", async () => {
@@ -574,7 +593,9 @@ describe("App", () => {
     const { container } = render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "新建模块" }));
     fireEvent.click(screen.getByRole("button", { name: "返回上级" }));
-    fireEvent.click(screen.getByRole("button", { name: "放置 Keyboard Module" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "放置 Keyboard Module" }),
+    );
     const instance = container.querySelector(
       '.react-flow__node[data-id="keyboard-module-1"]',
     );
@@ -582,8 +603,9 @@ describe("App", () => {
     fireEvent.keyDown(screen.getByRole("application"), { key: "Enter" });
 
     await waitFor(() =>
-      expect(screen.getByRole("navigation", { name: "层级导航" }))
-        .toHaveTextContent("Keyboard Module"),
+      expect(
+        screen.getByRole("navigation", { name: "层级导航" }),
+      ).toHaveTextContent("Keyboard Module"),
     );
   });
 
@@ -592,7 +614,9 @@ describe("App", () => {
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "新建模块" }));
 
-    expect(screen.getByRole("button", { name: "放置 Recursive" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "放置 Recursive" }),
+    ).toBeDisabled();
   });
 
   it("renames modules without changing their stable identity", async () => {
@@ -604,8 +628,9 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "返回上级" }));
     fireEvent.click(screen.getByRole("button", { name: "重命名 Reusable" }));
 
-    expect(screen.getByRole("button", { name: "编辑 Renamed Module" }))
-      .toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "编辑 Renamed Module" }),
+    ).toBeInTheDocument();
   });
 
   it("reloads the runtime at main when deleting the active module", async () => {
@@ -615,8 +640,9 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "删除 Disposable" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("navigation", { name: "层级导航" }))
-        .toHaveTextContent("Main");
+      expect(
+        screen.getByRole("navigation", { name: "层级导航" }),
+      ).toHaveTextContent("Main");
       expect(runtimeMock.loadProject).toHaveBeenCalledTimes(2);
     });
   });
@@ -632,8 +658,9 @@ describe("App", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "编辑 Blocked" }));
     expect(await screen.findByText(/navigation blocked/)).toBeInTheDocument();
-    expect(screen.getByRole("navigation", { name: "层级导航" }))
-      .not.toHaveTextContent("Blocked");
+    expect(
+      screen.getByRole("navigation", { name: "层级导航" }),
+    ).not.toHaveTextContent("Blocked");
   });
 
   it("keeps the Workbench and last valid catalog when project-aware port resolution fails", async () => {
@@ -646,8 +673,9 @@ describe("App", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "编辑 Identity" }));
     await waitFor(() => {
-      expect(screen.getByRole("navigation", { name: "层级导航" }))
-        .toHaveTextContent("Identity");
+      expect(
+        screen.getByRole("navigation", { name: "层级导航" }),
+      ).toHaveTextContent("Identity");
     });
     fireEvent.click(screen.getByRole("button", { name: "返回上级" }));
     expect(runtimeMock.resolveProjectModuleInterfaces).not.toHaveBeenCalled();
@@ -656,9 +684,13 @@ describe("App", () => {
     runtimeMock.loadProject.mockImplementationOnce(() => {
       throw runtimeMock.dependencyCycleError();
     });
-    const file = new File([JSON.stringify(recursiveProject())], "recursive.json", {
-      type: "application/json",
-    });
+    const file = new File(
+      [JSON.stringify(recursiveProject())],
+      "recursive.json",
+      {
+        type: "application/json",
+      },
+    );
     fireEvent.change(input, { target: { files: [file] } });
 
     expect(
@@ -669,8 +701,9 @@ describe("App", () => {
         name: /MODULE_DEPENDENCY_CYCLE\s*module dependency cycle: loop -> loop/i,
       }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("main", { name: "Logsim Ternary 编辑器" }))
-      .toBeInTheDocument();
+    expect(
+      screen.getByRole("main", { name: "Logsim Ternary 编辑器" }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("application")).toBeInTheDocument();
     expect(screen.getByText("7 COMPONENTS")).toBeInTheDocument();
     expect(screen.getByText("1 COMPILES")).toBeInTheDocument();
@@ -685,7 +718,9 @@ describe("App", () => {
     const { container } = render(<App />);
     await screen.findByText(/层级模拟器已就绪/);
     const input = await waitFor(() => {
-      const node = container.querySelector('.react-flow__node[data-id="input-1"]');
+      const node = container.querySelector(
+        '.react-flow__node[data-id="input-1"]',
+      );
       expect(node).not.toBeNull();
       return node!;
     });
@@ -704,19 +739,23 @@ describe("App", () => {
       inputNetWords: { "a-probe": { in: "T" } },
       tickCount: active === "reversed" ? 2 : 1,
     });
-    runtimeMock.loadProject.mockImplementation((_project?: unknown, active?: string) =>
-      signalSnapshot(active),
+    runtimeMock.loadProject.mockImplementation(
+      (_project?: unknown, active?: string) => signalSnapshot(active),
     );
     runtimeMock.switchActive.mockImplementation((active?: string) =>
       signalSnapshot(active),
     );
-    runtimeMock.updateProject.mockImplementation(() => signalSnapshot("reversed"));
+    runtimeMock.updateProject.mockImplementation(() =>
+      signalSnapshot("reversed"),
+    );
     const { container } = render(<App />);
     await importProject(reversedEndpointProject());
 
     const assertWire = (id: string) => {
       const state = JSON.parse(
-        screen.getByRole("region", { name: "电路画布" }).getAttribute("data-wire-state") ?? "[]",
+        screen
+          .getByRole("region", { name: "电路画布" })
+          .getAttribute("data-wire-state") ?? "[]",
       ) as Array<Record<string, string>>;
       expect(state.find((wire) => wire.id === id)).toEqual({
         id,
@@ -730,11 +769,17 @@ describe("App", () => {
     };
     await waitFor(() => assertWire("wire-main"));
 
-    fireEvent.click(screen.getByRole("button", { name: "编辑 Reversed Module" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "编辑 Reversed Module" }),
+    );
     await waitFor(() => assertWire("wire-reversed"));
     runtimeMock.updateProject.mockClear();
-    fireEvent.click(container.querySelector('.react-flow__node[data-id="z-source"]')!);
-    await waitFor(() => expect(runtimeMock.updateProject).toHaveBeenCalledTimes(1));
+    fireEvent.click(
+      container.querySelector('.react-flow__node[data-id="z-source"]')!,
+    );
+    await waitFor(() =>
+      expect(runtimeMock.updateProject).toHaveBeenCalledTimes(1),
+    );
     await screen.findByText(/输入 z-source:/);
     fireEvent.click(screen.getByRole("button", { name: "撤销" }));
     await waitFor(() => assertWire("wire-reversed"));
@@ -746,16 +791,24 @@ describe("App", () => {
 
     expect(screen.getByTestId("handle-a-probe-input-in")).toBeInTheDocument();
     expect(screen.getByTestId("handle-a-probe-output-in")).toBeInTheDocument();
-    expect(screen.getByTestId("handle-y-source-output-out")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("handle-y-source-output-out"),
+    ).toBeInTheDocument();
     expect(screen.getByTestId("handle-y-source-input-out")).toBeInTheDocument();
     expect(
-      container.querySelectorAll('.react-flow__node[data-id="a-probe"] .port-row'),
+      container.querySelectorAll(
+        '.react-flow__node[data-id="a-probe"] .port-row',
+      ),
     ).toHaveLength(1);
     expect(
-      container.querySelectorAll('.react-flow__node[data-id="y-source"] .port-row'),
+      container.querySelectorAll(
+        '.react-flow__node[data-id="y-source"] .port-row',
+      ),
     ).toHaveLength(1);
     const wires = JSON.parse(
-      screen.getByRole("region", { name: "电路画布" }).getAttribute("data-wire-state") ?? "[]",
+      screen
+        .getByRole("region", { name: "电路画布" })
+        .getAttribute("data-wire-state") ?? "[]",
     ) as Array<Record<string, string>>;
     expect(wires).toEqual(
       expect.arrayContaining([
@@ -780,7 +833,9 @@ describe("App", () => {
   it("clears local node and wire selection when clearing the circuit", async () => {
     const { container } = render(<App />);
     await screen.findByText(/层级模拟器已就绪/);
-    fireEvent.click(container.querySelector('.react-flow__node[data-id="input-1"]')!);
+    fireEvent.click(
+      container.querySelector('.react-flow__node[data-id="input-1"]')!,
+    );
     expect(screen.getByRole("button", { name: "删除所选" })).toBeEnabled();
 
     fireEvent.click(screen.getByRole("button", { name: "清空" }));
@@ -794,11 +849,17 @@ describe("App", () => {
     await importProject(reversedEndpointProject(3));
     runtimeMock.updateProject.mockClear();
 
-    fireEvent.click(container.querySelector('.react-flow__node[data-id="z-source"]')!);
+    fireEvent.click(
+      container.querySelector('.react-flow__node[data-id="z-source"]')!,
+    );
 
-    await waitFor(() => expect(runtimeMock.updateProject).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(runtimeMock.updateProject).toHaveBeenCalledTimes(1),
+    );
     const candidate = runtimeMock.updateProject.mock.calls[0][0] as {
-      circuits: Array<{ components: Array<{ id: string; properties: { value?: string } }> }>;
+      circuits: Array<{
+        components: Array<{ id: string; properties: { value?: string } }>;
+      }>;
     };
     expect(
       candidate.circuits[0].components.find((item) => item.id === "z-source")
@@ -870,7 +931,9 @@ describe("App", () => {
         '.react-flow__node[data-id="trit-input-1"] .node-heading span',
       ),
     ).toHaveTextContent("Renamed Input");
-    expect(screen.getByRole("heading", { name: "Renamed Input" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Renamed Input" }),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/^输入 trit-input-1:/)).not.toBeInTheDocument();
   });
 
@@ -891,12 +954,20 @@ describe("App", () => {
       runtimeMock.makeSnapshot(),
     );
     runtimeMock.updateProject.mockClear();
-    fireEvent.click(container.querySelector('.react-flow__node[data-id="input-1"]')!);
-    await waitFor(() => expect(runtimeMock.updateProject).toHaveBeenCalledTimes(1));
+    fireEvent.click(
+      container.querySelector('.react-flow__node[data-id="input-1"]')!,
+    );
+    await waitFor(() =>
+      expect(runtimeMock.updateProject).toHaveBeenCalledTimes(1),
+    );
     fireEvent.click(screen.getByRole("button", { name: "撤销" }));
-    await waitFor(() => expect(runtimeMock.updateProject).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(runtimeMock.updateProject).toHaveBeenCalledTimes(2),
+    );
     fireEvent.click(screen.getByRole("button", { name: "重做" }));
-    await waitFor(() => expect(runtimeMock.updateProject).toHaveBeenCalledTimes(3));
+    await waitFor(() =>
+      expect(runtimeMock.updateProject).toHaveBeenCalledTimes(3),
+    );
     expect(runtimeMock.setSource).not.toHaveBeenCalled();
   });
 
@@ -904,18 +975,26 @@ describe("App", () => {
     const { container } = render(<App />);
     await screen.findByText(/层级模拟器已就绪/);
 
-    expect(screen.getByRole("button", { name: /添加连接点/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /添加隧道/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /添加连接点/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /添加隧道/ }),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /添加分线器/ }));
 
-    expect(await screen.findByTestId("handle-splitter-1-output-trunk"))
-      .toHaveAttribute("aria-label", "trunk，双向，3 trit");
-    expect(screen.getByTestId("handle-splitter-1-output-trunk"))
-      .toHaveAttribute("title", "trunk，双向，3 trit");
-    expect(screen.getByTestId("handle-splitter-1-output-branch0"))
-      .toHaveAttribute("aria-label", "branch0，双向，1 trit");
-    expect(screen.getByTestId("handle-splitter-1-output-branch2"))
-      .toBeInTheDocument();
+    expect(
+      await screen.findByTestId("handle-splitter-1-output-trunk"),
+    ).toHaveAttribute("aria-label", "trunk，双向，3 trit");
+    expect(
+      screen.getByTestId("handle-splitter-1-output-trunk"),
+    ).toHaveAttribute("title", "trunk，双向，3 trit");
+    expect(
+      screen.getByTestId("handle-splitter-1-output-branch0"),
+    ).toHaveAttribute("aria-label", "branch0，双向，1 trit");
+    expect(
+      screen.getByTestId("handle-splitter-1-output-branch2"),
+    ).toBeInTheDocument();
     expect(
       container.querySelector('.react-flow__node[data-id="splitter-1"]'),
     ).toHaveClass("wiring-node-shell");
@@ -933,7 +1012,9 @@ describe("App", () => {
     runtimeMock.updateProject.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "应用属性" }));
 
-    await waitFor(() => expect(runtimeMock.updateProject).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(runtimeMock.updateProject).toHaveBeenCalledTimes(1),
+    );
     expect((await screen.findAllByText("3t")).length).toBeGreaterThan(0);
     expect(screen.getByLabelText("源字值")).toHaveValue("1T0");
   });
@@ -948,11 +1029,14 @@ describe("App", () => {
     await importProject(reversedEndpointProject(3), "six-state-word.json");
 
     expect(
-      container.querySelector('.react-flow__node[data-id="a-probe"] .node-signal'),
+      container.querySelector(
+        '.react-flow__node[data-id="a-probe"] .node-signal',
+      ),
     ).toHaveTextContent("1XE");
     const wires = JSON.parse(
-      screen.getByRole("region", { name: "电路画布" }).getAttribute("data-wire-state") ??
-        "[]",
+      screen
+        .getByRole("region", { name: "电路画布" })
+        .getAttribute("data-wire-state") ?? "[]",
     ) as Array<Record<string, unknown>>;
     expect(wires.find((wire) => wire.id === "wire-main")).toMatchObject({
       signal: "1XE",
@@ -961,6 +1045,27 @@ describe("App", () => {
     expect(JSON.stringify(wires)).not.toContain("scalar");
   });
 
+  it("switches multi-trit canvas nodes and wire labels to decimal display", async () => {
+    runtimeMock.loadProject.mockImplementation(() => ({
+      ...runtimeMock.makeSnapshot(),
+      componentOutputWords: { "z-source": { out: "1T0" } },
+      inputNetWords: { "a-probe": { in: "1T0" } },
+    }));
+    const { container } = render(<App />);
+    await importProject(reversedEndpointProject(3), "decimal-canvas.json");
+
+    const probe = container.querySelector(
+      '.react-flow__node[data-id="a-probe"] .node-signal',
+    );
+    expect(probe).toHaveTextContent("1T0");
+    fireEvent.change(screen.getByLabelText("画布显示模式"), {
+      target: { value: "decimal" },
+    });
+
+    expect(probe).toHaveTextContent("6");
+    const canvas = screen.getByRole("region", { name: "电路画布" });
+    expect(canvas).toHaveAttribute("data-display-mode", "decimal");
+  });
 
   it("follows qualified diagnostic instance paths", async () => {
     runtimeMock.loadProject.mockImplementation((project?: unknown) => {
@@ -998,7 +1103,9 @@ describe("App", () => {
     });
     render(<App />);
     await importProject(nestedReferencedProject());
-    fireEvent.click(await screen.findByRole("button", { name: /QUALIFIED_TEST/ }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /QUALIFIED_TEST/ }),
+    );
 
     await waitFor(() => {
       const navigation = screen.getByRole("navigation", { name: "层级导航" });
@@ -1052,8 +1159,9 @@ describe("App", () => {
 
     expect(runtimeMock.advancePhase).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "运行自动时钟" })).toBeVisible();
-    expect(screen.getByText(/自动时钟已暂停: simulation did not converge/))
-      .toBeInTheDocument();
+    expect(
+      screen.getByText(/自动时钟已暂停: simulation did not converge/),
+    ).toBeInTheDocument();
     expect(screen.getByTestId("chronogram-viewport")).toHaveAttribute(
       "data-frame-count",
       "1",

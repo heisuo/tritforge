@@ -7,6 +7,7 @@ import type {
 } from "./editor-model";
 import { edgeNetValue } from "./project/editor-projection";
 import type { WireLaneAssignment } from "./wire-routing";
+import { formatCanvasWord, type CanvasDisplayMode } from "./canvas-display";
 
 const SIGNAL_COLORS: Record<TritSymbol, string> = {
   T: "#246b9a",
@@ -37,6 +38,7 @@ export function buildRenderedEdges(
   nodes: EditorNode[],
   snapshot: ProjectSimulationSnapshot | null,
   wireLanes: Readonly<Record<string, Partial<WireLaneAssignment>>>,
+  displayMode: CanvasDisplayMode = "balanced",
 ): EditorEdge[] {
   const nodeById = new Map<string, NodeRenderIndex>();
   for (const node of nodes) {
@@ -80,6 +82,7 @@ export function buildRenderedEdges(
         ...wireLanes[edge.id],
         semanticWidth: width,
         currentWord: signal,
+        displayWord: formatCanvasWord(signal, displayMode),
         signalColor,
         ...(localName ? { localName } : {}),
       },

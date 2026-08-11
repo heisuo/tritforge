@@ -72,6 +72,21 @@ describe("edge rendering", () => {
     });
   });
 
+  it("adds a decimal label without changing the raw simulated word", () => {
+    const rendered = buildRenderedEdges(
+      [wire(0, 2)],
+      [junction("node-0"), junction("node-1")],
+      snapshot("1T0"),
+      {},
+      "decimal",
+    );
+
+    expect(rendered[0].data).toMatchObject({
+      currentWord: "1T0",
+      displayWord: "6",
+    });
+  });
+
   it("renders a large graph without scanning the node array per wire", () => {
     const nodeCount = 10_000;
     const wireCount = 50_000;

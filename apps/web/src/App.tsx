@@ -55,6 +55,7 @@ import {
 import { useStore } from "zustand";
 import "@xyflow/react/dist/style.css";
 import "./styles.css";
+import { formatCanvasWord, type CanvasDisplayMode } from "./canvas-display";
 import { CircuitNode, SIGNAL_COLORS } from "./CircuitNode";
 import {
   AutoClockScheduler,
@@ -382,6 +383,8 @@ function Workbench() {
   const [reloadRevision, setReloadRevision] = useState(0);
   const [traceFrames, setTraceFrames] = useState<TraceFrame[]>([]);
   const [traceWatches, setTraceWatches] = useState<TraceWatch[]>([]);
+  const [canvasDisplayMode, setCanvasDisplayMode] =
+    useState<CanvasDisplayMode>("balanced");
   const [autoClockState, setAutoClockState] = useState<AutoClockState>({
     status: "paused",
     rate: 1,
@@ -907,10 +910,11 @@ function Workbench() {
             outputSignals: snapshot?.componentOutputs[node.id] ?? {},
             inputWords: snapshot?.inputNetWords[node.id] ?? {},
             outputWords: snapshot?.componentOutputWords[node.id] ?? {},
+            canvasDisplayMode,
           },
         };
       }),
-    [descriptorForNode, nodes, snapshot],
+    [canvasDisplayMode, descriptorForNode, nodes, snapshot],
   );
 
   const wireLanes = useMemo(() => {
@@ -929,8 +933,9 @@ function Workbench() {
   }, [edges, nodes]);
 
   const renderedEdges = useMemo(
-    () => buildRenderedEdges(edges, nodes, snapshot, wireLanes),
-    [edges, nodes, snapshot, wireLanes],
+    () =>
+      buildRenderedEdges(edges, nodes, snapshot, wireLanes, canvasDisplayMode),
+    [canvasDisplayMode, edges, nodes, snapshot, wireLanes],
   );
 
   const validateUiConnection = useCallback(
@@ -1950,6 +1955,19 @@ function Workbench() {
             >
               <Download aria-hidden="true" />
             </button>
+            <label className="canvas-display-select">
+              <span>数值</span>
+              <select
+                aria-label="画布显示模式"
+                value={canvasDisplayMode}
+                onChange={(event) =>
+                  setCanvasDisplayMode(event.target.value as CanvasDisplayMode)
+                }
+              >
+                <option value="balanced">三进制</option>
+                <option value="decimal">十进制</option>
+              </select>
+            </label>
             <span className="toolbar-divider" />
             <button
               className="icon-button"
@@ -2083,6 +2101,7 @@ function Workbench() {
         <section
           className="canvas"
           aria-label="电路画布"
+          data-display-mode={canvasDisplayMode}
           data-wire-state={JSON.stringify(
             renderedEdges.map((edge) => ({
               id: edge.id,
@@ -2184,6 +2203,7 @@ function Workbench() {
                 node={selectedNode}
                 descriptor={selectedDescriptor}
                 snapshot={snapshot}
+                displayMode={canvasDisplayMode}
               />
               {selectedComponent && (
                 <PropertyEditor
@@ -2291,9 +2311,11 @@ function ExampleHelp({ example }: { example: TernaryExample }) {
 function SignalRows({
   title,
   values,
+  displayMode,
 }: {
   title: string;
   values: Record<string, TernaryWord>;
+  displayMode: CanvasDisplayMode;
 }) {
   return (
     <div className="signal-group">
@@ -2302,26 +2324,27 @@ function SignalRows({
         <span className="muted">无端口</span>
       ) : (
         Object.entries(values).map(([port, value]) => {
+          const shownValue = formatCanvasWord(value, displayMode);
           const lengthClass =
-            value.length > 24
+            shownValue.length > 24
               ? "is-length-27"
-              : value.length > 18
+              : shownValue.length > 18
                 ? "is-length-long"
-                : value.length > 9
+                : shownValue.length > 9
                   ? "is-length-medium"
                   : "is-length-short";
           return (
             <div
-              className={`signal-row ${value.length > 18 ? "is-long-word" : ""}`}
+              className={`signal-row ${shownValue.length > 18 ? "is-long-word" : ""}`}
               key={port}
             >
               <code>{port}</code>
               <strong
                 className={lengthClass}
-                aria-label={`${port} ${value}`}
+                aria-label={`${port} ${shownValue}`}
                 style={{ color: wireSignalColor(value, value.length) }}
               >
-                {value}
+                {shownValue}
               </strong>
             </div>
           );
@@ -2335,10 +2358,12 @@ function NodeInspector({
   node,
   descriptor,
   snapshot,
+  displayMode,
 }: {
   node: EditorNode;
   descriptor: CatalogComponent;
   snapshot: ProjectSimulationSnapshot | null;
+  displayMode: CanvasDisplayMode;
 }) {
   const inputValues = {
     ...(snapshot?.inputNets[node.id] ?? {}),
@@ -2372,8 +2397,16 @@ function NodeInspector({
           </div>
         </dl>
         <div className="signal-columns">
-          <SignalRows title="输入" values={inputValues} />
-          <SignalRows title="输出" values={outputValues} />
+          <SignalRows
+            title="输入"
+            values={inputValues}
+            displayMode={displayMode}
+          />
+          <SignalRows
+            title="输出"
+            values={outputValues}
+            displayMode={displayMode}
+          />
         </div>
       </section>
       {help && (
