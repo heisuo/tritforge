@@ -816,7 +816,14 @@ button {
 }
 
 .react-flow__edge.selected .react-flow__edge-path {
+  stroke: #1867d2 !important;
   filter: drop-shadow(0 0 2px rgb(22 70 76 / 42%));
+}
+
+.wire-label.is-selected {
+  color: #124f9f;
+  background: #eef6ff;
+  box-shadow: 0 1px 4px rgb(24 103 210 / 22%);
 }
 
 .wire-label {

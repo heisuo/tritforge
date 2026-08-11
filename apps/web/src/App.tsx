@@ -7,6 +7,7 @@ import {
   applyEdgeChanges,
   applyNodeChanges,
   type Connection,
+  type EdgeMouseHandler,
   type EdgeChange,
   type IsValidConnection,
   type NodeChange,
@@ -1798,6 +1799,23 @@ function Workbench() {
     },
     [applyEditorDocument, edges, nodes],
   );
+  const handleEdgeClick = useCallback<EdgeMouseHandler<EditorEdge>>(
+    (event, edge) => {
+      event.stopPropagation();
+      setNodes((items) =>
+        items.map((node) =>
+          node.selected ? { ...node, selected: false } : node,
+        ),
+      );
+      setEdges((items) =>
+        items.map((item) => ({ ...item, selected: item.id === edge.id })),
+      );
+      setSelectedNodeId(null);
+      setSelectedEdgeIds([edge.id]);
+      store.getState().setSelection(activeCircuitId, [], [edge.id]);
+    },
+    [activeCircuitId, store],
+  );
   const handleSelectionChange = useCallback(
     ({
       nodes: selectedNodes,
@@ -2148,6 +2166,7 @@ function Workbench() {
               onConnectEnd={handleConnectEnd}
               isValidConnection={isValidUiConnection}
               onNodeClick={onNodeClick}
+              onEdgeClick={handleEdgeClick}
               onNodeDoubleClick={onNodeDoubleClick}
               onNodeDragStop={handleNodeDragStop}
               onSelectionChange={handleSelectionChange}

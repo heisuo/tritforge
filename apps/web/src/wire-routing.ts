@@ -25,6 +25,8 @@ export interface LogicWirePathArgs extends WireLaneAssignment {
   sourceY: number;
   targetX: number;
   targetY: number;
+  sourceSide?: "left" | "right";
+  targetSide?: "left" | "right";
 }
 
 export interface LogicWireRoute {
@@ -179,28 +181,31 @@ export function createLogicWirePath(
     sourceY,
     targetX,
     targetY,
+    sourceSide = "right",
+    targetSide = "left",
     sourceLane,
     sourceLaneCount,
     targetLane,
     targetLaneCount,
   } = args;
-  const isBackward = targetX < sourceX;
+  const sourceDirection = sourceSide === "left" ? -1 : 1;
+  const targetDirection = targetSide === "left" ? -1 : 1;
   const horizontalDistance = Math.abs(targetX - sourceX);
   const sourceDepth = ENDPOINT_STUB + sourceLane * LANE_SPACING;
   const targetDepth = ENDPOINT_STUB + targetLane * LANE_SPACING;
+  const endpointsFaceEachOther =
+    (sourceDirection === 1 && targetDirection === -1 && targetX >= sourceX) ||
+    (sourceDirection === -1 && targetDirection === 1 && targetX <= sourceX);
   const lanesFit =
+    endpointsFaceEachOther &&
     horizontalDistance >= sourceDepth + targetDepth + MIN_MIDDLE_TRACK;
 
-  const sourceTurnX = isBackward
-    ? sourceX + sourceDepth
-    : lanesFit
-      ? sourceX + sourceDepth
-      : (sourceX + targetX) / 2;
-  const targetTurnX = isBackward
-    ? targetX - targetDepth
-    : lanesFit
-      ? targetX - targetDepth
-      : (sourceX + targetX) / 2;
+  const sourceTurnX = endpointsFaceEachOther && !lanesFit
+    ? (sourceX + targetX) / 2
+    : sourceX + sourceDirection * sourceDepth;
+  const targetTurnX = endpointsFaceEachOther && !lanesFit
+    ? (sourceX + targetX) / 2
+    : targetX + targetDirection * targetDepth;
 
   const activeLane =
     sourceLaneCount > 1
@@ -208,7 +213,7 @@ export function createLogicWirePath(
       : targetLaneCount > 1
         ? targetLane - (targetLaneCount - 1) / 2
         : 0;
-  const middleY = isBackward
+  const middleY = !endpointsFaceEachOther
     ? Math.min(sourceY, targetY) -
       BACKWARD_CLEARANCE -
       Math.max(sourceLane, targetLane) * LANE_SPACING

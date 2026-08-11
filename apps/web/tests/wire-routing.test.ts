@@ -138,4 +138,23 @@ describe("orthogonal logic wire paths", () => {
     expect(route.points.at(-2)?.x).toBeLessThan(180);
     expect(route.points.some((point) => point.y < 140)).toBe(true);
   });
+
+  it("approaches a right-side target from outside the module", () => {
+    const route = createLogicWirePath({
+      sourceX: 120,
+      sourceY: 80,
+      targetX: 420,
+      targetY: 220,
+      sourceSide: "right",
+      targetSide: "right",
+      sourceLane: 0,
+      sourceLaneCount: 1,
+      targetLane: 0,
+      targetLaneCount: 1,
+    });
+
+    expect(route.points[1].x).toBeGreaterThan(120);
+    expect(route.points.at(-2)?.x).toBeGreaterThan(420);
+    expect(route.points.some((point) => point.y < 20)).toBe(true);
+  });
 });

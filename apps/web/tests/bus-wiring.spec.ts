@@ -144,6 +144,31 @@ test("places, configures, and simulates a split bus with junction and tunnels", 
   await expect(
     page.locator('.react-flow__edge[data-id="wire-2"] .react-flow__edge-path'),
   ).toHaveCSS("stroke-width", "2px");
+  const selectedPath = page.locator(
+    '.react-flow__edge[data-id="wire-2"] .react-flow__edge-path',
+  );
+  const selectedPoint = await selectedPath.evaluate((element) => {
+    const path = element as SVGPathElement;
+    const point = path.getPointAtLength(path.getTotalLength() * 0.35);
+    const matrix = path.getScreenCTM();
+    if (!matrix) throw new Error("Wire has no screen transform");
+    return {
+      x: matrix.a * point.x + matrix.c * point.y + matrix.e,
+      y: matrix.b * point.x + matrix.d * point.y + matrix.f,
+    };
+  });
+  await page.mouse.click(selectedPoint.x, selectedPoint.y);
+  await expect(page.locator('.react-flow__edge[data-id="wire-2"]')).toHaveClass(
+    /selected/,
+  );
+  await expect(
+    page.locator('.react-flow__edge[data-id="wire-2"] .react-flow__edge-path'),
+  ).toHaveCSS("stroke", "rgb(24, 103, 210)");
+  await expect(page.getByTestId("wire-label-wire-2")).toHaveClass(/is-selected/);
+  await page.screenshot({
+    path: "test-results/bus-wiring-selected-wire-1440x900.png",
+    fullPage: true,
+  });
   await expect(node(page, "junction-1").locator(".junction-dot")).toBeVisible();
 
   await node(page, "trit-input-1").click();

@@ -1,4 +1,9 @@
-import { BaseEdge, EdgeLabelRenderer, type EdgeProps } from "@xyflow/react";
+import {
+  BaseEdge,
+  EdgeLabelRenderer,
+  Position,
+  type EdgeProps,
+} from "@xyflow/react";
 import type { CSSProperties } from "react";
 import type { EditorEdge } from "./editor-model";
 import { createLogicWirePath } from "./wire-routing";
@@ -9,6 +14,9 @@ export function LogicWireEdge({
   sourceY,
   targetX,
   targetY,
+  sourcePosition,
+  targetPosition,
+  selected,
   data,
   style,
   markerStart,
@@ -20,6 +28,8 @@ export function LogicWireEdge({
     sourceY,
     targetX,
     targetY,
+    sourceSide: sourcePosition === Position.Left ? "left" : "right",
+    targetSide: targetPosition === Position.Right ? "right" : "left",
     sourceLane: data?.sourceLane ?? 0,
     sourceLaneCount: data?.sourceLaneCount ?? 1,
     targetLane: data?.targetLane ?? 0,
@@ -38,11 +48,13 @@ export function LogicWireEdge({
       />
       <EdgeLabelRenderer>
         <div
-          className={`wire-label ${data?.semanticWidth && data.semanticWidth > 1 ? "is-bus" : ""}`}
+          className={`wire-label ${data?.semanticWidth && data.semanticWidth > 1 ? "is-bus" : ""} ${selected ? "is-selected" : ""}`}
           style={
             {
               transform: `translate(-50%, -50%) translate(${route.labelX}px, ${route.labelY}px)`,
-              "--wire-signal-color": data?.signalColor ?? "#526168",
+              "--wire-signal-color": selected
+                ? "#1867d2"
+                : (data?.signalColor ?? "#526168"),
             } as CSSProperties
           }
           data-testid={`wire-label-${id}`}
