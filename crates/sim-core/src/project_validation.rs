@@ -16,6 +16,10 @@ const JUNCTION: &str = "wiring.junction";
 const TUNNEL: &str = "wiring.tunnel";
 const SPLITTER: &str = "wiring.splitter";
 const REGISTER: &str = "sequential.register";
+const ROM: &str = "memory.rom";
+const RAM: &str = "memory.ram";
+const INTERNAL_ROM_CELL: &str = "internal.rom_cell";
+const INTERNAL_RAM_CELL: &str = "internal.ram_cell";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedProjectPort {
@@ -150,6 +154,17 @@ pub fn resolve_project_ports(
                 resolved_port("q", PortDirection::Output, word_shape),
             ])
         }
+        ROM | RAM => resolve_memory_ports(type_id, properties),
+        INTERNAL_ROM_CELL | INTERNAL_RAM_CELL => {
+            validate_internal_memory_properties(type_id, properties)?;
+            let kind = ComponentKind::from_type_id(type_id).expect("known internal memory kind");
+            let shape = default_signal_shape();
+            Ok(kind
+                .port_descriptors()
+                .into_iter()
+                .map(|port| resolved_port(&port.id, port.direction, shape))
+                .collect())
+        }
         MODULE_INSTANCE => Err(invalid_property(
             "module instance ports require a validated referenced interface",
         )),
@@ -170,6 +185,123 @@ pub fn resolve_project_ports(
                 .collect())
         }
     }
+}
+
+fn resolve_memory_ports(
+    type_id: &str,
+    properties: &ProjectProperties,
+) -> Result<Vec<ResolvedProjectPort>, ProjectPortResolveError> {
+    let allowed = if type_id == ROM {
+        &["addressWidth", "contents", "label", "wordWidth"][..]
+    } else {
+        &["addressWidth", "label", "wordWidth"][..]
+    };
+    require_only_properties(properties, allowed)?;
+    validate_optional_label(properties)?;
+
+    let word_width =
+        optional_bounded_width(properties, "wordWidth", 3, 1, 27).map_err(invalid_signal_width)?;
+    let address_width = optional_bounded_width(properties, "addressWidth", 3, 1, 3)
+        .map_err(|message| resolve_error("INVALID_MEMORY_ADDRESS_WIDTH", message))?;
+    let word_shape = SignalShape::new(word_width).expect("validated memory word width");
+    let address_shape = SignalShape::new(address_width).expect("validated memory address width");
+
+    if type_id == ROM {
+        validate_rom_contents(properties, word_shape, address_width)?;
+        Ok(vec![
+            resolved_port("addr", PortDirection::Input, address_shape),
+            resolved_port("data", PortDirection::Output, word_shape),
+        ])
+    } else {
+        let scalar_shape = default_signal_shape();
+        Ok(vec![
+            resolved_port("addr", PortDirection::Input, address_shape),
+            resolved_port("din", PortDirection::Input, word_shape),
+            resolved_port("we", PortDirection::Input, scalar_shape),
+            resolved_port("clk", PortDirection::Input, scalar_shape),
+            resolved_port("rst", PortDirection::Input, scalar_shape),
+            resolved_port("dout", PortDirection::Output, word_shape),
+        ])
+    }
+}
+
+fn optional_bounded_width(
+    properties: &ProjectProperties,
+    key: &str,
+    default: u8,
+    minimum: u8,
+    maximum: u8,
+) -> Result<u8, String> {
+    let Some(value) = properties.get(key) else {
+        return Ok(default);
+    };
+    value
+        .as_u64()
+        .and_then(|value| u8::try_from(value).ok())
+        .filter(|value| (*value >= minimum) && (*value <= maximum))
+        .ok_or_else(|| format!("{key} must be an integer between {minimum} and {maximum}"))
+}
+
+fn validate_rom_contents(
+    properties: &ProjectProperties,
+    word_shape: SignalShape,
+    address_width: u8,
+) -> Result<(), ProjectPortResolveError> {
+    let Some(contents) = properties.get("contents") else {
+        return Ok(());
+    };
+    let depth = 3_usize.pow(u32::from(address_width));
+    let Some(contents) = contents
+        .as_array()
+        .filter(|contents| contents.len() <= depth)
+    else {
+        return Err(resolve_error(
+            "INVALID_MEMORY_CONTENTS",
+            format!("contents must be an array of at most {depth} words"),
+        ));
+    };
+    for (index, word) in contents.iter().enumerate() {
+        let valid = word
+            .as_str()
+            .is_some_and(|word| KnownWord::parse(word, word_shape).is_ok());
+        if !valid {
+            return Err(resolve_error(
+                "INVALID_MEMORY_CONTENTS",
+                format!(
+                    "contents[{index}] must be a known {}-trit word",
+                    word_shape.width()
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_internal_memory_properties(
+    type_id: &str,
+    properties: &ProjectProperties,
+) -> Result<(), ProjectPortResolveError> {
+    let allowed = if type_id == INTERNAL_ROM_CELL {
+        &["addressWidth", "contents"][..]
+    } else {
+        &["addressWidth"][..]
+    };
+    require_only_properties(properties, allowed)?;
+    let address_width = properties
+        .get("addressWidth")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|width| u8::try_from(width).ok())
+        .filter(|width| (1..=3).contains(width))
+        .ok_or_else(|| {
+            resolve_error(
+                "INVALID_MEMORY_ADDRESS_WIDTH",
+                "internal memory addressWidth must be between 1 and 3",
+            )
+        })?;
+    if type_id == INTERNAL_ROM_CELL {
+        validate_rom_contents(properties, default_signal_shape(), address_width)?;
+    }
+    Ok(())
 }
 
 fn resolve_splitter_ports(
@@ -613,7 +745,14 @@ fn validate_builtin_properties(
     component: &ProjectComponent,
     kind: ComponentKind,
 ) -> Result<(), ProjectPortResolveError> {
-    if kind == ComponentKind::Register {
+    if matches!(
+        kind,
+        ComponentKind::Register
+            | ComponentKind::Rom
+            | ComponentKind::Ram
+            | ComponentKind::InternalRomCell
+            | ComponentKind::InternalRamCell
+    ) {
         return resolve_project_ports(&component.type_id, &component.properties).map(|_| ());
     }
     let width_aware = matches!(

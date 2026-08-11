@@ -57,6 +57,8 @@ fn phase_one_catalog_has_exact_stable_ids_and_type_lookup() {
             "source.clock",
             "sequential.dff",
             "sequential.register",
+            "memory.rom",
+            "memory.ram",
         ]
     );
 
@@ -204,6 +206,26 @@ fn catalog_has_exact_categories_ports_and_truth_table_sizes() {
                 ("en", PortDirection::Input),
                 ("rst", PortDirection::Input),
                 ("q", PortDirection::Output),
+            ],
+            0_usize,
+        ),
+        (
+            "memory",
+            vec![
+                ("addr", PortDirection::Input),
+                ("data", PortDirection::Output),
+            ],
+            0_usize,
+        ),
+        (
+            "memory",
+            vec![
+                ("addr", PortDirection::Input),
+                ("din", PortDirection::Input),
+                ("we", PortDirection::Input),
+                ("clk", PortDirection::Input),
+                ("rst", PortDirection::Input),
+                ("dout", PortDirection::Output),
             ],
             0_usize,
         ),

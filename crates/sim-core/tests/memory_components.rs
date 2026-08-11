@@ -265,7 +265,7 @@ fn address_decoding_is_total_for_meta_values() {
 }
 
 #[test]
-fn memory_kinds_are_recognized_but_are_not_public_catalog_entries() {
+fn public_memory_macros_are_catalogued_while_internal_cells_stay_private() {
     assert_eq!(
         ComponentKind::from_type_id("memory.rom"),
         Some(ComponentKind::Rom)
@@ -288,7 +288,8 @@ fn memory_kinds_are_recognized_but_are_not_public_catalog_entries() {
         .map(|descriptor| descriptor.type_id)
         .collect::<Vec<_>>();
     assert!(!public_ids.iter().any(|id| id.starts_with("internal.")));
-    assert!(!public_ids.iter().any(|id| id.starts_with("memory.")));
+    assert!(public_ids.iter().any(|id| id == "memory.rom"));
+    assert!(public_ids.iter().any(|id| id == "memory.ram"));
 }
 
 #[test]

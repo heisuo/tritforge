@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::catalog::PortDirection;
+use crate::catalog::{ComponentProperties, PortDirection};
 use crate::diagnostic::Severity;
 use crate::hierarchy::{
     CompiledProject, FlatPortRef, MAX_ANALYSIS_EDGES, MAX_EXPANDED_COMPONENTS,
@@ -17,8 +17,10 @@ use crate::project::{
 };
 use crate::project_validation::{ResolvedProjectPort, resolve_project_ports, validate_project};
 use crate::structural::{
-    REGISTER_TYPE_ID, endpoint_multiplicity, expand_register, expanded_component_count,
+    RAM_TYPE_ID, REGISTER_TYPE_ID, ROM_TYPE_ID, endpoint_multiplicity, expand_memory,
+    expand_register, expanded_component_count, memory_address_width, memory_word_width,
 };
+use crate::trit::Trit;
 
 const MODULE_INPUT: &str = "project.module_input";
 const MODULE_OUTPUT: &str = "project.module_output";
@@ -482,6 +484,23 @@ fn lower_project_v3_with_interfaces(
                 }
                 continue;
             }
+            if matches!(
+                component.type_id.as_str(),
+                "internal.rom_cell" | "internal.ram_cell"
+            ) {
+                diagnostics.insert(v3_error(
+                    "INTERNAL_COMPONENT_NOT_PUBLIC",
+                    format!(
+                        "component '{}' uses a private simulator primitive",
+                        component.id
+                    ),
+                    &circuit.id,
+                    &[&component.id],
+                    &[],
+                    &[],
+                ));
+                continue;
+            }
             match resolve_project_ports(&component.type_id, &component.properties) {
                 Ok(ports) => {
                     resolved_ports.insert((circuit.id.clone(), component.id.clone()), ports);
@@ -582,12 +601,13 @@ pub fn compile_project_v3(
     let lowered = lower_project_v3_for_active(project, active_circuit_id)?;
     let validated = validate_project(lowered.project.clone())
         .map_err(|errors| remap_diagnostics(&errors, &lowered.provenance, &lowered.reassembly))?;
-    let compiled = compile_project_with_reference_origins(
+    let mut compiled = compile_project_with_reference_origins(
         &validated,
         active_circuit_id,
         &lowered.provenance.connections,
     )
     .map_err(|errors| remap_diagnostics(&errors, &lowered.provenance, &lowered.reassembly))?;
+    hydrate_memory_cell_properties(&lowered, &mut compiled);
     check_compiled_provenance_amplification(&lowered.provenance, &compiled)?;
     let indexes = ConnectivityIndexes::new(&lowered, &compiled);
     let reassembly = expand_reassembly(&compiled, active_circuit_id, &indexes);
@@ -601,6 +621,58 @@ pub fn compile_project_v3(
         wire_provenance,
         reverse_wire_provenance,
     })
+}
+
+fn hydrate_memory_cell_properties(lowered: &LoweredProjectV3, compiled: &mut CompiledProject) {
+    let generated = lowered
+        .project
+        .circuits
+        .iter()
+        .flat_map(|circuit| {
+            circuit
+                .components
+                .iter()
+                .map(move |component| ((circuit.id.as_str(), component.id.as_str()), component))
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    for component in &mut compiled.circuit.components {
+        if !matches!(
+            component.type_id.as_str(),
+            "internal.rom_cell" | "internal.ram_cell"
+        ) {
+            continue;
+        }
+        let reference = compiled
+            .provenance
+            .components
+            .get(&component.id)
+            .expect("compiled memory cell has provenance");
+        let source = generated
+            .get(&(
+                reference.circuit_id.as_str(),
+                reference.component_id.as_str(),
+            ))
+            .expect("compiled memory cell exists in lowered project");
+        let address_width = source
+            .properties
+            .get("addressWidth")
+            .and_then(Value::as_u64)
+            .and_then(|width| u8::try_from(width).ok());
+        let contents = source
+            .properties
+            .get("contents")
+            .cloned()
+            .map(serde_json::from_value::<Vec<Trit>>)
+            .transpose()
+            .expect("validated internal ROM contents deserialize")
+            .unwrap_or_default();
+        component.properties = ComponentProperties {
+            value: None,
+            address_width,
+            contents,
+        };
+    }
 }
 
 fn check_compiled_provenance_amplification(
@@ -1606,7 +1678,10 @@ fn lower_circuit(
     let scalar_component_count = components.iter().try_fold(0_usize, |count, component| {
         let copies = if is_compile_time_helper(&component.type_id) {
             0
-        } else if component.type_id == REGISTER_TYPE_ID {
+        } else if matches!(
+            component.type_id.as_str(),
+            REGISTER_TYPE_ID | ROM_TYPE_ID | RAM_TYPE_ID
+        ) {
             expanded_component_count(component)
         } else if is_scalarized_component(&component.type_id) {
             resolved
@@ -1718,6 +1793,39 @@ fn lower_circuit(
                 .map(|port| port.shape.width())
                 .unwrap_or_default();
             let mut expansion = expand_register(&circuit.id, component, width, &mut occupied);
+            let original_ref =
+                QualifiedComponentRef::new(&circuit.id, [] as [&str; 0], &component.id);
+            for lane in &expansion.lanes {
+                scalar_components.push(lane.component.clone());
+                provenance.components.insert(
+                    QualifiedComponentRef::new(&circuit.id, [] as [&str; 0], &lane.component.id),
+                    original_ref.clone(),
+                );
+            }
+            provenance.ports.append(&mut expansion.port_origins);
+            for port in &ports {
+                let scalar_bits = expansion.port_bits.remove(&port.id).unwrap_or_default();
+                add_port_bits_multi(
+                    circuit,
+                    component,
+                    port,
+                    scalar_bits,
+                    &mut bit_info,
+                    &mut reassembly,
+                );
+            }
+            continue;
+        }
+        if matches!(component.type_id.as_str(), ROM_TYPE_ID | RAM_TYPE_ID) {
+            let word_width = memory_word_width(component).expect("validated memory kind");
+            let address_width = memory_address_width(component).expect("validated memory kind");
+            let mut expansion = expand_memory(
+                &circuit.id,
+                component,
+                word_width,
+                address_width,
+                &mut occupied,
+            );
             let original_ref =
                 QualifiedComponentRef::new(&circuit.id, [] as [&str; 0], &component.id);
             for lane in &expansion.lanes {

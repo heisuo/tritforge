@@ -15,7 +15,7 @@ use crate::project_validation::{ValidatedProject, resolve_project_ports, validat
 use crate::signal::{KnownWord, SignalError, SignalShape, WordValue};
 use crate::simulator::{ClockPhase, SimulationSnapshot, Simulator};
 use crate::structural::{
-    StructuralExpansionInspection, StructuralPrimitiveInspection, register_lane_index,
+    StructuralExpansionInspection, StructuralPrimitiveInspection, structural_lane_index,
 };
 use crate::trace::{
     MAX_TRACE_WATCHES, TraceBinding, TraceFrame, TraceFrameReason, TracePerformanceCounters,
@@ -260,7 +260,8 @@ impl ProjectSimulator {
             }
         };
         let compiled = compiled_v3.compiled.clone();
-        let can_reuse = self.simulator.is_some()
+        let can_reuse = !logical_topology_changed
+            && self.simulator.is_some()
             && self.compiled.as_ref().is_some_and(|current| {
                 flat_circuit_shape(&current.circuit) == flat_circuit_shape(&compiled.circuit)
             });
@@ -1035,8 +1036,8 @@ impl ProjectSimulator {
         }
 
         primitives.sort_by(|left, right| {
-            register_lane_index(&left.component_id)
-                .cmp(&register_lane_index(&right.component_id))
+            structural_lane_index(&left.component_id)
+                .cmp(&structural_lane_index(&right.component_id))
                 .then_with(|| left.component_id.cmp(&right.component_id))
         });
         if primitives.is_empty() {

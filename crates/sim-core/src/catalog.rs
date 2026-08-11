@@ -234,6 +234,8 @@ pub fn component_catalog() -> Vec<ComponentDescriptor> {
         (ComponentKind::Clock, "Clock", "source"),
         (ComponentKind::Dff, "D Flip-Flop", "sequential"),
         (ComponentKind::Register, "Register", "sequential"),
+        (ComponentKind::Rom, "ROM", "memory"),
+        (ComponentKind::Ram, "RAM", "memory"),
     ]
     .into_iter()
     .map(|(kind, display_name, category)| descriptor(kind, display_name, category))
