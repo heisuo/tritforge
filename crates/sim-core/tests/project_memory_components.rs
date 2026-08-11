@@ -343,6 +343,33 @@ fn ram_label_edit_preserves_state_and_phase_but_structural_edit_rebuilds() {
 }
 
 #[test]
+fn ram_full_ticks_write_hold_and_reset_through_public_macro_controls() {
+    let mut simulator = ProjectSimulator::load_v3(ram_project("Data", 3, "1T0"), "main")
+        .expect("RAM project loads");
+
+    let written = simulator.tick().expect("write tick");
+    assert_eq!(
+        written.component_output_words["ram"]["dout"].to_string(),
+        "1T0"
+    );
+
+    simulator.set_source_word("main", "we", "T").unwrap();
+    simulator.set_source_word("main", "din", "T01").unwrap();
+    let held = simulator.tick().expect("hold tick");
+    assert_eq!(
+        held.component_output_words["ram"]["dout"].to_string(),
+        "1T0"
+    );
+
+    simulator.set_source_word("main", "rst", "1").unwrap();
+    let cleared = simulator.tick().expect("reset tick");
+    assert_eq!(
+        cleared.component_output_words["ram"]["dout"].to_string(),
+        "000"
+    );
+}
+
+#[test]
 fn rom_contents_edit_recompiles_resets_phase_and_keeps_rom_immutable_on_reset() {
     let mut simulator =
         ProjectSimulator::load_v3(rom_project("Program", rom_contents()), "main").unwrap();

@@ -10,6 +10,7 @@ export default defineConfig({
     "bus-wiring.spec.ts",
     "bus-teaching-example.spec.ts",
     "chronogram.spec.ts",
+    "memory-lab.spec.ts",
   ],
   fullyParallel: false,
   workers: 1,

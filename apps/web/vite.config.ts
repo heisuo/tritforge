@@ -14,6 +14,7 @@ export default defineConfig({
       "tests/bus-wiring.spec.ts",
       "tests/bus-teaching-example.spec.ts",
       "tests/chronogram.spec.ts",
+      "tests/memory-lab.spec.ts",
       "node_modules/**",
       "dist/**",
     ],
