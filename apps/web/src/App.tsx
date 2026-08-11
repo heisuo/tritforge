@@ -21,11 +21,13 @@ import {
   Cable,
   CircleDot,
   Clock3,
+  Database,
   Download,
   Gauge,
   GitFork,
   Library,
   Maximize2,
+  MemoryStick,
   Menu,
   MousePointer2,
   PanelLeft,
@@ -116,10 +118,7 @@ import {
   HierarchyRuntime,
   HierarchyRuntimeError,
 } from "./project/hierarchy-runtime";
-import {
-  ProjectEditError,
-  createProjectStore,
-} from "./project/project-store";
+import { ProjectEditError, createProjectStore } from "./project/project-store";
 import { projectToEditor } from "./project/editor-projection";
 import {
   createWasmRuntime,
@@ -155,6 +154,9 @@ const DISPLAY_NAMES: Record<string, string> = {
   "module.half_adder": "Half Adder",
   "module.full_adder": "Full Adder",
   "sequential.dff": "DFF",
+  "sequential.register": "Register",
+  "memory.rom": "ROM",
+  "memory.ram": "RAM",
   "project.module_input": "Module Input",
   "project.module_output": "Module Output",
   "project.module_instance": "Module Instance",
@@ -229,9 +231,14 @@ function descriptorIcon(descriptor: CatalogComponent) {
   if (descriptor.type_id === "source.constant") return Box;
   if (descriptor.type_id === "source.clock") return Clock3;
   if (descriptor.type_id === "sequential.dff") return PanelTop;
+  if (descriptor.type_id === "memory.rom") return Database;
+  if (descriptor.type_id === "memory.ram") return MemoryStick;
   if (descriptor.type_id === "sink.probe") return Gauge;
   if (descriptor.type_id.includes("mux")) return Triangle;
-  if (descriptor.category === "module" || descriptor.category === "project-module") {
+  if (
+    descriptor.category === "module" ||
+    descriptor.category === "project-module"
+  ) {
     return Workflow;
   }
   return CircleDot;
@@ -247,6 +254,17 @@ function defaultComponentProperties(
     return { width: 1, value: "0", label };
   }
   if (typeId === "sink.probe") return { width: 1, label };
+  if (typeId === "memory.rom") {
+    return {
+      label,
+      wordWidth: 3,
+      addressWidth: 3,
+      contents: Array(27).fill("000"),
+    };
+  }
+  if (typeId === "memory.ram") {
+    return { label, wordWidth: 3, addressWidth: 3 };
+  }
   return { label };
 }
 
@@ -299,7 +317,9 @@ function readTextFile(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.addEventListener("load", () => resolve(String(reader.result ?? "")));
-    reader.addEventListener("error", () => reject(reader.error ?? new Error("文件读取失败")));
+    reader.addEventListener("error", () =>
+      reject(reader.error ?? new Error("文件读取失败")),
+    );
     reader.readAsText(file);
   });
 }
@@ -307,7 +327,9 @@ function readTextFile(file: File): Promise<string> {
 function snapshotRuntimeFault(
   snapshot: ProjectSimulationSnapshot,
 ): HierarchyRuntimeError | null {
-  const diagnostic = snapshot.diagnostics.find((item) => item.severity === "error");
+  const diagnostic = snapshot.diagnostics.find(
+    (item) => item.severity === "error",
+  );
   if (snapshot.stable && !diagnostic) return null;
   return new HierarchyRuntimeError({
     name: "SimulationError",
@@ -335,10 +357,18 @@ function Workbench() {
   const [nodes, setNodes] = useState<EditorNode[]>(initialEditor.nodes);
   const [edges, setEdges] = useState<EditorEdge[]>(initialEditor.edges);
   const [baseCatalog, setBaseCatalog] = useState<CatalogComponent[]>([]);
-  const [dynamicCatalog, setDynamicCatalog] = useState<ProjectCatalogComponent[]>([]);
-  const [snapshot, setSnapshot] = useState<ProjectSimulationSnapshot | null>(null);
-  const [diagnostics, setDiagnostics] = useState<ProjectSimulationDiagnostic[]>([]);
-  const [wasmState, setWasmState] = useState<"loading" | "ready" | "error">("loading");
+  const [dynamicCatalog, setDynamicCatalog] = useState<
+    ProjectCatalogComponent[]
+  >([]);
+  const [snapshot, setSnapshot] = useState<ProjectSimulationSnapshot | null>(
+    null,
+  );
+  const [diagnostics, setDiagnostics] = useState<ProjectSimulationDiagnostic[]>(
+    [],
+  );
+  const [wasmState, setWasmState] = useState<"loading" | "ready" | "error">(
+    "loading",
+  );
   const [wasmVersion, setWasmVersion] = useState<number | null>(null);
   const [statusMessage, setStatusMessage] = useState("正在加载 Rust/WASM...");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -365,7 +395,9 @@ function Workbench() {
   const pendingActiveCircuitRef = useRef<string | null>(null);
   const flowRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const instanceRef = useRef<ReactFlowInstance<EditorNode, EditorEdge> | null>(null);
+  const instanceRef = useRef<ReactFlowInstance<EditorNode, EditorEdge> | null>(
+    null,
+  );
   const inputClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flowResizeFrameRef = useRef<number | null>(null);
 
@@ -376,13 +408,18 @@ function Workbench() {
   const baseByType = useMemo(
     () =>
       new Map(
-        [...baseCatalog, ...BOUNDARY_CATALOG].map((item) => [item.type_id, item]),
+        [...baseCatalog, ...BOUNDARY_CATALOG].map((item) => [
+          item.type_id,
+          item,
+        ]),
       ),
     [baseCatalog],
   );
 
   const descriptorForNode = useCallback(
-    (node: EditorNode): ProjectCatalogComponent | CatalogComponent | undefined => {
+    (
+      node: EditorNode,
+    ): ProjectCatalogComponent | CatalogComponent | undefined => {
       if (node.data.typeId === "project.module_instance") {
         const moduleId = node.data.properties?.moduleId;
         return moduleDescriptors.find((item) => item.moduleId === moduleId);
@@ -419,10 +456,13 @@ function Workbench() {
     setTraceWatches(runtime.traceWatches());
   }, []);
 
-  const setSuccessfulSnapshot = useCallback((next: ProjectSimulationSnapshot) => {
-    setSnapshot(next);
-    setDiagnostics(next.diagnostics);
-  }, []);
+  const setSuccessfulSnapshot = useCallback(
+    (next: ProjectSimulationSnapshot) => {
+      setSnapshot(next);
+      setDiagnostics(next.diagnostics);
+    },
+    [],
+  );
 
   const runtimeFailure = useCallback(
     (prefix: string, error: unknown, clearSnapshot = true) => {
@@ -438,20 +478,20 @@ function Workbench() {
     [pauseAutoClock],
   );
 
-  const editFailure = useCallback((prefix: string, error: unknown) => {
-    if (error instanceof HierarchyRuntimeError) {
-      runtimeFailure(prefix, error, false);
-      return;
-    }
-    const code = error instanceof ProjectEditError ? ` [${error.code}]` : "";
-    setStatusMessage(`${prefix}${code}: ${wasmErrorMessage(error)}`);
-  }, [runtimeFailure]);
+  const editFailure = useCallback(
+    (prefix: string, error: unknown) => {
+      if (error instanceof HierarchyRuntimeError) {
+        runtimeFailure(prefix, error, false);
+        return;
+      }
+      const code = error instanceof ProjectEditError ? ` [${error.code}]` : "";
+      setStatusMessage(`${prefix}${code}: ${wasmErrorMessage(error)}`);
+    },
+    [runtimeFailure],
+  );
 
   const prepareProjectCatalog = useCallback(
-    (
-      nextProject: ProjectDocumentV3,
-      nextActiveCircuitId: string,
-    ) => {
+    (nextProject: ProjectDocumentV3, nextActiveCircuitId: string) => {
       const interfaces = store.getState().resolveProjectModuleInterfaces();
       return {
         catalog: buildProjectCatalog(
@@ -509,20 +549,16 @@ function Workbench() {
 
   const tickSimulation = useCallback(
     () =>
-      runManualRuntimeCommand(
-        "已完成单步 Tick",
-        "单步 Tick 失败",
-        (runtime) => runtime.tick(),
+      runManualRuntimeCommand("已完成单步 Tick", "单步 Tick 失败", (runtime) =>
+        runtime.tick(),
       ),
     [runManualRuntimeCommand],
   );
 
   const advanceSimulationPhase = useCallback(
     () =>
-      runManualRuntimeCommand(
-        "已推进一个时钟相位",
-        "相位推进失败",
-        (runtime) => runtime.advancePhase(),
+      runManualRuntimeCommand("已推进一个时钟相位", "相位推进失败", (runtime) =>
+        runtime.advancePhase(),
       ),
     [runManualRuntimeCommand],
   );
@@ -540,7 +576,12 @@ function Workbench() {
         runtimeFailure("清空时序记录失败", error, false);
       }
     });
-  }, [enqueueRuntimeCommand, pauseAutoClock, refreshTraceState, runtimeFailure]);
+  }, [
+    enqueueRuntimeCommand,
+    pauseAutoClock,
+    refreshTraceState,
+    runtimeFailure,
+  ]);
 
   const replaceTraceWatches = useCallback(
     (nextWatches: TraceWatch[]) => {
@@ -563,7 +604,10 @@ function Workbench() {
   const toggleAutoClock = useCallback(() => {
     const scheduler = autoClockRef.current;
     if (!scheduler) return;
-    if (scheduler.state.status === "running" || scheduler.state.status === "suspended") {
+    if (
+      scheduler.state.status === "running" ||
+      scheduler.state.status === "suspended"
+    ) {
       scheduler.pause();
       setStatusMessage("自动时钟已暂停");
     } else {
@@ -584,8 +628,11 @@ function Workbench() {
 
   const restoreActiveCircuit = useCallback(() => {
     const state = store.getState();
-    const circuitId = state.activePath.at(-1)?.circuitId ?? state.project.rootCircuitId;
-    const circuit = state.project.circuits.find((item) => item.id === circuitId);
+    const circuitId =
+      state.activePath.at(-1)?.circuitId ?? state.project.rootCircuitId;
+    const circuit = state.project.circuits.find(
+      (item) => item.id === circuitId,
+    );
     if (!circuit) return;
     const next = projectToEditor(circuit, (componentId) =>
       state.resolveComponentPorts(circuitId, componentId),
@@ -607,7 +654,9 @@ function Workbench() {
     setSelectedEdgeIds(selection?.wireIds ?? []);
     setReloadRevision((value) => value + 1);
     if (circuit.viewport) {
-      requestAnimationFrame(() => instanceRef.current?.setViewport(circuit.viewport!));
+      requestAnimationFrame(() =>
+        instanceRef.current?.setViewport(circuit.viewport!),
+      );
     }
   }, [store]);
 
@@ -616,33 +665,45 @@ function Workbench() {
     if (viewport) store.getState().setViewport(activeCircuitId, viewport);
   }, [activeCircuitId, store]);
 
-  const commitNavigation = useCallback((
-    targetCircuitId: string,
-    updatePath: () => void,
-    failurePrefix: string,
-  ): boolean => {
-    pauseAutoClock();
-    try {
-      const runtime = runtimeRef.current;
-      const nextCatalog = prepareProjectCatalog(
-        store.getState().project,
-        targetCircuitId,
-      );
-      const nextSnapshot = runtime?.switchActive(targetCircuitId);
-      if (nextSnapshot) runtimeActiveCircuitRef.current = targetCircuitId;
-      acceptProjectCatalog(nextCatalog);
-      if (nextSnapshot && runtime) {
-        setSuccessfulSnapshot(nextSnapshot);
-        refreshTraceState(runtime);
+  const commitNavigation = useCallback(
+    (
+      targetCircuitId: string,
+      updatePath: () => void,
+      failurePrefix: string,
+    ): boolean => {
+      pauseAutoClock();
+      try {
+        const runtime = runtimeRef.current;
+        const nextCatalog = prepareProjectCatalog(
+          store.getState().project,
+          targetCircuitId,
+        );
+        const nextSnapshot = runtime?.switchActive(targetCircuitId);
+        if (nextSnapshot) runtimeActiveCircuitRef.current = targetCircuitId;
+        acceptProjectCatalog(nextCatalog);
+        if (nextSnapshot && runtime) {
+          setSuccessfulSnapshot(nextSnapshot);
+          refreshTraceState(runtime);
+        }
+        updatePath();
+        restoreActiveCircuit();
+        return true;
+      } catch (error) {
+        runtimeFailure(failurePrefix, error, false);
+        return false;
       }
-      updatePath();
-      restoreActiveCircuit();
-      return true;
-    } catch (error) {
-      runtimeFailure(failurePrefix, error, false);
-      return false;
-    }
-  }, [acceptProjectCatalog, pauseAutoClock, prepareProjectCatalog, refreshTraceState, restoreActiveCircuit, runtimeFailure, setSuccessfulSnapshot, store]);
+    },
+    [
+      acceptProjectCatalog,
+      pauseAutoClock,
+      prepareProjectCatalog,
+      refreshTraceState,
+      restoreActiveCircuit,
+      runtimeFailure,
+      setSuccessfulSnapshot,
+      store,
+    ],
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -678,17 +739,19 @@ function Workbench() {
         });
         autoClockRef.current = scheduler;
         setAutoClockState(scheduler.state);
-        const wiringCatalog: CatalogComponent[] = WIRING_HELPERS.map((helper) => ({
-          type_id: helper.typeId,
-          display_name: helper.displayName,
-          category: "wiring",
-          kind: "wiring",
-          ports: wasm.resolveProjectPorts(
-            helper.typeId,
-            structuredClone(helper.properties),
-          ),
-          truth_table: [],
-        }));
+        const wiringCatalog: CatalogComponent[] = WIRING_HELPERS.map(
+          (helper) => ({
+            type_id: helper.typeId,
+            display_name: helper.displayName,
+            category: "wiring",
+            kind: "wiring",
+            ports: wasm.resolveProjectPorts(
+              helper.typeId,
+              structuredClone(helper.properties),
+            ),
+            truth_table: [],
+          }),
+        );
         const completeCatalog = [...wasm.catalog, ...wiringCatalog];
         baseCatalogRef.current = completeCatalog;
         store.getState().setPortResolver({
@@ -720,7 +783,8 @@ function Workbench() {
               ? currentActive
               : nextProject.rootCircuitId;
             const reloadsRuntime =
-              requested !== null || runtimeActiveCircuitRef.current !== nextActive;
+              requested !== null ||
+              runtimeActiveCircuitRef.current !== nextActive;
             const previousCompileCount = runtime.snapshot()?.compileCount;
             if (reloadsRuntime) pauseAutoClock();
             const accepted = reloadsRuntime
@@ -765,7 +829,10 @@ function Workbench() {
     const syncAfterVisibilityChange = () => queueMicrotask(syncAutoClockState);
     document.addEventListener("visibilitychange", syncAfterVisibilityChange);
     return () =>
-      document.removeEventListener("visibilitychange", syncAfterVisibilityChange);
+      document.removeEventListener(
+        "visibilitychange",
+        syncAfterVisibilityChange,
+      );
   }, [syncAutoClockState]);
 
   useEffect(() => {
@@ -906,7 +973,12 @@ function Workbench() {
         return;
       }
       try {
-        if (!connection.source || !connection.sourceHandle || !connection.target || !connection.targetHandle) {
+        if (
+          !connection.source ||
+          !connection.sourceHandle ||
+          !connection.target ||
+          !connection.targetHandle
+        ) {
           setStatusMessage("连线失败: 连线端点不存在");
           return;
         }
@@ -938,14 +1010,22 @@ function Workbench() {
         restoreActiveCircuit();
         setStatusMessage("连线已添加");
       } catch (error) {
-        const code = error instanceof ProjectEditError ? ` [${error.code}]` : "";
+        const code =
+          error instanceof ProjectEditError ? ` [${error.code}]` : "";
         if (error instanceof HierarchyRuntimeError) {
           setDiagnostics(error.diagnostics);
         }
         setStatusMessage(`连线失败${code}: ${wasmErrorMessage(error)}`);
       }
     },
-    [activeCircuitId, edges, nodes, restoreActiveCircuit, store, validateUiConnection],
+    [
+      activeCircuitId,
+      edges,
+      nodes,
+      restoreActiveCircuit,
+      store,
+      validateUiConnection,
+    ],
   );
 
   const addBuiltin = useCallback(
@@ -999,7 +1079,9 @@ function Workbench() {
 
   const placeModule = useCallback(
     (moduleId: string) => {
-      const module = project.circuits.find((circuit) => circuit.id === moduleId);
+      const module = project.circuits.find(
+        (circuit) => circuit.id === moduleId,
+      );
       if (!module) return;
       const id = instanceId(moduleId, nodes);
       const bounds = flowRef.current?.getBoundingClientRect();
@@ -1024,7 +1106,14 @@ function Workbench() {
         editFailure("模块放置失败", error);
       }
     },
-    [activeCircuitId, editFailure, nodes, project.circuits, restoreActiveCircuit, store],
+    [
+      activeCircuitId,
+      editFailure,
+      nodes,
+      project.circuits,
+      restoreActiveCircuit,
+      store,
+    ],
   );
 
   const openCircuit = useCallback(
@@ -1062,7 +1151,10 @@ function Workbench() {
     (direction: "input" | "output") => {
       if (activeCircuit.kind !== "module") return;
       const stem = direction === "input" ? "module-input" : "module-output";
-      const id = nextId(stem, activeCircuit.components.map((item) => item.id));
+      const id = nextId(
+        stem,
+        activeCircuit.components.map((item) => item.id),
+      );
       const portStem = direction === "input" ? "in" : "out";
       const portId = nextId(
         portStem,
@@ -1077,10 +1169,18 @@ function Workbench() {
         store.getState().addComponent(activeCircuit.id, {
           id,
           typeId: `project.module_${direction}`,
-          position: { x: direction === "input" ? 80 : 650, y: 100 + count * 150 },
+          position: {
+            x: direction === "input" ? 80 : 650,
+            y: 100 + count * 150,
+          },
           properties:
             direction === "input"
-              ? { portId, label: `Input ${count + 1}`, width: 1, previewValue: "0" }
+              ? {
+                  portId,
+                  label: `Input ${count + 1}`,
+                  width: 1,
+                  previewValue: "0",
+                }
               : { portId, label: `Output ${count + 1}`, width: 1 },
         });
         restoreActiveCircuit();
@@ -1108,8 +1208,12 @@ function Workbench() {
   const cycleInput = useCallback(
     (circuitId: string, componentId: string) => {
       const state = store.getState();
-      const circuit = state.project.circuits.find((item) => item.id === circuitId);
-      const component = circuit?.components.find((item) => item.id === componentId);
+      const circuit = state.project.circuits.find(
+        (item) => item.id === circuitId,
+      );
+      const component = circuit?.components.find(
+        (item) => item.id === componentId,
+      );
       if (!component) return;
       const valueKey =
         component.typeId === "project.module_input" ? "previewValue" : "value";
@@ -1197,7 +1301,9 @@ function Workbench() {
       if (nextLabel === null || !nextLabel.trim()) return;
       if (node.data.typeId.startsWith("project.module_")) {
         try {
-          store.getState().renameModulePort(activeCircuitId, node.id, nextLabel);
+          store
+            .getState()
+            .renameModulePort(activeCircuitId, node.id, nextLabel);
           restoreActiveCircuit();
         } catch (error) {
           setStatusMessage(`重命名失败: ${wasmErrorMessage(error)}`);
@@ -1218,9 +1324,13 @@ function Workbench() {
   );
 
   const deleteSelected = useCallback(() => {
-    const selectedId = selectedNodeId ?? nodes.find((node) => node.selected)?.id;
+    const selectedId =
+      selectedNodeId ?? nodes.find((node) => node.selected)?.id;
     const selectedNode = nodes.find((node) => node.id === selectedId);
-    if (selectedNode?.data.typeId === "project.module_input" || selectedNode?.data.typeId === "project.module_output") {
+    if (
+      selectedNode?.data.typeId === "project.module_input" ||
+      selectedNode?.data.typeId === "project.module_output"
+    ) {
       try {
         store.getState().deleteModulePort(activeCircuitId, selectedNode.id);
         restoreActiveCircuit();
@@ -1230,7 +1340,9 @@ function Workbench() {
       }
       return;
     }
-    const nodeIds = new Set(nodes.filter((node) => node.selected).map((node) => node.id));
+    const nodeIds = new Set(
+      nodes.filter((node) => node.selected).map((node) => node.id),
+    );
     if (selectedNodeId) nodeIds.add(selectedNodeId);
     const edgeIds = new Set([
       ...selectedEdgeIds,
@@ -1274,9 +1386,9 @@ function Workbench() {
 
   const renameModule = useCallback(
     (moduleId: string) => {
-      const module = store.getState().project.circuits.find(
-        (circuit) => circuit.id === moduleId,
-      );
+      const module = store
+        .getState()
+        .project.circuits.find((circuit) => circuit.id === moduleId);
       if (!module) return;
       const name = window.prompt("修改模块名称", module.name)?.trim();
       if (!name) return;
@@ -1297,7 +1409,9 @@ function Workbench() {
       try {
         store.getState()[direction]();
         restoreActiveCircuit();
-        setStatusMessage(direction === "undo" ? "已撤销上一步编辑" : "已重做编辑");
+        setStatusMessage(
+          direction === "undo" ? "已撤销上一步编辑" : "已重做编辑",
+        );
       } catch (error) {
         editFailure("历史恢复失败", error);
       }
@@ -1336,16 +1450,21 @@ function Workbench() {
       loadProject(next, `已载入示例: ${example?.name ?? exampleId}`);
       setActiveExampleId(exampleId);
       setExampleLibraryOpen(false);
-      requestAnimationFrame(() => instanceRef.current?.fitView({ padding: 0.28 }));
+      requestAnimationFrame(() =>
+        instanceRef.current?.fitView({ padding: 0.28 }),
+      );
     },
     [loadProject],
   );
 
   const exportProject = useCallback(() => {
     persistViewport();
-    const blob = new Blob([serializeProjectDocument(store.getState().project)], {
-      type: "application/json",
-    });
+    const blob = new Blob(
+      [serializeProjectDocument(store.getState().project)],
+      {
+        type: "application/json",
+      },
+    );
     const url = URL.createObjectURL(blob);
     const anchor = window.document.createElement("a");
     anchor.href = url;
@@ -1361,7 +1480,10 @@ function Workbench() {
       event.target.value = "";
       if (!file) return;
       try {
-        loadProject(parseProjectDocument(await readTextFile(file)), `已导入工程: ${file.name}`);
+        loadProject(
+          parseProjectDocument(await readTextFile(file)),
+          `已导入工程: ${file.name}`,
+        );
       } catch (error) {
         setStatusMessage(`工程导入失败: ${wasmErrorMessage(error)}`);
       }
@@ -1391,18 +1513,32 @@ function Workbench() {
       if (target?.matches("input, textarea, [contenteditable='true']")) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
         event.preventDefault();
-        if (event.shiftKey ? canRedo : canUndo) historyStep(event.shiftKey ? "redo" : "undo");
-      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") {
+        if (event.shiftKey ? canRedo : canUndo)
+          historyStep(event.shiftKey ? "redo" : "undo");
+      } else if (
+        (event.ctrlKey || event.metaKey) &&
+        event.key.toLowerCase() === "y"
+      ) {
         event.preventDefault();
         if (canRedo) historyStep("redo");
-      } else if ((event.key === "Delete" || event.key === "Backspace") && (selectedNodeId || selectedEdgeIds.length)) {
+      } else if (
+        (event.key === "Delete" || event.key === "Backspace") &&
+        (selectedNodeId || selectedEdgeIds.length)
+      ) {
         event.preventDefault();
         deleteSelected();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [canRedo, canUndo, deleteSelected, historyStep, selectedEdgeIds.length, selectedNodeId]);
+  }, [
+    canRedo,
+    canUndo,
+    deleteSelected,
+    historyStep,
+    selectedEdgeIds.length,
+    selectedNodeId,
+  ]);
 
   const modules = useMemo(
     () =>
@@ -1483,19 +1619,28 @@ function Workbench() {
     } catch {
       return [];
     }
-  }, [activeCircuit, activeCircuitId, activePath, store, structureRevision, wasmState]);
+  }, [
+    activeCircuit,
+    activeCircuitId,
+    activePath,
+    store,
+    structureRevision,
+    wasmState,
+  ]);
   const breadcrumbEntries = activePath.map((entry) => ({
     circuitId: entry.circuitId,
     name:
-      project.circuits.find((circuit) => circuit.id === entry.circuitId)?.name ??
-      entry.circuitId,
+      project.circuits.find((circuit) => circuit.id === entry.circuitId)
+        ?.name ?? entry.circuitId,
   }));
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? null;
-  const selectedDescriptor = selectedNode ? descriptorForNode(selectedNode) ?? null : null;
+  const selectedDescriptor = selectedNode
+    ? (descriptorForNode(selectedNode) ?? null)
+    : null;
   const selectedComponent = selectedNode
-    ? activeCircuit.components.find(
+    ? (activeCircuit.components.find(
         (component) => component.id === selectedNode.id,
-      ) ?? null
+      ) ?? null)
     : null;
 
   const commitSelectedProperties = useCallback(
@@ -1533,7 +1678,8 @@ function Workbench() {
       persistViewport();
       const state = store.getState();
       const startCircuitId = activeCircuitId;
-      const pathSteps: Array<{ parentCircuitId: string; instanceId: string }> = [];
+      const pathSteps: Array<{ parentCircuitId: string; instanceId: string }> =
+        [];
       let parentCircuitId = startCircuitId;
       try {
         for (const instanceId of ref.instancePath) {
@@ -1555,13 +1701,16 @@ function Workbench() {
         if (ref.instancePath.length > 0 && parentCircuitId !== circuitId) {
           throw new Error("诊断实例路径与目标电路不一致");
         }
-        const targetCircuitId = ref.instancePath.length > 0 ? parentCircuitId : circuitId;
+        const targetCircuitId =
+          ref.instancePath.length > 0 ? parentCircuitId : circuitId;
         const navigated = commitNavigation(
           targetCircuitId,
           () => {
             store.getState().openCircuit(startCircuitId);
             for (const step of pathSteps) {
-              store.getState().enterInstance(step.parentCircuitId, step.instanceId);
+              store
+                .getState()
+                .enterInstance(step.parentCircuitId, step.instanceId);
             }
             if (pathSteps.length === 0 && circuitId !== startCircuitId) {
               store.getState().openCircuit(circuitId);
@@ -1586,7 +1735,13 @@ function Workbench() {
         }
       });
     },
-    [activeCircuitId, commitNavigation, persistViewport, restoreActiveCircuit, store],
+    [
+      activeCircuitId,
+      commitNavigation,
+      persistViewport,
+      restoreActiveCircuit,
+      store,
+    ],
   );
 
   const handleFlowInit = useCallback(
@@ -1596,22 +1751,24 @@ function Workbench() {
     [],
   );
   const handleChronogramLayoutChange = useCallback(() => {
-    if (flowResizeFrameRef.current !== null) cancelAnimationFrame(flowResizeFrameRef.current);
+    if (flowResizeFrameRef.current !== null)
+      cancelAnimationFrame(flowResizeFrameRef.current);
     flowResizeFrameRef.current = requestAnimationFrame(() => {
       flowResizeFrameRef.current = null;
       flowRef.current?.getBoundingClientRect();
       window.dispatchEvent(new Event("resize"));
     });
   }, []);
-  useEffect(() => () => {
-    if (flowResizeFrameRef.current !== null) cancelAnimationFrame(flowResizeFrameRef.current);
-  }, []);
-  const handleNodesChange = useCallback(
-    (changes: NodeChange<EditorNode>[]) => {
-      setNodes((items) => applyNodeChanges(changes, items));
+  useEffect(
+    () => () => {
+      if (flowResizeFrameRef.current !== null)
+        cancelAnimationFrame(flowResizeFrameRef.current);
     },
     [],
   );
+  const handleNodesChange = useCallback((changes: NodeChange<EditorNode>[]) => {
+    setNodes((items) => applyNodeChanges(changes, items));
+  }, []);
   const handleEdgesChange = useCallback(
     (changes: EdgeChange<EditorEdge>[]) => {
       const nextEdges = applyEdgeChanges(changes, edges);
@@ -1637,10 +1794,15 @@ function Workbench() {
     [applyEditorDocument, edges, nodes],
   );
   const handleSelectionChange = useCallback(
-    ({ nodes: selectedNodes, edges: selectedEdges }: OnSelectionChangeParams) => {
+    ({
+      nodes: selectedNodes,
+      edges: selectedEdges,
+    }: OnSelectionChangeParams) => {
       const nextNodeId = selectedNodes.at(-1)?.id ?? null;
       const nextEdgeIds = selectedEdges.map((edge) => edge.id);
-      setSelectedNodeId((current) => (current === nextNodeId ? current : nextNodeId));
+      setSelectedNodeId((current) =>
+        current === nextNodeId ? current : nextNodeId,
+      );
       setSelectedEdgeIds((current) =>
         current.length === nextEdgeIds.length &&
         current.every((id, index) => id === nextEdgeIds[index])
@@ -1674,34 +1836,177 @@ function Workbench() {
           <strong>LOGSIM TERNARY</strong>
           <span>PHASE 3D</span>
         </div>
-        <div className={`toolbar ${mobileMenuOpen ? "is-open" : ""}`} role="toolbar" aria-label="画布工具">
-          <button className="mobile-only icon-button" type="button" title="打开工具菜单" aria-label="打开工具菜单" aria-expanded={mobileMenuOpen} aria-controls="mobile-toolbar-menu" onClick={() => setMobileMenuOpen((value) => !value)}><Menu aria-hidden="true" /></button>
-          <button className="mobile-only icon-button" type="button" title="元件库" aria-label="切换元件库" aria-expanded={paletteOpen} aria-controls="component-palette" onClick={() => { setPaletteOpen((value) => !value); setInspectorOpen(false); }}><PanelLeft aria-hidden="true" /></button>
-          <button className="mobile-only icon-button" type="button" title="检查器" aria-label="切换检查器" aria-expanded={inspectorOpen} aria-controls="component-inspector" onClick={() => { setInspectorOpen((value) => !value); setPaletteOpen(false); }}><PanelRight aria-hidden="true" /></button>
+        <div
+          className={`toolbar ${mobileMenuOpen ? "is-open" : ""}`}
+          role="toolbar"
+          aria-label="画布工具"
+        >
+          <button
+            className="mobile-only icon-button"
+            type="button"
+            title="打开工具菜单"
+            aria-label="打开工具菜单"
+            aria-expanded={mobileMenuOpen}
+            aria-controls="mobile-toolbar-menu"
+            onClick={() => setMobileMenuOpen((value) => !value)}
+          >
+            <Menu aria-hidden="true" />
+          </button>
+          <button
+            className="mobile-only icon-button"
+            type="button"
+            title="元件库"
+            aria-label="切换元件库"
+            aria-expanded={paletteOpen}
+            aria-controls="component-palette"
+            onClick={() => {
+              setPaletteOpen((value) => !value);
+              setInspectorOpen(false);
+            }}
+          >
+            <PanelLeft aria-hidden="true" />
+          </button>
+          <button
+            className="mobile-only icon-button"
+            type="button"
+            title="检查器"
+            aria-label="切换检查器"
+            aria-expanded={inspectorOpen}
+            aria-controls="component-inspector"
+            onClick={() => {
+              setInspectorOpen((value) => !value);
+              setPaletteOpen(false);
+            }}
+          >
+            <PanelRight aria-hidden="true" />
+          </button>
           <div className="toolbar-menu" id="mobile-toolbar-menu">
-            <button className="icon-button" type="button" title="撤销" aria-label="撤销" disabled={!canUndo} onClick={() => historyStep("undo")}><Undo2 aria-hidden="true" /></button>
-            <button className="icon-button" type="button" title="重做" aria-label="重做" disabled={!canRedo} onClick={() => historyStep("redo")}><Redo2 aria-hidden="true" /></button>
-            <button className="icon-button" type="button" title="单步 Tick" aria-label="单步 Tick" disabled={wasmState !== "ready" || !snapshot} onClick={tickSimulation}><StepForward aria-hidden="true" /></button>
-            <button type="button" onClick={() => setExampleLibraryOpen(true)}><Library aria-hidden="true" />示例库</button>
-            <button type="button" onClick={() => loadExample("neg")}><RotateCcw aria-hidden="true" />默认示例</button>
-            <button type="button" onClick={clearCircuit}><Trash2 aria-hidden="true" />清空</button>
-            <button type="button" onClick={() => instanceRef.current?.fitView({ padding: 0.25, duration: 250 })}><Maximize2 aria-hidden="true" />适应画布</button>
-            <button className="icon-button" type="button" title="导入工程" aria-label="导入工程" onClick={() => fileInputRef.current?.click()}><Upload aria-hidden="true" /></button>
-            <button className="icon-button" type="button" title="导出工程" aria-label="导出工程" onClick={exportProject}><Download aria-hidden="true" /></button>
+            <button
+              className="icon-button"
+              type="button"
+              title="撤销"
+              aria-label="撤销"
+              disabled={!canUndo}
+              onClick={() => historyStep("undo")}
+            >
+              <Undo2 aria-hidden="true" />
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              title="重做"
+              aria-label="重做"
+              disabled={!canRedo}
+              onClick={() => historyStep("redo")}
+            >
+              <Redo2 aria-hidden="true" />
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              title="单步 Tick"
+              aria-label="单步 Tick"
+              disabled={wasmState !== "ready" || !snapshot}
+              onClick={tickSimulation}
+            >
+              <StepForward aria-hidden="true" />
+            </button>
+            <button type="button" onClick={() => setExampleLibraryOpen(true)}>
+              <Library aria-hidden="true" />
+              示例库
+            </button>
+            <button type="button" onClick={() => loadExample("neg")}>
+              <RotateCcw aria-hidden="true" />
+              默认示例
+            </button>
+            <button type="button" onClick={clearCircuit}>
+              <Trash2 aria-hidden="true" />
+              清空
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                instanceRef.current?.fitView({ padding: 0.25, duration: 250 })
+              }
+            >
+              <Maximize2 aria-hidden="true" />
+              适应画布
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              title="导入工程"
+              aria-label="导入工程"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Upload aria-hidden="true" />
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              title="导出工程"
+              aria-label="导出工程"
+              onClick={exportProject}
+            >
+              <Download aria-hidden="true" />
+            </button>
             <span className="toolbar-divider" />
-            <button className="icon-button" type="button" title="删除所选" aria-label="删除所选" disabled={!selectedNodeId && selectedEdgeIds.length === 0} onClick={deleteSelected}><Trash2 aria-hidden="true" /></button>
+            <button
+              className="icon-button"
+              type="button"
+              title="删除所选"
+              aria-label="删除所选"
+              disabled={!selectedNodeId && selectedEdgeIds.length === 0}
+              onClick={deleteSelected}
+            >
+              <Trash2 aria-hidden="true" />
+            </button>
           </div>
         </div>
-        <div className={`wasm-badge state-${wasmState}`}><span />{wasmState === "ready" ? `WASM v${wasmVersion}` : "WASM"}</div>
+        <div className={`wasm-badge state-${wasmState}`}>
+          <span />
+          {wasmState === "ready" ? `WASM v${wasmVersion}` : "WASM"}
+        </div>
       </header>
 
-      <HierarchyBreadcrumbs entries={breadcrumbEntries} onNavigate={navigateBreadcrumb} />
-      <input ref={fileInputRef} className="visually-hidden" type="file" accept="application/json,.json" aria-label="选择三进制工程文件" onChange={importProject} />
+      <HierarchyBreadcrumbs
+        entries={breadcrumbEntries}
+        onNavigate={navigateBreadcrumb}
+      />
+      <input
+        ref={fileInputRef}
+        className="visually-hidden"
+        type="file"
+        accept="application/json,.json"
+        aria-label="选择三进制工程文件"
+        onChange={importProject}
+      />
 
       <div className="workbench">
-        {(paletteOpen || inspectorOpen) && <button className="drawer-backdrop mobile-only" type="button" aria-label="关闭侧栏" onClick={() => { setPaletteOpen(false); setInspectorOpen(false); }} />}
-        <aside id="component-palette" className={`palette ${paletteOpen ? "is-open" : ""}`} aria-label="元件库" inert={compactLayout && !paletteOpen ? true : undefined}>
-          <div className="panel-title"><Plus aria-hidden="true" /><div><strong>元件库</strong><span>{dynamicCatalog.length} COMPONENTS</span></div></div>
+        {(paletteOpen || inspectorOpen) && (
+          <button
+            className="drawer-backdrop mobile-only"
+            type="button"
+            aria-label="关闭侧栏"
+            onClick={() => {
+              setPaletteOpen(false);
+              setInspectorOpen(false);
+            }}
+          />
+        )}
+        <aside
+          id="component-palette"
+          className={`palette ${paletteOpen ? "is-open" : ""}`}
+          aria-label="元件库"
+          inert={compactLayout && !paletteOpen ? true : undefined}
+        >
+          <div className="panel-title">
+            <Plus aria-hidden="true" />
+            <div>
+              <strong>元件库</strong>
+              <span>{dynamicCatalog.length} COMPONENTS</span>
+            </div>
+          </div>
           <ModuleManager
             modules={modules}
             activeCircuitKind={activeCircuit.kind}
@@ -1713,23 +2018,103 @@ function Workbench() {
             onAddInput={() => addBoundary("input")}
             onAddOutput={() => addBoundary("output")}
           />
-          {["source", "wiring", "gate", "module", "sequential", "sink"].map((category) => (
+          {[
+            "source",
+            "wiring",
+            "gate",
+            "module",
+            "sequential",
+            "memory",
+            "sink",
+          ].map((category) => (
             <section className="palette-group" key={category}>
-              <h2>{category === "source" ? "输入与常量" : category === "sink" ? "观测" : category === "wiring" ? "布线" : category === "module" ? "算术模块" : category === "sequential" ? "时序" : "逻辑门"}</h2>
-              {baseCatalog.filter((item) => item.category === category).map((descriptor) => {
-                const Icon = descriptorIcon(descriptor);
-                const name = DISPLAY_NAMES[descriptor.type_id] ?? descriptor.display_name;
-                return (
-                  <button type="button" className="palette-item" key={descriptor.type_id} aria-label={`添加${name}`} title={`添加${name}`} draggable onDragStart={(event) => { event.dataTransfer.setData("application/logsim-component", descriptor.type_id); event.dataTransfer.effectAllowed = "copy"; }} onClick={() => addBuiltin(descriptor.type_id)}>
-                    <Icon aria-hidden="true" /><span><strong>{name}</strong><small>{descriptor.ports.length} PORTS</small></span><Plus aria-hidden="true" />
-                  </button>
-                );
-              })}
+              <h2>
+                {category === "source"
+                  ? "输入与常量"
+                  : category === "sink"
+                    ? "观测"
+                    : category === "wiring"
+                      ? "布线"
+                      : category === "module"
+                        ? "算术模块"
+                        : category === "sequential"
+                          ? "时序"
+                          : category === "memory"
+                            ? "存储器"
+                            : "逻辑门"}
+              </h2>
+              {baseCatalog
+                .filter((item) => item.category === category)
+                .map((descriptor) => {
+                  const Icon = descriptorIcon(descriptor);
+                  const name =
+                    DISPLAY_NAMES[descriptor.type_id] ??
+                    descriptor.display_name;
+                  return (
+                    <button
+                      type="button"
+                      className="palette-item"
+                      key={descriptor.type_id}
+                      aria-label={`添加${name}`}
+                      title={`添加${name}`}
+                      draggable
+                      onDragStart={(event) => {
+                        event.dataTransfer.setData(
+                          "application/logsim-component",
+                          descriptor.type_id,
+                        );
+                        event.dataTransfer.effectAllowed = "copy";
+                      }}
+                      onClick={() => addBuiltin(descriptor.type_id)}
+                    >
+                      <Icon aria-hidden="true" />
+                      <span>
+                        <strong>{name}</strong>
+                        <small>{descriptor.ports.length} PORTS</small>
+                      </span>
+                      <Plus aria-hidden="true" />
+                    </button>
+                  );
+                })}
             </section>
           ))}
         </aside>
 
-        <section className="canvas" aria-label="电路画布" data-wire-state={JSON.stringify(renderedEdges.map((edge) => ({ id: edge.id, source: edge.source, sourcePort: edge.data?.semanticSourcePortId ?? edge.sourceHandle, target: edge.target, targetPort: edge.data?.semanticTargetPortId ?? edge.targetHandle, signal: edge.data?.currentWord, width: edge.data?.semanticWidth, name: edge.data?.localName })))} ref={flowRef} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }} onDrop={(event: DragEvent<HTMLDivElement>) => { event.preventDefault(); const typeId = event.dataTransfer.getData("application/logsim-component"); if (typeId && instanceRef.current) addBuiltin(typeId, instanceRef.current.screenToFlowPosition({ x: event.clientX, y: event.clientY })); }}>
+        <section
+          className="canvas"
+          aria-label="电路画布"
+          data-wire-state={JSON.stringify(
+            renderedEdges.map((edge) => ({
+              id: edge.id,
+              source: edge.source,
+              sourcePort: edge.data?.semanticSourcePortId ?? edge.sourceHandle,
+              target: edge.target,
+              targetPort: edge.data?.semanticTargetPortId ?? edge.targetHandle,
+              signal: edge.data?.currentWord,
+              width: edge.data?.semanticWidth,
+              name: edge.data?.localName,
+            })),
+          )}
+          ref={flowRef}
+          onDragOver={(event) => {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "copy";
+          }}
+          onDrop={(event: DragEvent<HTMLDivElement>) => {
+            event.preventDefault();
+            const typeId = event.dataTransfer.getData(
+              "application/logsim-component",
+            );
+            if (typeId && instanceRef.current)
+              addBuiltin(
+                typeId,
+                instanceRef.current.screenToFlowPosition({
+                  x: event.clientX,
+                  y: event.clientY,
+                }),
+              );
+          }}
+        >
           {wasmState !== "loading" ? (
             <ReactFlow<EditorNode, EditorEdge>
               key={`${activeCircuitId}-${reloadRevision}`}
@@ -1758,15 +2143,69 @@ function Workbench() {
               snapGrid={FLOW_SNAP_GRID}
               defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
               proOptions={{ hideAttribution: true }}
-            ><Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#bcc6cc" /></ReactFlow>
-          ) : <div className="canvas-loading"><Activity aria-hidden="true" /><strong>正在初始化 Rust/WASM</strong></div>}
-          {nodes.length === 0 && <div className="empty-canvas"><MousePointer2 aria-hidden="true" /><strong>从左侧添加元件</strong></div>}
+            >
+              <Background
+                variant={BackgroundVariant.Dots}
+                gap={20}
+                size={1}
+                color="#bcc6cc"
+              />
+            </ReactFlow>
+          ) : (
+            <div className="canvas-loading">
+              <Activity aria-hidden="true" />
+              <strong>正在初始化 Rust/WASM</strong>
+            </div>
+          )}
+          {nodes.length === 0 && (
+            <div className="empty-canvas">
+              <MousePointer2 aria-hidden="true" />
+              <strong>从左侧添加元件</strong>
+            </div>
+          )}
         </section>
 
-        <aside id="component-inspector" className={`inspector ${inspectorOpen ? "is-open" : ""}`} aria-label="检查器" inert={compactLayout && !inspectorOpen ? true : undefined}>
-          <div className="panel-title"><Activity aria-hidden="true" /><div><strong>检查器</strong><span>PROJECT SNAPSHOT</span></div></div>
-          {selectedNode && selectedDescriptor ? <><NodeInspector node={selectedNode} descriptor={selectedDescriptor} snapshot={snapshot} />{selectedComponent && <PropertyEditor key={`${activeCircuitId}/${selectedComponent.id}`} typeId={selectedComponent.typeId} properties={selectedComponent.properties} onCommit={commitSelectedProperties} />}</> : <ExampleHelp example={EXAMPLES.find((item) => item.id === activeExampleId) ?? EXAMPLES[0]} />}
-          <Diagnostics diagnostics={diagnostics} onNavigate={navigateDiagnostic} />
+        <aside
+          id="component-inspector"
+          className={`inspector ${inspectorOpen ? "is-open" : ""}`}
+          aria-label="检查器"
+          inert={compactLayout && !inspectorOpen ? true : undefined}
+        >
+          <div className="panel-title">
+            <Activity aria-hidden="true" />
+            <div>
+              <strong>检查器</strong>
+              <span>PROJECT SNAPSHOT</span>
+            </div>
+          </div>
+          {selectedNode && selectedDescriptor ? (
+            <>
+              <NodeInspector
+                node={selectedNode}
+                descriptor={selectedDescriptor}
+                snapshot={snapshot}
+              />
+              {selectedComponent && (
+                <PropertyEditor
+                  key={`${activeCircuitId}/${selectedComponent.id}`}
+                  typeId={selectedComponent.typeId}
+                  properties={selectedComponent.properties}
+                  onCommit={commitSelectedProperties}
+                />
+              )}
+            </>
+          ) : (
+            <ExampleHelp
+              example={
+                EXAMPLES.find((item) => item.id === activeExampleId) ??
+                EXAMPLES[0]
+              }
+            />
+          )}
+          <Diagnostics
+            diagnostics={diagnostics}
+            onNavigate={navigateDiagnostic}
+          />
         </aside>
       </div>
 
@@ -1786,39 +2225,247 @@ function Workbench() {
         onLayoutChange={handleChronogramLayoutChange}
       />
 
-      {exampleLibraryOpen && <ExampleLibrary examples={EXAMPLES} onClose={() => setExampleLibraryOpen(false)} onLoad={loadExample} />}
-      <footer className="statusbar"><span className={`status-dot state-${wasmState}`} /><strong>{statusMessage}</strong><span className="status-separator" /><span>{snapshot ? snapshot.stable ? "STABLE" : "UNSTABLE" : "NO SNAPSHOT"}</span><span>{snapshot?.tickCount ?? 0} TICKS</span><span>{snapshot?.compileCount ?? 0} COMPILES</span><span>{diagnostics.length} DIAGNOSTICS</span><span className="status-spacer" /><span>{nodes.length} NODES</span><span>{edges.length} WIRES</span></footer>
+      {exampleLibraryOpen && (
+        <ExampleLibrary
+          examples={EXAMPLES}
+          onClose={() => setExampleLibraryOpen(false)}
+          onLoad={loadExample}
+        />
+      )}
+      <footer className="statusbar">
+        <span className={`status-dot state-${wasmState}`} />
+        <strong>{statusMessage}</strong>
+        <span className="status-separator" />
+        <span>
+          {snapshot ? (snapshot.stable ? "STABLE" : "UNSTABLE") : "NO SNAPSHOT"}
+        </span>
+        <span>{snapshot?.tickCount ?? 0} TICKS</span>
+        <span>{snapshot?.compileCount ?? 0} COMPILES</span>
+        <span>{diagnostics.length} DIAGNOSTICS</span>
+        <span className="status-spacer" />
+        <span>{nodes.length} NODES</span>
+        <span>{edges.length} WIRES</span>
+      </footer>
     </main>
   );
 }
 
 function ExampleHelp({ example }: { example: TernaryExample }) {
   return (
-    <section className="inspector-section example-help"><span className="type-chip">当前示例</span><h2>{example.name}</h2><div className="example-path"><span>{example.composition}</span></div><p>{example.description}</p><p className="example-expected">{example.expected}</p>{example.lessons && <dl className="example-lessons">{example.lessons.map((lesson) => <div key={lesson.title}><dt>{lesson.title}</dt><dd>{lesson.text}</dd></div>)}</dl>}<dl className="ternary-key"><div><dt className="signal-T">T</dt><dd>-1，负一</dd></div><div><dt className="signal-0">0</dt><dd>0，中性值</dd></div><div><dt className="signal-1">1</dt><dd>+1，正一</dd></div></dl></section>
+    <section className="inspector-section example-help">
+      <span className="type-chip">当前示例</span>
+      <h2>{example.name}</h2>
+      <div className="example-path">
+        <span>{example.composition}</span>
+      </div>
+      <p>{example.description}</p>
+      <p className="example-expected">{example.expected}</p>
+      {example.lessons && (
+        <dl className="example-lessons">
+          {example.lessons.map((lesson) => (
+            <div key={lesson.title}>
+              <dt>{lesson.title}</dt>
+              <dd>{lesson.text}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      <dl className="ternary-key">
+        <div>
+          <dt className="signal-T">T</dt>
+          <dd>-1，负一</dd>
+        </div>
+        <div>
+          <dt className="signal-0">0</dt>
+          <dd>0，中性值</dd>
+        </div>
+        <div>
+          <dt className="signal-1">1</dt>
+          <dd>+1，正一</dd>
+        </div>
+      </dl>
+    </section>
   );
 }
 
-function SignalRows({ title, values }: { title: string; values: Record<string, TernaryWord> }) {
-  return <div className="signal-group"><h3>{title}</h3>{Object.keys(values).length === 0 ? <span className="muted">无端口</span> : Object.entries(values).map(([port, value]) => {
-    const lengthClass = value.length > 24 ? "is-length-27" : value.length > 18 ? "is-length-long" : value.length > 9 ? "is-length-medium" : "is-length-short";
-    return <div className={`signal-row ${value.length > 18 ? "is-long-word" : ""}`} key={port}><code>{port}</code><strong className={lengthClass} aria-label={`${port} ${value}`} style={{ color: wireSignalColor(value, value.length) }}>{value}</strong></div>;
-  })}</div>;
+function SignalRows({
+  title,
+  values,
+}: {
+  title: string;
+  values: Record<string, TernaryWord>;
+}) {
+  return (
+    <div className="signal-group">
+      <h3>{title}</h3>
+      {Object.keys(values).length === 0 ? (
+        <span className="muted">无端口</span>
+      ) : (
+        Object.entries(values).map(([port, value]) => {
+          const lengthClass =
+            value.length > 24
+              ? "is-length-27"
+              : value.length > 18
+                ? "is-length-long"
+                : value.length > 9
+                  ? "is-length-medium"
+                  : "is-length-short";
+          return (
+            <div
+              className={`signal-row ${value.length > 18 ? "is-long-word" : ""}`}
+              key={port}
+            >
+              <code>{port}</code>
+              <strong
+                className={lengthClass}
+                aria-label={`${port} ${value}`}
+                style={{ color: wireSignalColor(value, value.length) }}
+              >
+                {value}
+              </strong>
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
 }
 
-function NodeInspector({ node, descriptor, snapshot }: { node: EditorNode; descriptor: CatalogComponent; snapshot: ProjectSimulationSnapshot | null }) {
-  const inputValues = { ...(snapshot?.inputNets[node.id] ?? {}), ...(snapshot?.inputNetWords[node.id] ?? {}) };
-  const outputValues = { ...(snapshot?.componentOutputs[node.id] ?? {}), ...(snapshot?.componentOutputWords[node.id] ?? {}) };
+function NodeInspector({
+  node,
+  descriptor,
+  snapshot,
+}: {
+  node: EditorNode;
+  descriptor: CatalogComponent;
+  snapshot: ProjectSimulationSnapshot | null;
+}) {
+  const inputValues = {
+    ...(snapshot?.inputNets[node.id] ?? {}),
+    ...(snapshot?.inputNetWords[node.id] ?? {}),
+  };
+  const outputValues = {
+    ...(snapshot?.componentOutputs[node.id] ?? {}),
+    ...(snapshot?.componentOutputWords[node.id] ?? {}),
+  };
   const resolvedPorts = node.data.ports ?? descriptor.ports;
-  const inputPorts = resolvedPorts.filter((port) => port.direction !== "output");
-  const outputPorts = resolvedPorts.filter((port) => port.direction !== "input");
+  const inputPorts = resolvedPorts.filter(
+    (port) => port.direction !== "output",
+  );
+  const outputPorts = resolvedPorts.filter(
+    (port) => port.direction !== "input",
+  );
   const help = COMPONENT_HELP[descriptor.type_id];
-  return <><section className="inspector-section selected-component"><span className="type-chip">{descriptor.category.toUpperCase()}</span><h2>{node.data.label}</h2><dl className="metadata"><div><dt>稳定 ID</dt><dd>{node.id}</dd></div><div><dt>类型</dt><dd>{descriptor.type_id}</dd></div></dl><div className="signal-columns"><SignalRows title="输入" values={inputValues} /><SignalRows title="输出" values={outputValues} /></div></section>{help && <section className="inspector-section component-help"><h2>中文说明</h2><p>{help.summary}</p><p>{help.details}</p></section>}{["gate", "module"].includes(descriptor.category) && descriptor.truth_table.length > 0 && <section className="inspector-section truth-table-section"><h2>真值表</h2><div className="truth-table-wrap"><table><thead><tr>{inputPorts.map((port) => <th key={port.id}>{port.id}</th>)}{outputPorts.map((port) => <th className="output-column" key={port.id}>{port.id}</th>)}</tr></thead><tbody>{descriptor.truth_table.map((row, rowIndex) => <tr key={rowIndex}>{[...row.inputs, ...row.outputs].map((value, index) => <td className={`signal-${value}`} key={`${rowIndex}-${index}`} style={{ color: SIGNAL_COLORS[value] }}>{value}</td>)}</tr>)}</tbody></table></div></section>}</>;
+  return (
+    <>
+      <section className="inspector-section selected-component">
+        <span className="type-chip">{descriptor.category.toUpperCase()}</span>
+        <h2>{node.data.label}</h2>
+        <dl className="metadata">
+          <div>
+            <dt>稳定 ID</dt>
+            <dd>{node.id}</dd>
+          </div>
+          <div>
+            <dt>类型</dt>
+            <dd>{descriptor.type_id}</dd>
+          </div>
+        </dl>
+        <div className="signal-columns">
+          <SignalRows title="输入" values={inputValues} />
+          <SignalRows title="输出" values={outputValues} />
+        </div>
+      </section>
+      {help && (
+        <section className="inspector-section component-help">
+          <h2>中文说明</h2>
+          <p>{help.summary}</p>
+          <p>{help.details}</p>
+        </section>
+      )}
+      {["gate", "module"].includes(descriptor.category) &&
+        descriptor.truth_table.length > 0 && (
+          <section className="inspector-section truth-table-section">
+            <h2>真值表</h2>
+            <div className="truth-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    {inputPorts.map((port) => (
+                      <th key={port.id}>{port.id}</th>
+                    ))}
+                    {outputPorts.map((port) => (
+                      <th className="output-column" key={port.id}>
+                        {port.id}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {descriptor.truth_table.map((row, rowIndex) => (
+                    <tr key={rowIndex}>
+                      {[...row.inputs, ...row.outputs].map((value, index) => (
+                        <td
+                          className={`signal-${value}`}
+                          key={`${rowIndex}-${index}`}
+                          style={{ color: SIGNAL_COLORS[value] }}
+                        >
+                          {value}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+    </>
+  );
 }
 
-function Diagnostics({ diagnostics, onNavigate }: { diagnostics: ProjectSimulationDiagnostic[]; onNavigate: (diagnostic: ProjectSimulationDiagnostic) => void }) {
-  return <section className="inspector-section diagnostics-section"><div className="section-heading"><h2>诊断</h2><span>{diagnostics.length}</span></div>{diagnostics.length === 0 ? <p className="muted">当前没有诊断信息。</p> : <ul>{diagnostics.map((diagnostic, index) => <li className={`diagnostic diagnostic-${diagnostic.severity}`} key={`${diagnostic.code}-${index}`}><button type="button" disabled={!diagnostic.primaryLocation} onClick={() => onNavigate(diagnostic)}><strong>{diagnostic.code}</strong><span>{diagnostic.message}</span></button></li>)}</ul>}</section>;
+function Diagnostics({
+  diagnostics,
+  onNavigate,
+}: {
+  diagnostics: ProjectSimulationDiagnostic[];
+  onNavigate: (diagnostic: ProjectSimulationDiagnostic) => void;
+}) {
+  return (
+    <section className="inspector-section diagnostics-section">
+      <div className="section-heading">
+        <h2>诊断</h2>
+        <span>{diagnostics.length}</span>
+      </div>
+      {diagnostics.length === 0 ? (
+        <p className="muted">当前没有诊断信息。</p>
+      ) : (
+        <ul>
+          {diagnostics.map((diagnostic, index) => (
+            <li
+              className={`diagnostic diagnostic-${diagnostic.severity}`}
+              key={`${diagnostic.code}-${index}`}
+            >
+              <button
+                type="button"
+                disabled={!diagnostic.primaryLocation}
+                onClick={() => onNavigate(diagnostic)}
+              >
+                <strong>{diagnostic.code}</strong>
+                <span>{diagnostic.message}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
 }
 
 export function App() {
-  return <ReactFlowProvider><Workbench /></ReactFlowProvider>;
+  return (
+    <ReactFlowProvider>
+      <Workbench />
+    </ReactFlowProvider>
+  );
 }

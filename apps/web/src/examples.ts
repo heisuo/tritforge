@@ -7,6 +7,7 @@ import type {
 import { toEditorDocument } from "./editor/circuit-document";
 import { cloneBusWiringProject } from "./examples/bus-wiring";
 import { cloneHierarchicalAdderProject } from "./examples/hierarchical-adder";
+import { cloneMemoryLabProject } from "./examples/memory-lab";
 import { cloneRegister3Project } from "./examples/register3";
 import { cloneSequentialDffProject } from "./examples/sequential-dff";
 import type { ProjectDocumentV2 } from "./project/project-document";
@@ -24,7 +25,8 @@ export type ExampleId =
   | "bus-tunnel-3"
   | "driver-conflict"
   | "sequential-dff"
-  | "register3";
+  | "register3"
+  | "memory-lab";
 
 export interface TernaryExample {
   id: ExampleId;
@@ -82,7 +84,9 @@ const sequentialDffDocument = toEditorDocument({
   version: 1,
   components: sequentialDffRoot.components,
   connections: sequentialDffRoot.connections,
-  ...(sequentialDffRoot.viewport ? { viewport: sequentialDffRoot.viewport } : {}),
+  ...(sequentialDffRoot.viewport
+    ? { viewport: sequentialDffRoot.viewport }
+    : {}),
 });
 const register3Project = cloneRegister3Project();
 const register3Root = register3Project.circuits[0];
@@ -113,6 +117,33 @@ const busWiringDocument: EditorDocument = {
     };
   }),
   edges: busWiringRoot.wires.map((item) => ({
+    id: item.id,
+    source: item.endpointA.componentId,
+    sourceHandle: item.endpointA.portId,
+    target: item.endpointB.componentId,
+    targetHandle: item.endpointB.portId,
+  })),
+};
+const memoryLabProject = cloneMemoryLabProject();
+const memoryLabRoot = memoryLabProject.circuits[0];
+const memoryLabDocument: EditorDocument = {
+  nodes: memoryLabRoot.components.map((item) => {
+    const { label, value, ...properties } = item.properties;
+    return {
+      id: item.id,
+      type: "component",
+      position: { ...item.position },
+      data: {
+        typeId: item.typeId,
+        label: typeof label === "string" ? label : item.typeId,
+        ...(typeof value === "string" ? { sourceValue: value } : {}),
+        ...(Object.keys(properties).length > 0
+          ? { properties: structuredClone(properties) }
+          : {}),
+      },
+    };
+  }),
+  edges: memoryLabRoot.wires.map((item) => ({
     id: item.id,
     source: item.endpointA.componentId,
     sourceHandle: item.endpointA.portId,
@@ -223,7 +254,8 @@ export const EXAMPLES: TernaryExample[] = [
     id: "half-adder",
     name: "基础门搭建单 trit 半加器",
     category: "门级算术",
-    description: "用 MOD_SUM 计算本位和，用 CONSENSUS 计算进位，结构对应三进制的 XOR 与 AND。",
+    description:
+      "用 MOD_SUM 计算本位和，用 CONSENSUS 计算进位，结构对应三进制的 XOR 与 AND。",
     composition: "a + b → MOD_SUM / CONSENSUS → sum / carry",
     expected: "默认 1 + 1：sum=T，carry=1，合起来是 1T₃（十进制 2）",
     document: {
@@ -249,7 +281,8 @@ export const EXAMPLES: TernaryExample[] = [
     id: "full-adder",
     name: "半加器组合单 trit 全加器",
     category: "层次化算术",
-    description: "两个 Half Adder 依次加入 a、b、cin，再用 MOD_SUM 合并两级产生的进位。",
+    description:
+      "两个 Half Adder 依次加入 a、b、cin，再用 MOD_SUM 合并两级产生的进位。",
     composition: "HA1(a,b) → HA2(partial,cin) → sum；MOD_SUM(c1,c2) → carry",
     expected: "默认 1 + 1 + 0：sum=T，carry=1，合起来是 1T₃（十进制 2）",
     document: {
@@ -279,7 +312,8 @@ export const EXAMPLES: TernaryExample[] = [
     id: "hierarchical-adder",
     name: "可展开的层级全加器",
     category: "层级子电路",
-    description: "主电路实例化 Full Adder，内部再由两个可进入、可编辑的 Half Adder 组成。",
+    description:
+      "主电路实例化 Full Adder，内部再由两个可进入、可编辑的 Half Adder 组成。",
     composition: "Main → Full Adder → 2 × Half Adder → 基础门",
     expected: "默认 1 + 1 + 0：SUM=T，CARRY=1；双击实例可逐层查看",
     document: hierarchicalRootDocument,
@@ -289,7 +323,8 @@ export const EXAMPLES: TernaryExample[] = [
     id: "ripple-adder-3",
     name: "3-trit 行波进位加法器",
     category: "多 trit 算术",
-    description: "三个全加器从最低位到最高位串联，前一级 carry 接到后一级 cin。",
+    description:
+      "三个全加器从最低位到最高位串联，前一级 carry 接到后一级 cin。",
     composition: "A[2:0] + B[2:0] → FA0 → FA1 → FA2 → S[2:0] + Cout",
     expected: "默认 001₃ + 001₃ = 01T₃：S2=0、S1=1、S0=T、Cout=0",
     document: {
@@ -393,11 +428,23 @@ export const EXAMPLES: TernaryExample[] = [
     id: "register3",
     name: "3-trit 并行寄存器",
     category: "时序电路",
-    description: "用三个共享 Clock、EN 和同步 RST 的 DFF 并行保存一个 3-trit 字。",
+    description:
+      "用三个共享 Clock、EN 和同步 RST 的 DFF 并行保存一个 3-trit 字。",
     composition: "D2:D0 + Clock + EN + RST → 3 × DFF → Q2:Q0",
     expected: "默认 D=1T0，载入时 Q=000，单步后 Q=1T0（十进制 6）",
     document: register3Document,
     project: cloneRegister3Project(),
+  },
+  {
+    id: "memory-lab",
+    name: "三进制 Memory Lab",
+    category: "存储器",
+    description:
+      "用同一条 3-trit 地址总线观察 ROM 异步读取，并演示 RAM 的写入、保持和复位。",
+    composition: "Address → ROM / RAM；DIN + WE + Clock + RST → RAM",
+    expected: "默认地址 T00：ROM 输出 T01，RAM 输出 000；单步后 RAM 写入 1T0",
+    document: memoryLabDocument,
+    project: cloneMemoryLabProject(),
   },
 ];
 
@@ -416,16 +463,14 @@ export function cloneExampleDocument(id: ExampleId): EditorDocument {
   };
 }
 
-type V2ProjectExampleId =
-  | "hierarchical-adder"
-  | "sequential-dff"
-  | "register3";
+type V2ProjectExampleId = "hierarchical-adder" | "sequential-dff" | "register3";
+type V3ProjectExampleId = "bus-tunnel-3" | "memory-lab";
 type DocumentOnlyExampleId = Exclude<
   ExampleId,
-  V2ProjectExampleId | "bus-tunnel-3"
+  V2ProjectExampleId | V3ProjectExampleId
 >;
 
-export function cloneExampleProject(id: "bus-tunnel-3"): ProjectDocumentV3;
+export function cloneExampleProject(id: V3ProjectExampleId): ProjectDocumentV3;
 export function cloneExampleProject(id: V2ProjectExampleId): ProjectDocumentV2;
 export function cloneExampleProject(id: DocumentOnlyExampleId): null;
 export function cloneExampleProject(
@@ -438,5 +483,6 @@ export function cloneExampleProject(
   if (id === "bus-tunnel-3") return cloneBusWiringProject();
   if (id === "sequential-dff") return cloneSequentialDffProject();
   if (id === "register3") return cloneRegister3Project();
+  if (id === "memory-lab") return cloneMemoryLabProject();
   return null;
 }

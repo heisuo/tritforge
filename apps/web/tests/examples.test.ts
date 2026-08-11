@@ -42,29 +42,69 @@ describe("example library", () => {
       "driver-conflict",
       "sequential-dff",
       "register3",
+      "memory-lab",
     ]);
   });
 
-  it.each(EXAMPLES)("$name has a structurally valid editable graph", (example) => {
-    const nodeIds = example.document.nodes.map((node) => node.id);
-    const edgeIds = example.document.edges.map((edge) => edge.id);
+  it("defines a runnable 3-trit Memory Lab around one shared address bus", () => {
+    const project = cloneExampleProject("memory-lab")!;
+    const circuit = project.circuits[0];
+    const components = new Map(
+      circuit.components.map((component) => [component.id, component]),
+    );
+    const wires = "wires" in circuit ? circuit.wires : [];
 
-    expect(new Set(nodeIds).size).toBe(nodeIds.length);
-    expect(new Set(edgeIds).size).toBe(edgeIds.length);
-    expect(example.document.nodes.length).toBeGreaterThan(0);
+    expect(project).toMatchObject({ version: 3, rootCircuitId: "main" });
+    expect(components.get("address")).toMatchObject({
+      typeId: "source.trit_input",
+      properties: { width: 3, value: "T00" },
+    });
+    expect(components.get("rom")).toMatchObject({
+      typeId: "memory.rom",
+      properties: { wordWidth: 3, addressWidth: 3 },
+    });
+    expect(components.get("ram")).toMatchObject({
+      typeId: "memory.ram",
+      properties: { wordWidth: 3, addressWidth: 3 },
+    });
     expect(
-      example.document.nodes.some(
-        (node) => node.data.typeId === "sink.probe",
+      wires.filter(
+        (wire) =>
+          wire.endpointA.componentId === "address" &&
+          wire.endpointA.portId === "out",
       ),
-    ).toBe(true);
-
-    for (const edge of example.document.edges) {
-      expect(nodeIds).toContain(edge.source);
-      expect(nodeIds).toContain(edge.target);
-      expect(edge.sourceHandle).toBeTruthy();
-      expect(edge.targetHandle).toBeTruthy();
-    }
+    ).toHaveLength(2);
+    const contents = components.get("rom")!.properties.contents as string[];
+    expect([contents[4], contents[13], contents[22]]).toEqual([
+      "T01",
+      "000",
+      "1T0",
+    ]);
   });
+
+  it.each(EXAMPLES)(
+    "$name has a structurally valid editable graph",
+    (example) => {
+      const nodeIds = example.document.nodes.map((node) => node.id);
+      const edgeIds = example.document.edges.map((edge) => edge.id);
+
+      expect(new Set(nodeIds).size).toBe(nodeIds.length);
+      expect(new Set(edgeIds).size).toBe(edgeIds.length);
+      expect(example.document.nodes.length).toBeGreaterThan(0);
+      expect(
+        example.document.nodes.some(
+          (node) => node.data.typeId === "sink.probe",
+        ),
+      ).toBe(true);
+
+      for (const edge of example.document.edges) {
+        expect(nodeIds).toContain(edge.source);
+        expect(nodeIds).toContain(edge.target);
+        expect(edge.sourceHandle).toBeTruthy();
+        expect(edge.targetHandle).toBeTruthy();
+      }
+    },
+  );
 
   it("returns a deep clone that cannot mutate the template", () => {
     const copy = cloneExampleDocument("neg");
@@ -81,9 +121,7 @@ describe("example library", () => {
   it("builds the 3-trit ripple adder from exactly three full adders", () => {
     const document = cloneExampleDocument("ripple-adder-3");
     expect(
-      document.nodes.filter(
-        (node) => node.data.typeId === "module.full_adder",
-      ),
+      document.nodes.filter((node) => node.data.typeId === "module.full_adder"),
     ).toHaveLength(3);
   });
 
@@ -103,9 +141,7 @@ describe("example library", () => {
   it("builds the full adder from two half adders and one MOD_SUM gate", () => {
     const document = cloneExampleDocument("full-adder");
     expect(
-      document.nodes.filter(
-        (node) => node.data.typeId === "module.half_adder",
-      ),
+      document.nodes.filter((node) => node.data.typeId === "module.half_adder"),
     ).toHaveLength(2);
     expect(
       document.nodes.filter((node) => node.data.typeId === "gate.mod_sum"),
@@ -121,8 +157,12 @@ describe("example library", () => {
 
   it("freezes the editable Half Adder -> Full Adder -> Main hierarchy", () => {
     const project = cloneExampleProject("hierarchical-adder")!;
-    const halfAdder = project.circuits.find((circuit) => circuit.id === "half-adder")!;
-    const fullAdder = project.circuits.find((circuit) => circuit.id === "full-adder")!;
+    const halfAdder = project.circuits.find(
+      (circuit) => circuit.id === "half-adder",
+    )!;
+    const fullAdder = project.circuits.find(
+      (circuit) => circuit.id === "full-adder",
+    )!;
     const main = project.circuits.find((circuit) => circuit.id === "main")!;
 
     expect(halfAdder.components.map((component) => component.typeId)).toEqual([
@@ -186,9 +226,9 @@ describe("example library", () => {
       "sink.probe",
     ]);
     expect(
-      project.circuits.flatMap((circuit) => circuit.components).some(
-        (component) => component.typeId === "module.full_adder",
-      ),
+      project.circuits
+        .flatMap((circuit) => circuit.components)
+        .some((component) => component.typeId === "module.full_adder"),
     ).toBe(false);
   });
 
@@ -299,16 +339,56 @@ describe("example library", () => {
     const circuit = cloneBusWiringProject().circuits[0];
 
     expect(circuit.wires).toEqual([
-      { id: "word-to-split", endpointA: { componentId: "word-input", portId: "out" }, endpointB: { componentId: "split-word", portId: "trunk" } },
-      { id: "branch0-to-junction", endpointA: { componentId: "split-word", portId: "branch0" }, endpointB: { componentId: "lst-junction", portId: "net" } },
-      { id: "junction-to-lst-probe", endpointA: { componentId: "lst-junction", portId: "net" }, endpointB: { componentId: "probe-lst", portId: "in" } },
-      { id: "junction-to-join", endpointA: { componentId: "lst-junction", portId: "net" }, endpointB: { componentId: "join-word", portId: "branch0" } },
-      { id: "branch1-to-tunnel", endpointA: { componentId: "split-word", portId: "branch1" }, endpointB: { componentId: "tunnel-send", portId: "net" } },
-      { id: "tunnel-to-join", endpointA: { componentId: "tunnel-receive", portId: "net" }, endpointB: { componentId: "join-word", portId: "branch1" } },
-      { id: "tunnel-to-mid-probe", endpointA: { componentId: "tunnel-receive", portId: "net" }, endpointB: { componentId: "probe-mid", portId: "in" } },
-      { id: "branch2-to-join", endpointA: { componentId: "split-word", portId: "branch2" }, endpointB: { componentId: "join-word", portId: "branch2" } },
-      { id: "branch2-to-mst-probe", endpointA: { componentId: "split-word", portId: "branch2" }, endpointB: { componentId: "probe-mst", portId: "in" } },
-      { id: "join-to-word-probe", endpointA: { componentId: "join-word", portId: "trunk" }, endpointB: { componentId: "probe-word", portId: "in" } },
+      {
+        id: "word-to-split",
+        endpointA: { componentId: "word-input", portId: "out" },
+        endpointB: { componentId: "split-word", portId: "trunk" },
+      },
+      {
+        id: "branch0-to-junction",
+        endpointA: { componentId: "split-word", portId: "branch0" },
+        endpointB: { componentId: "lst-junction", portId: "net" },
+      },
+      {
+        id: "junction-to-lst-probe",
+        endpointA: { componentId: "lst-junction", portId: "net" },
+        endpointB: { componentId: "probe-lst", portId: "in" },
+      },
+      {
+        id: "junction-to-join",
+        endpointA: { componentId: "lst-junction", portId: "net" },
+        endpointB: { componentId: "join-word", portId: "branch0" },
+      },
+      {
+        id: "branch1-to-tunnel",
+        endpointA: { componentId: "split-word", portId: "branch1" },
+        endpointB: { componentId: "tunnel-send", portId: "net" },
+      },
+      {
+        id: "tunnel-to-join",
+        endpointA: { componentId: "tunnel-receive", portId: "net" },
+        endpointB: { componentId: "join-word", portId: "branch1" },
+      },
+      {
+        id: "tunnel-to-mid-probe",
+        endpointA: { componentId: "tunnel-receive", portId: "net" },
+        endpointB: { componentId: "probe-mid", portId: "in" },
+      },
+      {
+        id: "branch2-to-join",
+        endpointA: { componentId: "split-word", portId: "branch2" },
+        endpointB: { componentId: "join-word", portId: "branch2" },
+      },
+      {
+        id: "branch2-to-mst-probe",
+        endpointA: { componentId: "split-word", portId: "branch2" },
+        endpointB: { componentId: "probe-mst", portId: "in" },
+      },
+      {
+        id: "join-to-word-probe",
+        endpointA: { componentId: "join-word", portId: "trunk" },
+        endpointB: { componentId: "probe-word", portId: "in" },
+      },
     ]);
 
     const tunnels = circuit.components.filter(
@@ -321,14 +401,12 @@ describe("example library", () => {
     expect(
       circuit.wires.some(
         (wire) =>
-          new Set([
-            wire.endpointA.componentId,
-            wire.endpointB.componentId,
-          ]).has("tunnel-send") &&
-          new Set([
-            wire.endpointA.componentId,
-            wire.endpointB.componentId,
-          ]).has("tunnel-receive"),
+          new Set([wire.endpointA.componentId, wire.endpointB.componentId]).has(
+            "tunnel-send",
+          ) &&
+          new Set([wire.endpointA.componentId, wire.endpointB.componentId]).has(
+            "tunnel-receive",
+          ),
       ),
     ).toBe(false);
   });
@@ -338,9 +416,9 @@ describe("example library", () => {
     copy.circuits[0].components[0].properties.value = "000";
     copy.circuits[0].wires[0].endpointA.componentId = "changed";
 
-    expect(cloneBusWiringProject().circuits[0].components[0].properties.value).toBe(
-      "1T0",
-    );
+    expect(
+      cloneBusWiringProject().circuits[0].components[0].properties.value,
+    ).toBe("1T0");
     expect(
       cloneBusWiringProject().circuits[0].wires[0].endpointA.componentId,
     ).toBe("word-input");

@@ -116,4 +116,63 @@ describe("PropertyEditor", () => {
     expect(onCommit).not.toHaveBeenCalled();
     expect(screen.getByRole("alert")).toHaveTextContent("位映射必须是整数列表");
   });
+
+  it("edits ROM geometry and its address-labelled contents atomically", () => {
+    const onCommit = vi.fn(() => undefined);
+    render(
+      <PropertyEditor
+        typeId="memory.rom"
+        properties={{
+          label: "Program ROM",
+          wordWidth: 3,
+          addressWidth: 3,
+          contents: Array(27).fill("000"),
+        }}
+        onCommit={onCommit}
+      />,
+    );
+
+    expect(screen.getByLabelText("ROM 地址 T00")).toHaveValue("000");
+    expect(screen.getByLabelText("ROM 地址 000")).toHaveValue("000");
+    expect(screen.getByLabelText("ROM 地址 100")).toHaveValue("000");
+    fireEvent.change(screen.getByLabelText("ROM 地址 T00"), {
+      target: { value: "1t0" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "应用属性" }));
+
+    const expected = Array(27).fill("000");
+    expected[4] = "1T0";
+    expect(onCommit).toHaveBeenCalledWith({
+      label: "Program ROM",
+      wordWidth: 3,
+      addressWidth: 3,
+      contents: expected,
+    });
+  });
+
+  it("configures RAM geometry without exposing ROM contents", () => {
+    const onCommit = vi.fn(() => undefined);
+    render(
+      <PropertyEditor
+        typeId="memory.ram"
+        properties={{ label: "Data RAM", wordWidth: 3, addressWidth: 2 }}
+        onCommit={onCommit}
+      />,
+    );
+
+    expect(screen.queryByText("存储内容")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("存储字宽"), {
+      target: { value: "6" },
+    });
+    fireEvent.change(screen.getByLabelText("地址宽度"), {
+      target: { value: "1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "应用属性" }));
+
+    expect(onCommit).toHaveBeenCalledWith({
+      label: "Data RAM",
+      wordWidth: 6,
+      addressWidth: 1,
+    });
+  });
 });

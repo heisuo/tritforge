@@ -5,8 +5,10 @@ import {
   Cable,
   CircleDot,
   Clock3,
+  Database,
   Gauge,
   GitFork,
+  MemoryStick,
   PanelTop,
   Radio,
   Triangle,
@@ -35,8 +37,8 @@ function signalForPort(
   outputs: Record<string, TernaryWord>,
 ): TernaryWord {
   return port.direction !== "output"
-    ? inputs[port.id] ?? "Z"
-    : outputs[port.id] ?? "Z";
+    ? (inputs[port.id] ?? "Z")
+    : (outputs[port.id] ?? "Z");
 }
 
 function signalColor(value: TernaryWord): string {
@@ -90,6 +92,12 @@ function ComponentIcon({ typeId }: { typeId: string }) {
   if (typeId === "sequential.dff") {
     return <PanelTop aria-hidden="true" />;
   }
+  if (typeId === "memory.rom") {
+    return <Database aria-hidden="true" />;
+  }
+  if (typeId === "memory.ram") {
+    return <MemoryStick aria-hidden="true" />;
+  }
   if (typeId === "sink.probe") {
     return <Gauge aria-hidden="true" />;
   }
@@ -102,11 +110,7 @@ function ComponentIcon({ typeId }: { typeId: string }) {
   return <CircleDot aria-hidden="true" />;
 }
 
-export function CircuitNode({
-  id,
-  data,
-  selected,
-}: NodeProps<EditorNode>) {
+export function CircuitNode({ id, data, selected }: NodeProps<EditorNode>) {
   const inputs: Record<string, TernaryWord> = {
     ...(data.inputSignals ?? {}),
     ...(data.inputWords ?? {}),
@@ -139,13 +143,23 @@ export function CircuitNode({
       : null;
   const displaySignal =
     data.typeId === "sink.probe" || data.typeId === "project.module_output"
-      ? inputs.in ?? "Z"
+      ? (inputs.in ?? "Z")
       : data.typeId === "sequential.dff"
-        ? outputs.q ?? "Z"
-        : registerWord
-          ? registerWord
-          : outputs.out ?? outputs.y ?? outputs.sum ?? data.sourceValue ?? "Z";
-  const primarySignal: TritSymbol = isTritSymbol(displaySignal) ? displaySignal : "X";
+        ? (outputs.q ?? "Z")
+        : data.typeId === "memory.rom"
+          ? (outputs.data ?? "Z")
+          : data.typeId === "memory.ram"
+            ? (outputs.dout ?? "Z")
+            : registerWord
+              ? registerWord
+              : (outputs.out ??
+                outputs.y ??
+                outputs.sum ??
+                data.sourceValue ??
+                "Z");
+  const primarySignal: TritSymbol = isTritSymbol(displaySignal)
+    ? displaySignal
+    : "X";
 
   return (
     <div
@@ -155,10 +169,10 @@ export function CircuitNode({
         data.typeId === "source.clock" || data.typeId === "sequential.dff"
           ? "is-sequential-node"
           : ""
-      } ${
-        selected ? "is-selected" : ""
-      }`}
-      style={{ "--signal-color": signalColor(displaySignal) } as React.CSSProperties}
+      } ${selected ? "is-selected" : ""}`}
+      style={
+        { "--signal-color": signalColor(displaySignal) } as React.CSSProperties
+      }
     >
       <div className="node-heading">
         <ComponentIcon typeId={data.typeId} />
@@ -205,7 +219,14 @@ export function CircuitNode({
             )}
             <span>{"label" in port ? String(port.label) : port.id}</span>
             <small>{port.width}t</small>
-            <b style={{ color: signalColor(signal), fontSize: signalFontSize(signal) }}>{signal}</b>
+            <b
+              style={{
+                color: signalColor(signal),
+                fontSize: signalFontSize(signal),
+              }}
+            >
+              {signal}
+            </b>
           </div>
         );
       })}
@@ -220,7 +241,14 @@ export function CircuitNode({
               top: `${((index + 1) / (outputPorts.length + 1)) * 100}%`,
             }}
           >
-            <b style={{ color: signalColor(signal), fontSize: signalFontSize(signal) }}>{signal}</b>
+            <b
+              style={{
+                color: signalColor(signal),
+                fontSize: signalFontSize(signal),
+              }}
+            >
+              {signal}
+            </b>
             <small>{port.width}t</small>
             <span>{"label" in port ? String(port.label) : port.id}</span>
             <Handle
@@ -322,7 +350,12 @@ function WiringNode({
         style={{ "--signal-color": signalColor(value) } as React.CSSProperties}
         aria-label={`${label} ${width}t ${value}`}
       >
-        <InOutPort nodeId={id} port={net} position={Position.Left} signal={value} />
+        <InOutPort
+          nodeId={id}
+          port={net}
+          position={Position.Left}
+          signal={value}
+        />
         <span className="junction-dot" />
         <span className="wiring-width">{width}t</span>
       </div>
@@ -335,12 +368,19 @@ function WiringNode({
     return (
       <div
         className={`wiring-tunnel ${selected ? "is-selected" : ""}`}
-        style={{
-          "--signal-color": signalColor(value),
-          width: `${Math.max(116, 96 + width * 4)}px`,
-        } as React.CSSProperties}
+        style={
+          {
+            "--signal-color": signalColor(value),
+            width: `${Math.max(116, 96 + width * 4)}px`,
+          } as React.CSSProperties
+        }
       >
-        <InOutPort nodeId={id} port={net} position={Position.Left} signal={value} />
+        <InOutPort
+          nodeId={id}
+          port={net}
+          position={Position.Left}
+          signal={value}
+        />
         <Cable aria-hidden="true" />
         <strong>{tunnelLabel}</strong>
         <span>{width}t</span>
@@ -378,7 +418,9 @@ function WiringNode({
           />
           <span>trunk</span>
           <small>{trunk.width}t</small>
-          <b style={{ fontSize: signalFontSize(signal(trunk)) }}>{signal(trunk)}</b>
+          <b style={{ fontSize: signalFontSize(signal(trunk)) }}>
+            {signal(trunk)}
+          </b>
         </div>
       )}
       <div className="splitter-bar" />
@@ -388,7 +430,9 @@ function WiringNode({
           key={port.id}
           style={{ top: branchTop + index * branchGap }}
         >
-          <b style={{ fontSize: signalFontSize(signal(port)) }}>{signal(port)}</b>
+          <b style={{ fontSize: signalFontSize(signal(port)) }}>
+            {signal(port)}
+          </b>
           <small>{port.width}t</small>
           <span>{port.id}</span>
           <InOutPort
@@ -399,13 +443,22 @@ function WiringNode({
           />
         </div>
       ))}
-      <code>{Array.isArray(properties.mapping) ? properties.mapping.join("·") : ""}</code>
+      <code>
+        {Array.isArray(properties.mapping) ? properties.mapping.join("·") : ""}
+      </code>
     </div>
   );
 }
 
 function isTritSymbol(value: string): value is TritSymbol {
-  return value === "T" || value === "0" || value === "1" || value === "X" || value === "Z" || value === "E";
+  return (
+    value === "T" ||
+    value === "0" ||
+    value === "1" ||
+    value === "X" ||
+    value === "Z" ||
+    value === "E"
+  );
 }
 
 export { SIGNAL_COLORS };

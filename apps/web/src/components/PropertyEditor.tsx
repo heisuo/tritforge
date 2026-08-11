@@ -12,6 +12,7 @@ const WIDTH_TYPES = new Set([
   "wiring.tunnel",
   "wiring.splitter",
 ]);
+const MEMORY_TYPES = new Set(["memory.rom", "memory.ram"]);
 
 interface PropertyEditorProps {
   typeId: string;
@@ -25,9 +26,34 @@ interface DraftProperties {
   branchCount: string;
   mapping: string;
   sourceWord: string;
+  wordWidth: string;
+  addressWidth: string;
+  contents: string[];
 }
 
-function draftFrom(typeId: string, properties: Record<string, unknown>): DraftProperties {
+function memoryDepth(addressWidth: number): number {
+  return Number.isInteger(addressWidth) &&
+    addressWidth >= 1 &&
+    addressWidth <= 3
+    ? 3 ** addressWidth
+    : 0;
+}
+
+function balancedAddress(index: number, width: number): string {
+  let value = index - (3 ** width - 1) / 2;
+  const digits = Array<string>(width).fill("0");
+  for (let position = width - 1; position >= 0; position -= 1) {
+    const remainder = ((((value + 1) % 3) + 3) % 3) - 1;
+    digits[position] = remainder === -1 ? "T" : String(remainder);
+    value = (value - remainder) / 3;
+  }
+  return digits.join("");
+}
+
+function draftFrom(
+  typeId: string,
+  properties: Record<string, unknown>,
+): DraftProperties {
   const valueKey = typeId === "project.module_input" ? "previewValue" : "value";
   return {
     width: String(properties.width ?? 1),
@@ -37,6 +63,11 @@ function draftFrom(typeId: string, properties: Record<string, unknown>): DraftPr
       ? properties.mapping.join(", ")
       : "",
     sourceWord: String(properties[valueKey] ?? "0"),
+    wordWidth: String(properties.wordWidth ?? 3),
+    addressWidth: String(properties.addressWidth ?? 3),
+    contents: Array.isArray(properties.contents)
+      ? properties.contents.map((word) => String(word))
+      : [],
   };
 }
 
@@ -66,7 +97,10 @@ export function PropertyEditor({
   properties,
   onCommit,
 }: PropertyEditorProps) {
-  const sourceProperties = useMemo(() => structuredClone(properties), [properties]);
+  const sourceProperties = useMemo(
+    () => structuredClone(properties),
+    [properties],
+  );
   const [draft, setDraft] = useState(() => draftFrom(typeId, sourceProperties));
   const [error, setError] = useState<string | null>(null);
   const displayedWidth = Number(draft.width);
@@ -75,7 +109,9 @@ export function PropertyEditor({
     .split(",")
     .map((entry) => Number(entry.trim()));
   const mappingMenuCount =
-    Number.isInteger(displayedWidth) && displayedWidth >= 1 && displayedWidth <= 27
+    Number.isInteger(displayedWidth) &&
+    displayedWidth >= 1 &&
+    displayedWidth <= 27
       ? displayedWidth
       : 0;
   const mappingBranchCount =
@@ -84,26 +120,44 @@ export function PropertyEditor({
     displayedBranchCount <= 27
       ? displayedBranchCount
       : 0;
+  const displayedAddressWidth = Number(draft.addressWidth);
+  const displayedMemoryDepth = memoryDepth(displayedAddressWidth);
+  const displayedWordWidth = Number(draft.wordWidth);
 
   useEffect(() => {
     setDraft(draftFrom(typeId, sourceProperties));
     setError(null);
   }, [sourceProperties, typeId]);
 
-  if (!WIDTH_TYPES.has(typeId)) return null;
+  if (!WIDTH_TYPES.has(typeId) && !MEMORY_TYPES.has(typeId)) return null;
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
     try {
       const next = structuredClone(sourceProperties);
-      next.width = parseInteger(draft.width, "宽度");
+      if (MEMORY_TYPES.has(typeId)) {
+        next.wordWidth = parseInteger(draft.wordWidth, "存储字宽");
+        next.addressWidth = parseInteger(draft.addressWidth, "地址宽度");
+        if (typeId === "memory.rom") {
+          const depth = memoryDepth(next.addressWidth as number);
+          const zeroWord = "0".repeat(next.wordWidth as number);
+          next.contents = Array.from({ length: depth }, (_, index) =>
+            String(draft.contents[index] ?? zeroWord)
+              .trim()
+              .toUpperCase(),
+          );
+        }
+      } else {
+        next.width = parseInteger(draft.width, "宽度");
+      }
       if (typeId === "wiring.tunnel") next.label = draft.tunnelLabel.trim();
       if (typeId === "wiring.splitter") {
         next.branchCount = parseInteger(draft.branchCount, "分支数量");
         next.mapping = parseMapping(draft.mapping);
       }
       if (isSource(typeId)) {
-        const key = typeId === "project.module_input" ? "previewValue" : "value";
+        const key =
+          typeId === "project.module_input" ? "previewValue" : "value";
         next[key] = draft.sourceWord.trim().toUpperCase();
       }
       const message = onCommit(next);
@@ -114,41 +168,138 @@ export function PropertyEditor({
   };
 
   return (
-    <section className="inspector-section property-editor" aria-labelledby="property-editor-title">
+    <section
+      className="inspector-section property-editor"
+      aria-labelledby="property-editor-title"
+    >
       <div className="section-heading">
         <h2 id="property-editor-title">属性</h2>
-        <span>{draft.width}t</span>
+        <span>
+          {MEMORY_TYPES.has(typeId)
+            ? `${draft.wordWidth}t × ${displayedMemoryDepth}`
+            : `${draft.width}t`}
+        </span>
       </div>
       <form onSubmit={submit}>
-        <label className="property-field">
-          <span>信号宽度</span>
-          <input
-            aria-label="信号宽度"
-            type="number"
-            min="1"
-            max="27"
-            step="1"
-            value={draft.width}
-            onChange={(event) =>
-              setDraft((current) => ({ ...current, width: event.target.value }))
-            }
-          />
-        </label>
-        <div className="width-presets" role="group" aria-label="常用信号宽度">
-          {WIDTH_PRESETS.map((width) => (
-            <button
-              key={width}
-              type="button"
-              aria-label={`宽度 ${width} trit`}
-              className={draft.width === String(width) ? "is-active" : ""}
-              onClick={() =>
-                setDraft((current) => ({ ...current, width: String(width) }))
-              }
+        {MEMORY_TYPES.has(typeId) ? (
+          <>
+            <label className="property-field">
+              <span>存储字宽</span>
+              <input
+                aria-label="存储字宽"
+                type="number"
+                min="1"
+                max="27"
+                step="1"
+                value={draft.wordWidth}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    wordWidth: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label className="property-field">
+              <span>地址宽度</span>
+              <select
+                aria-label="地址宽度"
+                value={draft.addressWidth}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    addressWidth: event.target.value,
+                  }))
+                }
+              >
+                <option value="1">1 trit / 3 字</option>
+                <option value="2">2 trit / 9 字</option>
+                <option value="3">3 trit / 27 字</option>
+              </select>
+            </label>
+            {typeId === "memory.rom" && displayedMemoryDepth > 0 && (
+              <div className="memory-contents-editor">
+                <div className="memory-contents-heading">
+                  <span>地址</span>
+                  <strong>存储内容</strong>
+                </div>
+                <div className="memory-contents-grid">
+                  {Array.from({ length: displayedMemoryDepth }, (_, index) => {
+                    const address = balancedAddress(
+                      index,
+                      displayedAddressWidth,
+                    );
+                    const zeroWord =
+                      Number.isInteger(displayedWordWidth) &&
+                      displayedWordWidth > 0
+                        ? "0".repeat(displayedWordWidth)
+                        : "0";
+                    return (
+                      <label key={address}>
+                        <span>{address}</span>
+                        <input
+                          aria-label={`ROM 地址 ${address}`}
+                          type="text"
+                          spellCheck="false"
+                          value={draft.contents[index] ?? zeroWord}
+                          onChange={(event) =>
+                            setDraft((current) => {
+                              const contents = [...current.contents];
+                              contents[index] = event.target.value;
+                              return { ...current, contents };
+                            })
+                          }
+                        />
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <label className="property-field">
+              <span>信号宽度</span>
+              <input
+                aria-label="信号宽度"
+                type="number"
+                min="1"
+                max="27"
+                step="1"
+                value={draft.width}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    width: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <div
+              className="width-presets"
+              role="group"
+              aria-label="常用信号宽度"
             >
-              {width}
-            </button>
-          ))}
-        </div>
+              {WIDTH_PRESETS.map((width) => (
+                <button
+                  key={width}
+                  type="button"
+                  aria-label={`宽度 ${width} trit`}
+                  className={draft.width === String(width) ? "is-active" : ""}
+                  onClick={() =>
+                    setDraft((current) => ({
+                      ...current,
+                      width: String(width),
+                    }))
+                  }
+                >
+                  {width}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
 
         {typeId === "wiring.tunnel" && (
           <label className="property-field">
@@ -235,11 +386,14 @@ export function PropertyEditor({
                       {!Number.isInteger(displayedMapping[bit]) && (
                         <option value="">-</option>
                       )}
-                      {Array.from({ length: mappingBranchCount }, (_, branch) => (
-                        <option key={branch} value={branch}>
-                          {branch}
-                        </option>
-                      ))}
+                      {Array.from(
+                        { length: mappingBranchCount },
+                        (_, branch) => (
+                          <option key={branch} value={branch}>
+                            {branch}
+                          </option>
+                        ),
+                      )}
                     </select>
                   </label>
                 ))}
@@ -266,7 +420,11 @@ export function PropertyEditor({
           </label>
         )}
 
-        {error && <p className="property-error" role="alert">{error}</p>}
+        {error && (
+          <p className="property-error" role="alert">
+            {error}
+          </p>
+        )}
         <button className="property-apply" type="submit" aria-label="应用属性">
           <Save aria-hidden="true" />
           应用
