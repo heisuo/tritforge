@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>三进制仿真器核心算法图</title>
+<style>body{margin:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;background:#eef2f4;color:#17242b}button{padding:10px 16px;margin:0 8px 18px 0;border:0;border-radius:6px;background:#176f66;color:#fff;font-size:14px;cursor:pointer}button:hover{background:#105a53}.preview{max-width:1600px;background:#fff;border:1px solid #ccd7dc;border-radius:8px;overflow:hidden}.preview svg{display:block;width:100%;height:auto}canvas{display:none}</style>
+</head>
+<body>
+<button onclick="downloadPNG(1)">下载 PNG</button><button onclick="downloadPNG(2)">下载 PNG（2x）</button>
+<div class="preview" id="preview"><svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100" viewBox="0 0 1600 1100">
+  <title>Logsim Ternary 核心仿真算法</title>
+  <desc>展示网页工程经过多 trit 拆分、并查集网络合并和层级展开后，进入 Rust delta-cycle 事件队列传播，并说明一次时钟 Tick 的两相状态更新流程。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#53636d"/>
+    </marker>
+    <marker id="arrow-teal" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#147d74"/>
+    </marker>
+  </defs>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", Arial, sans-serif; letter-spacing: 0; }
+    .title { font-size: 34px; font-weight: 750; fill: #17242b; }
+    .subtitle { font-size: 16px; fill: #5b6b74; }
+    .section { font-size: 17px; font-weight: 750; fill: #23343d; }
+    .box-title { font-size: 18px; font-weight: 750; fill: #18282f; }
+    .box-body { font-size: 14px; fill: #40525c; }
+    .small { font-size: 12px; fill: #61737d; }
+    .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+    .chip { font-size: 12px; font-weight: 700; }
+    .arrow { fill: none; stroke: #53636d; stroke-width: 2.2; marker-end: url(#arrow); }
+    .arrow-teal { fill: none; stroke: #147d74; stroke-width: 2.4; marker-end: url(#arrow-teal); }
+    .loop { fill: none; stroke: #147d74; stroke-width: 2.2; stroke-dasharray: 7 6; marker-end: url(#arrow-teal); }
+  </style>
+
+  <rect width="1600" height="1100" fill="#f7f9fa"/>
+  <rect x="0" y="0" width="1600" height="92" fill="#ffffff"/>
+  <line x1="0" y1="92" x2="1600" y2="92" stroke="#d7e0e4"/>
+  <text x="52" y="48" class="title">三进制仿真器：从电路图到稳定结果</text>
+  <text x="52" y="75" class="subtitle">核心 = 拓扑编译（Union-Find） + 增量事件传播（delta-cycle） + 同步状态提交</text>
+  <rect x="1320" y="28" width="228" height="40" rx="6" fill="#e7f4ef" stroke="#8abeb0"/>
+  <text x="1434" y="53" text-anchor="middle" class="chip" fill="#12695f">Rust / WebAssembly 唯一语义源</text>
+
+  <!-- Compile stage -->
+  <text x="42" y="126" class="section">① 编译阶段：把“画出来的电路”变成可计算的标量网络</text>
+  <rect x="32" y="144" width="1536" height="284" rx="8" fill="#ffffff" stroke="#cbd6db"/>
+
+  <rect x="58" y="178" width="240" height="204" rx="7" fill="#eaf3f8" stroke="#8bb6ca" stroke-width="1.5"/>
+  <rect x="76" y="195" width="84" height="25" rx="4" fill="#d4e8f2"/>
+  <text x="118" y="212" text-anchor="middle" class="chip" fill="#245e79">React 网页</text>
+  <text x="78" y="252" class="box-title">Project v3 工程</text>
+  <text x="78" y="281" class="box-body">元件、端口、导线</text>
+  <text x="78" y="305" class="box-body">模块实例与属性</text>
+  <text x="78" y="329" class="box-body">1～27 trit 信号宽度</text>
+  <text x="78" y="353" class="small">坐标、旋转仅用于显示</text>
+
+  <path d="M298 280 H347" class="arrow"/>
+
+  <rect x="348" y="166" width="620" height="238" rx="7" fill="#fff9e7" stroke="#d2af52" stroke-width="1.5"/>
+  <text x="372" y="198" class="box-title">Rust 拓扑编译器</text>
+
+  <rect x="372" y="220" width="174" height="140" rx="6" fill="#ffffff" stroke="#dfc981"/>
+  <circle cx="393" cy="244" r="12" fill="#f3cf63"/>
+  <text x="393" y="249" text-anchor="middle" class="chip" fill="#4c3b0a">A</text>
+  <text x="414" y="249" class="box-title" font-size="16">逐位拆分</text>
+  <text x="390" y="279" class="box-body mono">1T0 → bit2/1/0</text>
+  <text x="390" y="304" class="box-body">每个 trit 独立传播</text>
+  <text x="390" y="329" class="small">最后再组合成字</text>
+
+  <rect x="570" y="220" width="174" height="140" rx="6" fill="#ffffff" stroke="#dfc981"/>
+  <circle cx="591" cy="244" r="12" fill="#f3cf63"/>
+  <text x="591" y="249" text-anchor="middle" class="chip" fill="#4c3b0a">B</text>
+  <text x="612" y="249" class="box-title" font-size="16">网络合并</text>
+  <text x="588" y="279" class="box-body">Wire / Junction</text>
+  <text x="588" y="304" class="box-body">同名 Tunnel</text>
+  <text x="588" y="329" class="small">Union-Find 并查集</text>
+
+  <rect x="768" y="220" width="174" height="140" rx="6" fill="#ffffff" stroke="#dfc981"/>
+  <circle cx="789" cy="244" r="12" fill="#f3cf63"/>
+  <text x="789" y="249" text-anchor="middle" class="chip" fill="#4c3b0a">C</text>
+  <text x="810" y="249" class="box-title" font-size="16">层级展开</text>
+  <text x="786" y="279" class="box-body">递归展开模块实例</text>
+  <text x="786" y="304" class="box-body">生成唯一实例路径</text>
+  <text x="786" y="329" class="small">每个实例状态独立</text>
+
+  <rect x="1006" y="178" width="270" height="204" rx="7" fill="#e9f6f2" stroke="#79b8a8" stroke-width="1.5"/>
+  <text x="1030" y="213" class="box-title">扁平标量电路</text>
+  <text x="1030" y="244" class="box-body mono">primitive components</text>
+  <text x="1030" y="269" class="box-body mono">scalar connections</text>
+  <text x="1030" y="294" class="box-body mono">driver → consumer</text>
+  <line x1="1030" y1="314" x2="1250" y2="314" stroke="#b9d8cf"/>
+  <text x="1030" y="341" class="small">不包含画布坐标和视觉布线</text>
+  <text x="1030" y="363" class="small">只保留真正影响逻辑的结构</text>
+  <path d="M968 280 H1006" class="arrow"/>
+
+  <rect x="1313" y="178" width="225" height="204" rx="7" fill="#f4f0fa" stroke="#aa91c2" stroke-width="1.5"/>
+  <text x="1337" y="213" class="box-title">编译溯源表</text>
+  <text x="1337" y="245" class="box-body">扁平端口 ↔ 原始端口</text>
+  <text x="1337" y="270" class="box-body">标量位 ↔ 多-trit 字</text>
+  <text x="1337" y="295" class="box-body">内部实例 ↔ 模块路径</text>
+  <text x="1337" y="335" class="small">用于把结果和错误</text>
+  <text x="1337" y="357" class="small">投影回当前画布</text>
+  <path d="M1276 280 H1313" class="arrow"/>
+
+  <!-- Runtime stage -->
+  <text x="42" y="468" class="section">② 运行阶段：只传播真正发生变化的部分</text>
+  <rect x="32" y="486" width="1536" height="358" rx="8" fill="#ffffff" stroke="#cbd6db"/>
+
+  <rect x="58" y="530" width="190" height="108" rx="7" fill="#eaf3f8" stroke="#8bb6ca"/>
+  <text x="82" y="563" class="box-title">变化入口</text>
+  <text x="82" y="592" class="box-body">输入值改变</text>
+  <text x="82" y="617" class="box-body">Clock / Q / RAM 改变</text>
+
+  <path d="M248 584 H296" class="arrow"/>
+
+  <rect x="296" y="530" width="190" height="108" rx="7" fill="#edf7f4" stroke="#79b8a8" stroke-width="1.5"/>
+  <text x="320" y="563" class="box-title">事件队列</text>
+  <text x="320" y="592" class="box-body mono">VecDeque&lt;component&gt;</text>
+  <text x="320" y="617" class="small">同一元件只排队一次</text>
+
+  <path d="M486 584 H534" class="arrow-teal"/>
+
+  <rect x="534" y="518" width="230" height="132" rx="7" fill="#edf7f4" stroke="#79b8a8" stroke-width="1.5"/>
+  <text x="558" y="551" class="box-title">计算一个元件</text>
+  <text x="558" y="580" class="box-body mono">output = evaluate(inputs)</text>
+  <text x="558" y="607" class="box-body">NEG / MIN / MUX / 加法器</text>
+  <text x="558" y="632" class="small">输出未变化则传播到此结束</text>
+
+  <path d="M764 584 H817" class="arrow-teal"/>
+
+  <path d="M892 518 L967 584 L892 650 L817 584 Z" fill="#fff9e7" stroke="#d2af52" stroke-width="1.5"/>
+  <text x="892" y="577" text-anchor="middle" class="box-title" font-size="16">输出变化？</text>
+  <text x="892" y="603" text-anchor="middle" class="small">比较前后值</text>
+
+  <path d="M967 584 H1015" class="arrow-teal"/>
+  <text x="984" y="568" class="chip" fill="#147d74">是</text>
+
+  <rect x="1015" y="518" width="238" height="132" rx="7" fill="#fff1ee" stroke="#c9897b" stroke-width="1.5"/>
+  <text x="1039" y="551" class="box-title">解析下游网络</text>
+  <text x="1039" y="580" class="box-body">聚合所有驱动：T/0/1/X/Z/E</text>
+  <text x="1039" y="607" class="box-body">异值驱动冲突 → E</text>
+  <text x="1039" y="632" class="small">Z 被忽略；无驱动保持 Z</text>
+
+  <path d="M1253 584 H1301" class="arrow-teal"/>
+
+  <rect x="1301" y="530" width="215" height="108" rx="7" fill="#edf7f4" stroke="#79b8a8" stroke-width="1.5"/>
+  <text x="1325" y="563" class="box-title">下游重新入队</text>
+  <text x="1325" y="592" class="box-body">仅输入网络变化时</text>
+  <text x="1325" y="617" class="small">继续下一轮 delta-cycle</text>
+
+  <path d="M1408 638 V685 H391 V638" class="loop"/>
+  <text x="927" y="708" text-anchor="middle" class="small" fill="#147d74">循环，直到队列为空</text>
+
+  <path d="M892 650 V747 H1012" class="arrow"/>
+  <text x="907" y="682" class="chip" fill="#596a74">否</text>
+  <rect x="1012" y="724" width="242" height="88" rx="7" fill="#e7f4ef" stroke="#68a997" stroke-width="1.5"/>
+  <text x="1036" y="757" class="box-title">稳定固定点</text>
+  <text x="1036" y="784" class="box-body">队列为空，stable = true</text>
+  <path d="M1254 768 H1301" class="arrow"/>
+  <rect x="1301" y="724" width="215" height="88" rx="7" fill="#f4f0fa" stroke="#aa91c2" stroke-width="1.5"/>
+  <text x="1325" y="757" class="box-title">重组并投影</text>
+  <text x="1325" y="784" class="box-body mono">bits → 1T0 → Web</text>
+
+  <rect x="58" y="724" width="374" height="88" rx="7" fill="#fff1ee" stroke="#c9897b"/>
+  <text x="82" y="755" class="box-title">组合环路保护</text>
+  <text x="82" y="782" class="box-body">事件超限 → 输出 E + 非收敛诊断</text>
+  <text x="82" y="803" class="small mono">max(1024, 64 × (components + connections))</text>
+
+  <!-- Tick stage -->
+  <text x="42" y="884" class="section">③ 一次 Tick：所有时序元件读取旧状态，并同时提交新状态</text>
+  <rect x="32" y="902" width="1536" height="154" rx="8" fill="#ffffff" stroke="#cbd6db"/>
+
+  <rect x="58" y="936" width="202" height="84" rx="7" fill="#eaf3f8" stroke="#8bb6ca"/>
+  <text x="159" y="969" text-anchor="middle" class="box-title">CLK：0 → 1</text>
+  <text x="159" y="995" text-anchor="middle" class="small">先传播到稳定</text>
+  <path d="M260 978 H300" class="arrow"/>
+
+  <rect x="300" y="936" width="270" height="84" rx="7" fill="#fff9e7" stroke="#d2af52"/>
+  <text x="435" y="969" text-anchor="middle" class="box-title">批量计算 next state</text>
+  <text x="435" y="995" text-anchor="middle" class="small">读取旧 Q、D、EN、RST 与 RAM 控制</text>
+  <path d="M570 978 H610" class="arrow"/>
+
+  <rect x="610" y="936" width="250" height="84" rx="7" fill="#fff1ee" stroke="#c9897b"/>
+  <text x="735" y="969" text-anchor="middle" class="box-title">同时提交状态</text>
+  <text x="735" y="995" text-anchor="middle" class="small">全部 DFF / RAM 一起更新</text>
+  <path d="M860 978 H900" class="arrow"/>
+
+  <rect x="900" y="936" width="250" height="84" rx="7" fill="#edf7f4" stroke="#79b8a8"/>
+  <text x="1025" y="969" text-anchor="middle" class="box-title">传播新 Q / RAM 输出</text>
+  <text x="1025" y="995" text-anchor="middle" class="small">再次运行 delta-cycle 至稳定</text>
+  <path d="M1150 978 H1190" class="arrow"/>
+
+  <rect x="1190" y="936" width="326" height="84" rx="7" fill="#e7f4ef" stroke="#68a997"/>
+  <text x="1353" y="969" text-anchor="middle" class="box-title">CLK：1 → 0，Tick + 1</text>
+  <text x="1353" y="995" text-anchor="middle" class="small">下降沿传播后返回低电平稳定快照</text>
+
+  <text x="800" y="1084" text-anchor="middle" class="small">功能级仿真：没有纳秒延迟、模拟电压和建立保持时间；结果表示逻辑正确性，而非物理时序。</text>
+</svg>
+</div>
+<canvas id="canvas"></canvas>
+<script>function downloadPNG(scale){const svgEl=document.querySelector("#preview svg");const data=new XMLSerializer().serializeToString(svgEl);const blob=new Blob([data],{type:"image/svg+xml;charset=utf-8"});const url=URL.createObjectURL(blob);const canvas=document.getElementById("canvas");const ctx=canvas.getContext("2d");const img=new Image();img.onload=()=>{canvas.width=1600*scale;canvas.height=1100*scale;ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(img,0,0,canvas.width,canvas.height);const link=document.createElement("a");link.download="ternary-simulator-core-algorithm.png";link.href=canvas.toDataURL("image/png");link.click();URL.revokeObjectURL(url)};img.src=url}</script>
+</body>
+</html>
