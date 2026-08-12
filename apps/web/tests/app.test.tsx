@@ -1000,6 +1000,21 @@ describe("App", () => {
     ).toHaveClass("wiring-node-shell");
   });
 
+  it("assigns sequential local names to newly placed tunnels", async () => {
+    const { container } = render(<App />);
+    await screen.findByText(/层级模拟器已就绪/);
+
+    fireEvent.click(screen.getByRole("button", { name: /添加隧道/ }));
+    fireEvent.click(screen.getByRole("button", { name: /添加隧道/ }));
+    fireEvent.click(screen.getByRole("button", { name: /添加隧道/ }));
+
+    expect(
+      Array.from(container.querySelectorAll(".wiring-tunnel strong")).map(
+        (element) => element.textContent,
+      ),
+    ).toEqual(["tunnel0", "tunnel1", "tunnel2"]);
+  });
+
   it("edits a selected width-aware source atomically and displays word widths", async () => {
     render(<App />);
     await screen.findByText(/层级模拟器已就绪/);

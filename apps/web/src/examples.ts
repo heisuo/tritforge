@@ -23,6 +23,7 @@ export type ExampleId =
   | "full-adder"
   | "hierarchical-adder"
   | "ripple-adder-3"
+  | "tunnel-basics"
   | "bus-tunnel-3"
   | "driver-conflict"
   | "sequential-dff"
@@ -391,6 +392,71 @@ export const EXAMPLES: TernaryExample[] = [
         edge("b2-fa2", "b2", "out", "fa2", "b"),
         edge("fa2-s2", "fa2", "sum", "s2", "in"),
         edge("fa2-cout", "fa2", "carry", "cout", "in"),
+      ],
+    },
+  },
+  {
+    id: "tunnel-basics",
+    name: "Tunnel 隔空连线入门",
+    category: "基础布线",
+    description:
+      "两个名称相同的 Tunnel 属于同一条本地网络，可以省略画布中间的长导线。",
+    composition: "Input → tunnel0   tunnel0 → Probe",
+    expected: "两个 Tunnel 之间没有直接导线，但 Probe 输出 1。",
+    lessons: [
+      {
+        title: "同名即连接",
+        text: "发送端和接收端都叫 tunnel0，因此它们在当前电路内属于同一网络。",
+      },
+      {
+        title: "名称可以修改",
+        text: "新放置的隧道会自动命名为 tunnel0、tunnel1……需要连接时，在属性栏把两个隧道改成相同名称。",
+      },
+      {
+        title: "只在本地生效",
+        text: "Tunnel 名称不会跨越子电路边界；不同模块中的同名 Tunnel 不会自动连接。",
+      },
+    ],
+    document: {
+      nodes: [
+        node("tunnel-input", "source.trit_input", "输入 1", 90, 180, "1"),
+        {
+          id: "tunnel-send",
+          type: "component",
+          position: { x: 390, y: 180 },
+          data: {
+            typeId: "wiring.tunnel",
+            label: "tunnel0",
+            properties: { width: 1 },
+          },
+        },
+        {
+          id: "tunnel-receive",
+          type: "component",
+          position: { x: 650, y: 390 },
+          data: {
+            typeId: "wiring.tunnel",
+            label: "tunnel0",
+            properties: { width: 1 },
+          },
+        },
+        node("tunnel-probe", "sink.probe", "隔空输出", 950, 390),
+      ],
+      edges: [
+        edge(
+          "input-to-tunnel",
+          "tunnel-input",
+          "out",
+          "tunnel-send",
+          "net",
+        ),
+        edge(
+          "tunnel-to-probe",
+          "tunnel-receive",
+          "net",
+          "tunnel-probe",
+          "in",
+        ),
       ],
     },
   },

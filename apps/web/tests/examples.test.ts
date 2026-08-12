@@ -38,6 +38,7 @@ describe("example library", () => {
       "full-adder",
       "hierarchical-adder",
       "ripple-adder-3",
+      "tunnel-basics",
       "bus-tunnel-3",
       "driver-conflict",
       "sequential-dff",
@@ -45,6 +46,30 @@ describe("example library", () => {
       "memory-lab",
       "counter3",
     ]);
+  });
+
+  it("teaches a disconnected same-name tunnel pair", () => {
+    const example = EXAMPLES.find((item) => item.id === "tunnel-basics")!;
+    const tunnels = example.document.nodes.filter(
+      (node) => node.data.typeId === "wiring.tunnel",
+    );
+
+    expect(tunnels.map((node) => node.data.label)).toEqual([
+      "tunnel0",
+      "tunnel0",
+    ]);
+    expect(example.document.edges).toEqual([
+      expect.objectContaining({ source: "tunnel-input", target: "tunnel-send" }),
+      expect.objectContaining({ source: "tunnel-receive", target: "tunnel-probe" }),
+    ]);
+    expect(
+      example.document.edges.some(
+        (edge) =>
+          new Set([edge.source, edge.target]).has("tunnel-send") &&
+          new Set([edge.source, edge.target]).has("tunnel-receive"),
+      ),
+    ).toBe(false);
+    expect(example.expected).toMatch(/没有直接导线.*输出 1/);
   });
 
   it("defines a runnable 3-trit Memory Lab around one shared address bus", () => {

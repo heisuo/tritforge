@@ -67,6 +67,41 @@ test("real WASM reassembles 1T0 through scalar branches and a local tunnel", asy
   });
 });
 
+test("loads the basic same-name Tunnel lesson", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const consoleErrors = watchConsoleErrors(page);
+  await page.goto("/");
+  await expect(page.getByText("WASM v3")).toBeVisible();
+  await page.getByRole("button", { name: "清空" }).click();
+  for (let index = 0; index < 3; index += 1) {
+    await page.getByRole("button", { name: "添加隧道" }).click();
+  }
+  await expect(page.locator(".wiring-tunnel strong")).toHaveText([
+    "tunnel0",
+    "tunnel1",
+    "tunnel2",
+  ]);
+  await page.getByRole("button", { name: "示例库" }).click();
+  await page
+    .getByRole("button", { name: "载入示例：Tunnel 隔空连线入门" })
+    .click();
+
+  await expect(node(page, "tunnel-probe").locator(".node-signal")).toHaveText(
+    "1",
+  );
+  await expect(page.locator(".wiring-tunnel strong")).toHaveText([
+    "tunnel0",
+    "tunnel0",
+  ]);
+  await expect(page.locator(".react-flow__edge")).toHaveCount(2);
+  await expect(page.getByText("同名即连接")).toBeVisible();
+  await page.screenshot({
+    path: "test-results/tunnel-basics-1440x900.png",
+    fullPage: true,
+  });
+  expect(consoleErrors).toEqual([]);
+});
+
 test("desktop loads the editable lesson without node or page overlap", async ({
   page,
 }) => {

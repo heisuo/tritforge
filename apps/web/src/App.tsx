@@ -292,6 +292,17 @@ function nextId(stem: string, used: string[]): string {
   return `${stem}-${suffix}`;
 }
 
+function nextTunnelLabel(nodes: EditorNode[]): string {
+  const used = new Set(
+    nodes
+      .filter((node) => node.data.typeId === "wiring.tunnel")
+      .map((node) => node.data.label),
+  );
+  let suffix = 0;
+  while (used.has(`tunnel${suffix}`)) suffix += 1;
+  return `tunnel${suffix}`;
+}
+
 function connectionRejectionMessage(
   result: Exclude<ConnectionValidationResult, { valid: true }>,
 ): string {
@@ -1062,7 +1073,9 @@ function Workbench() {
             : { x: 420, y: 280 };
       }
       const id = makeComponentId(typeId, nodes);
-      const label = DISPLAY_NAMES[typeId] ?? descriptor.display_name;
+      const displayLabel = DISPLAY_NAMES[typeId] ?? descriptor.display_name;
+      const label =
+        typeId === "wiring.tunnel" ? nextTunnelLabel(nodes) : displayLabel;
       try {
         store.getState().addComponent(activeCircuitId, {
           id,
@@ -1087,7 +1100,7 @@ function Workbench() {
         ]);
         setSelectedNodeId(id);
         setSelectedEdgeIds([]);
-        setStatusMessage(`已添加${label}`);
+        setStatusMessage(`已添加${displayLabel}`);
       } catch (error) {
         editFailure("元件添加失败", error);
       }
