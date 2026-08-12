@@ -214,6 +214,28 @@ describe("project document v3", () => {
     ).toBe(serialized);
   });
 
+  it("round-trips editor-only component rotation", () => {
+    const project = v3Project();
+    project.circuits[0].components[0].rotation = 90;
+
+    const parsed = parseProjectDocumentV3(
+      serializeProjectDocumentV3(project),
+    );
+
+    expect(parsed.circuits[0].components[0].rotation).toBe(90);
+  });
+
+  it("rejects unsupported component rotation", () => {
+    const project = v3Project() as unknown as {
+      circuits: Array<{ components: Array<Record<string, unknown>> }>;
+    };
+    project.circuits[0].components[0].rotation = 45;
+
+    expect(() => parseProjectDocumentV3(JSON.stringify(project))).toThrow(
+      /rotation/i,
+    );
+  });
+
   it("preserves native v3 width-aware properties without interpreting them", () => {
     const project = v3Project();
     project.circuits[0].components[0].properties = {

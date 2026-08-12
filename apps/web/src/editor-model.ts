@@ -5,6 +5,7 @@ import {
 } from "./editor/port-handles";
 import type { WireLaneAssignment, WireObstacle } from "./wire-routing";
 import type { CanvasDisplayMode } from "./canvas-display";
+import type { NodeRotation } from "./editor/node-rotation";
 
 export type KnownTrit = "T" | "0" | "1";
 export type TritSymbol = KnownTrit | "X" | "Z" | "E";
@@ -89,6 +90,7 @@ export interface ComponentNodeData extends Record<string, unknown> {
   inputWords?: Record<string, TernaryWord>;
   outputWords?: Record<string, TernaryWord>;
   canvasDisplayMode?: CanvasDisplayMode;
+  rotation?: NodeRotation;
 }
 
 export type EditorNode = Node<ComponentNodeData, "component">;

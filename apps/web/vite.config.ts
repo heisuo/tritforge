@@ -16,6 +16,7 @@ export default defineConfig({
       "tests/chronogram.spec.ts",
       "tests/memory-lab.spec.ts",
       "tests/counter3.spec.ts",
+      "tests/node-context-menu.spec.ts",
       "node_modules/**",
       "dist/**",
     ],

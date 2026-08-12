@@ -314,7 +314,7 @@ test("keeps 27 splitter branches and a 27-trit word inside stable node bounds", 
   await page.getByRole("button", { name: "清空" }).click();
   await place(page, "Trit Input", { x: 120, y: 180 });
   await place(page, "分线器", { x: 430, y: 110 });
-  await place(page, "Probe", { x: 820, y: 650 });
+  await place(page, "Probe", { x: 820, y: 500 });
 
   const word = "1T0".repeat(9);
   await node(page, "trit-input-1").click();

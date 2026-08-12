@@ -51,6 +51,25 @@ describe("v3 editor projection", () => {
     });
   });
 
+  it("projects component rotation into editor node data", () => {
+    const rotated = {
+      ...circuit,
+      components: circuit.components.map((component, index) =>
+        index === 0 ? { ...component, rotation: 90 as const } : component,
+      ),
+    };
+
+    const editor = projectToEditor(rotated, (componentId) =>
+      componentId === "z-source"
+        ? [{ id: "out", direction: "output", width: 1 }]
+        : [{ id: "in", direction: "input", width: 1 }],
+    );
+
+    expect(editor.nodes.find((node) => node.id === "z-source")?.data.rotation).toBe(
+      90,
+    );
+  });
+
   it("labels a wire from the resolved net instead of the raw driver", () => {
     const editor = projectToEditor(circuit, (componentId) =>
       componentId === "z-source"

@@ -5,11 +5,13 @@ import type {
   TernaryWord,
 } from "../editor-model";
 import { semanticPortIdForHandle } from "./port-handles";
+import { isNodeRotation, type NodeRotation } from "./node-rotation";
 
 export interface EditorComponent {
   id: string;
   typeId: string;
   position: { x: number; y: number };
+  rotation?: NodeRotation;
   properties: Record<string, unknown>;
 }
 
@@ -40,6 +42,7 @@ const COMPONENT_KEYS = new Set([
   "id",
   "typeId",
   "position",
+  "rotation",
   "properties",
 ]);
 const CONNECTION_KEYS = new Set([
@@ -86,6 +89,9 @@ export function fromEditorDocument(
       id: node.id,
       typeId: node.data.typeId,
       position: { ...node.position },
+      ...(node.data.rotation === undefined
+        ? {}
+        : { rotation: node.data.rotation }),
       properties: {
         ...node.data.properties,
         label: node.data.label,
@@ -133,6 +139,9 @@ export function toEditorDocument(document: CircuitDocument): EditorDocument {
       position: { ...component.position },
       data: {
         typeId: component.typeId,
+        ...(component.rotation === undefined
+          ? {}
+          : { rotation: component.rotation }),
         label:
           typeof label === "string" && label.length > 0
             ? label
@@ -204,6 +213,9 @@ function componentAt(value: unknown, index: number): EditorComponent {
   const component = recordAt(value, path);
   assertAllowedKeys(component, COMPONENT_KEYS, path);
   const properties = recordAt(component.properties, `${path}.properties`);
+  if (component.rotation !== undefined && !isNodeRotation(component.rotation)) {
+    throw new Error(`${path}.rotation must be 0, 90, 180, or 270`);
+  }
   knownWordAt(properties.value, `${path}.properties.value`);
   knownWordAt(properties.previewValue, `${path}.properties.previewValue`);
   if (
@@ -216,6 +228,9 @@ function componentAt(value: unknown, index: number): EditorComponent {
     id: stringAt(component.id, `${path}.id`),
     typeId: stringAt(component.typeId, `${path}.typeId`),
     position: pointAt(component.position, `${path}.position`),
+    ...(component.rotation === undefined
+      ? {}
+      : { rotation: component.rotation }),
     properties: { ...properties },
   };
 }

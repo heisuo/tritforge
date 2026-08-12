@@ -789,7 +789,7 @@ describe("project v3 store", () => {
     expect(store.getState().selectionByCircuit).toEqual({});
   });
 
-  it("caches Rust port shapes and skips semantic resolution for position-only edits", () => {
+  it("skips semantic resolution for position and rotation-only edits", () => {
     const base = resolver();
     const tracked: ProjectStorePortResolver = {
       resolvePorts: vi.fn(base.resolvePorts),
@@ -815,6 +815,7 @@ describe("project v3 store", () => {
       components: circuit.components.map((item, index) => ({
         ...item,
         position: { x: index * 100 + 12, y: 34 },
+        rotation: index === 0 ? (90 as const) : (270 as const),
       })),
       wires: circuit.wires,
     });

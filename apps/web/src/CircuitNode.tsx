@@ -21,6 +21,11 @@ import type {
   TritSymbol,
 } from "./editor-model";
 import { editorHandleId } from "./editor/port-handles";
+import {
+  rotatedSide,
+  type NodeRotation,
+  type NodeSide,
+} from "./editor/node-rotation";
 import { formatCanvasWord, type CanvasDisplayMode } from "./canvas-display";
 
 const SIGNAL_COLORS: Record<TritSymbol, string> = {
@@ -111,7 +116,35 @@ function ComponentIcon({ typeId }: { typeId: string }) {
   return <CircleDot aria-hidden="true" />;
 }
 
+function flowPosition(side: NodeSide): Position {
+  if (side === "top") return Position.Top;
+  if (side === "right") return Position.Right;
+  if (side === "bottom") return Position.Bottom;
+  return Position.Left;
+}
+
+function portRowStyle(
+  side: NodeSide,
+  index: number,
+  count: number,
+): React.CSSProperties {
+  const offset = `${((index + 1) / (count + 1)) * 100}%`;
+  return side === "left" || side === "right"
+    ? { top: offset }
+    : { left: offset };
+}
+
+function wiringPortStyle(side: NodeSide): React.CSSProperties {
+  if (side === "right") return { right: -8, left: "auto", top: "50%" };
+  if (side === "top") return { top: -8, left: "50%" };
+  if (side === "bottom") {
+    return { top: "auto", bottom: -8, left: "50%" };
+  }
+  return { left: -8, top: "50%" };
+}
+
 export function CircuitNode({ id, data, selected }: NodeProps<EditorNode>) {
+  const rotation = data.rotation ?? 0;
   const displayMode = data.canvasDisplayMode ?? "balanced";
   const inputs: Record<string, TernaryWord> = {
     ...(data.inputSignals ?? {}),
@@ -133,12 +166,16 @@ export function CircuitNode({ id, data, selected }: NodeProps<EditorNode>) {
         inputs={inputs}
         outputs={outputs}
         displayMode={displayMode}
+        rotation={rotation}
         selected={selected}
       />
     );
   }
   const inputPorts = ports.filter((port) => port.direction !== "output");
   const outputPorts = ports.filter((port) => port.direction !== "input");
+  const inputSide = rotatedSide("left", rotation);
+  const outputSide = rotatedSide("right", rotation);
+  const quarterTurn = rotation === 90 || rotation === 270;
   const registerWord =
     data.typeId === "project.module_instance" &&
     data.properties?.moduleId === "register3"
@@ -167,7 +204,7 @@ export function CircuitNode({ id, data, selected }: NodeProps<EditorNode>) {
 
   return (
     <div
-      className={`circuit-node signal-${primarySignal} ${
+      className={`circuit-node rotation-${rotation} signal-${primarySignal} ${
         data.typeId.startsWith("project.module_") ? "is-project-node" : ""
       } ${
         data.typeId === "source.clock" || data.typeId === "sequential.dff"
@@ -175,7 +212,18 @@ export function CircuitNode({ id, data, selected }: NodeProps<EditorNode>) {
           : ""
       } ${selected ? "is-selected" : ""}`}
       style={
-        { "--signal-color": signalColor(displaySignal) } as React.CSSProperties
+        {
+          "--signal-color": signalColor(displaySignal),
+          ...(quarterTurn
+            ? {
+                width: Math.max(
+                  156,
+                  Math.max(inputPorts.length, outputPorts.length) * 46,
+                ),
+                minHeight: 156,
+              }
+            : {}),
+        } as React.CSSProperties
       }
     >
       <div className="node-heading">
@@ -196,17 +244,15 @@ export function CircuitNode({ id, data, selected }: NodeProps<EditorNode>) {
         const shown = formatCanvasWord(signal, displayMode);
         return (
           <div
-            className="port-row port-row-input"
+            className={`port-row port-row-input port-side-${inputSide}`}
             key={port.id}
-            style={{
-              top: `${((index + 1) / (inputPorts.length + 1)) * 100}%`,
-            }}
+            style={portRowStyle(inputSide, index, inputPorts.length)}
           >
             <Handle
               id={editorHandleId(port.id, "target")}
               data-testid={`handle-${id}-input-${port.id}`}
               type="target"
-              position={Position.Left}
+              position={flowPosition(inputSide)}
               style={{ backgroundColor: signalColor(signal) }}
             />
             {port.direction === "input" && (
@@ -214,7 +260,7 @@ export function CircuitNode({ id, data, selected }: NodeProps<EditorNode>) {
                 id={editorHandleId(port.id, "source")}
                 data-testid={`handle-${id}-output-${port.id}`}
                 type="source"
-                position={Position.Left}
+                position={flowPosition(inputSide)}
                 style={{
                   backgroundColor: signalColor(signal),
                   opacity: 0,
@@ -241,11 +287,9 @@ export function CircuitNode({ id, data, selected }: NodeProps<EditorNode>) {
         const shown = formatCanvasWord(signal, displayMode);
         return (
           <div
-            className="port-row port-row-output"
+            className={`port-row port-row-output port-side-${outputSide}`}
             key={port.id}
-            style={{
-              top: `${((index + 1) / (outputPorts.length + 1)) * 100}%`,
-            }}
+            style={portRowStyle(outputSide, index, outputPorts.length)}
           >
             <b
               style={{
@@ -261,7 +305,7 @@ export function CircuitNode({ id, data, selected }: NodeProps<EditorNode>) {
               id={editorHandleId(port.id, "source")}
               data-testid={`handle-${id}-output-${port.id}`}
               type="source"
-              position={Position.Right}
+              position={flowPosition(outputSide)}
               style={{ backgroundColor: signalColor(signal) }}
             />
             {port.direction === "output" && (
@@ -269,7 +313,7 @@ export function CircuitNode({ id, data, selected }: NodeProps<EditorNode>) {
                 id={editorHandleId(port.id, "target")}
                 data-testid={`handle-${id}-input-${port.id}`}
                 type="target"
-                position={Position.Right}
+                position={flowPosition(outputSide)}
                 style={{
                   backgroundColor: signalColor(signal),
                   opacity: 0,
@@ -293,6 +337,7 @@ interface WiringNodeProps {
   inputs: Record<string, TernaryWord>;
   outputs: Record<string, TernaryWord>;
   displayMode: CanvasDisplayMode;
+  rotation: NodeRotation;
   selected: boolean;
 }
 
@@ -318,7 +363,18 @@ function InOutPort({
         position={position}
         aria-label={accessibleName}
         title={accessibleName}
-        style={{ backgroundColor: signalColor(signal) }}
+        style={{
+          backgroundColor: signalColor(signal),
+          ...wiringPortStyle(
+            position === Position.Top
+              ? "top"
+              : position === Position.Right
+                ? "right"
+                : position === Position.Bottom
+                  ? "bottom"
+                  : "left",
+          ),
+        }}
       />
       <Handle
         id={editorHandleId(port.id, "source")}
@@ -327,7 +383,18 @@ function InOutPort({
         position={position}
         aria-label={accessibleName}
         title={accessibleName}
-        style={{ backgroundColor: signalColor(signal) }}
+        style={{
+          backgroundColor: signalColor(signal),
+          ...wiringPortStyle(
+            position === Position.Top
+              ? "top"
+              : position === Position.Right
+                ? "right"
+                : position === Position.Bottom
+                  ? "bottom"
+                  : "left",
+          ),
+        }}
       />
     </>
   );
@@ -342,6 +409,7 @@ function WiringNode({
   inputs,
   outputs,
   displayMode,
+  rotation,
   selected,
 }: WiringNodeProps) {
   const signal = (port: CatalogPort) => signalForPort(port, inputs, outputs);
@@ -349,19 +417,21 @@ function WiringNode({
   const branches = ports.filter((port) => port.id.startsWith("branch"));
   const net = ports.find((port) => port.id === "net");
   const width = trunk?.width ?? net?.width ?? 1;
+  const inputSide = rotatedSide("left", rotation);
+  const outputSide = rotatedSide("right", rotation);
 
   if (typeId === "wiring.junction" && net) {
     const value = signal(net);
     return (
       <div
-        className={`wiring-junction ${selected ? "is-selected" : ""}`}
+        className={`wiring-junction rotation-${rotation} ${selected ? "is-selected" : ""}`}
         style={{ "--signal-color": signalColor(value) } as React.CSSProperties}
         aria-label={`${label} ${width}t ${value}`}
       >
         <InOutPort
           nodeId={id}
           port={net}
-          position={Position.Left}
+          position={flowPosition(inputSide)}
           signal={value}
         />
         <span className="junction-dot" />
@@ -375,7 +445,7 @@ function WiringNode({
     const tunnelLabel = String(properties.label ?? label);
     return (
       <div
-        className={`wiring-tunnel ${selected ? "is-selected" : ""}`}
+        className={`wiring-tunnel rotation-${rotation} ${selected ? "is-selected" : ""}`}
         style={
           {
             "--signal-color": signalColor(value),
@@ -386,7 +456,7 @@ function WiringNode({
         <InOutPort
           nodeId={id}
           port={net}
-          position={Position.Left}
+          position={flowPosition(inputSide)}
           signal={value}
         />
         <Cable aria-hidden="true" />
@@ -415,19 +485,33 @@ function WiringNode({
 
   return (
     <div
-      className={`wiring-splitter ${selected ? "is-selected" : ""}`}
-      style={{ height: splitterHeight, width: splitterWidth }}
+      className={`wiring-splitter rotation-${rotation} ${selected ? "is-selected" : ""}`}
+      style={{
+        height:
+          rotation === 90 || rotation === 270 ? splitterWidth : splitterHeight,
+        width:
+          rotation === 90 || rotation === 270
+            ? Math.max(splitterHeight, 150)
+            : splitterWidth,
+      }}
     >
       <div className="splitter-title">
         <GitFork aria-hidden="true" />
         <strong>{label}</strong>
       </div>
       {trunk && (
-        <div className="splitter-trunk" style={{ top: trunkTop }}>
+        <div
+          className={`splitter-trunk splitter-port-side-${inputSide}`}
+          style={
+            inputSide === "left" || inputSide === "right"
+              ? { top: trunkTop }
+              : { left: "50%" }
+          }
+        >
           <InOutPort
             nodeId={id}
             port={trunk}
-            position={Position.Left}
+            position={flowPosition(inputSide)}
             signal={signal(trunk)}
           />
           <span>trunk</span>
@@ -446,9 +530,15 @@ function WiringNode({
       <div className="splitter-bar" />
       {branches.map((port, index) => (
         <div
-          className="splitter-branch"
+          className={`splitter-branch splitter-port-side-${outputSide}`}
           key={port.id}
-          style={{ top: branchTop + index * branchGap }}
+          style={
+            outputSide === "left" || outputSide === "right"
+              ? { top: branchTop + index * branchGap }
+              : {
+                  left: `${((index + 1) / (branches.length + 1)) * 100}%`,
+                }
+          }
         >
           <b
             style={{
@@ -464,7 +554,7 @@ function WiringNode({
           <InOutPort
             nodeId={id}
             port={port}
-            position={Position.Right}
+            position={flowPosition(outputSide)}
             signal={signal(port)}
           />
         </div>

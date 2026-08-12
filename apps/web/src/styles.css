@@ -865,6 +865,61 @@ button {
   text-overflow: ellipsis;
 }
 
+.node-context-menu {
+  position: fixed;
+  z-index: 50;
+  width: 190px;
+  padding: 5px;
+  border: 1px solid #9ba9ae;
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 10px 28px rgb(25 44 51 / 20%);
+}
+
+.node-context-heading {
+  padding: 6px 9px 7px;
+  border-bottom: 1px solid #e0e6e8;
+  color: #708087;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+}
+
+.node-context-menu button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 4px;
+  color: #27373d;
+  background: transparent;
+  font-size: 11px;
+  text-align: left;
+}
+
+.node-context-menu button:hover,
+.node-context-menu button:focus-visible {
+  color: #174f67;
+  background: #edf5f6;
+  outline: none;
+}
+
+.node-context-menu button.is-danger {
+  color: #a33238;
+}
+
+.node-context-menu button.is-danger:hover,
+.node-context-menu button.is-danger:focus-visible {
+  background: #fff0f0;
+}
+
+.node-context-menu svg {
+  width: 15px;
+  height: 15px;
+}
+
 .wire-name {
   overflow: hidden;
   max-width: 54px;
@@ -892,6 +947,21 @@ button {
   border-radius: 5px;
   background: #ffffff;
   box-shadow: 0 2px 8px rgb(30 49 57 / 9%);
+}
+
+.circuit-node.rotation-90 {
+  border-top-color: #9caaaf;
+  border-right: 3px solid var(--signal-color);
+}
+
+.circuit-node.rotation-180 {
+  border-top-color: #9caaaf;
+  border-bottom: 3px solid var(--signal-color);
+}
+
+.circuit-node.rotation-270 {
+  border-top-color: #9caaaf;
+  border-left: 3px solid var(--signal-color);
 }
 
 .circuit-node.is-selected {
@@ -979,6 +1049,36 @@ button {
   right: 5px;
 }
 
+.port-row.port-side-left {
+  right: auto;
+  left: 5px;
+}
+
+.port-row.port-side-right {
+  right: 5px;
+  left: auto;
+}
+
+.port-row.port-side-top,
+.port-row.port-side-bottom {
+  top: auto;
+  right: auto;
+  width: 42px;
+  height: 30px;
+  justify-content: center;
+  transform: translateX(-50%);
+}
+
+.port-row.port-side-top {
+  top: 4px;
+  flex-direction: column;
+}
+
+.port-row.port-side-bottom {
+  bottom: 4px;
+  flex-direction: column-reverse;
+}
+
 .port-row b {
   font-size: 9px;
   letter-spacing: 0px;
@@ -1004,6 +1104,31 @@ button {
 
 .port-row-output .react-flow__handle {
   right: -10px;
+}
+
+.port-row.port-side-left .react-flow__handle {
+  top: 50%;
+  right: auto;
+  left: -10px;
+}
+
+.port-row.port-side-right .react-flow__handle {
+  top: 50%;
+  right: -10px;
+  left: auto;
+}
+
+.port-row.port-side-top .react-flow__handle {
+  top: -10px;
+  right: auto;
+  left: 50%;
+}
+
+.port-row.port-side-bottom .react-flow__handle {
+  top: auto;
+  right: auto;
+  bottom: -10px;
+  left: 50%;
 }
 
 .react-flow__node.wiring-node-shell {
@@ -1182,6 +1307,53 @@ button {
   border-radius: 2px;
   background: #426a70;
   transform: translateX(-50%);
+}
+
+.wiring-splitter.rotation-90 .splitter-bar,
+.wiring-splitter.rotation-270 .splitter-bar {
+  top: 50%;
+  right: 18px;
+  bottom: auto;
+  left: 18px;
+  width: auto;
+  height: 7px;
+  transform: translateY(-50%);
+}
+
+.splitter-trunk.splitter-port-side-left,
+.splitter-branch.splitter-port-side-left {
+  right: auto;
+  left: 7px;
+}
+
+.splitter-trunk.splitter-port-side-right,
+.splitter-branch.splitter-port-side-right {
+  right: 7px;
+  left: auto;
+}
+
+.splitter-trunk.splitter-port-side-top,
+.splitter-trunk.splitter-port-side-bottom,
+.splitter-branch.splitter-port-side-top,
+.splitter-branch.splitter-port-side-bottom {
+  right: auto;
+  width: 46px;
+  justify-content: center;
+  transform: translateX(-50%);
+}
+
+.splitter-trunk.splitter-port-side-top,
+.splitter-branch.splitter-port-side-top {
+  top: 7px;
+  bottom: auto;
+  flex-direction: column;
+}
+
+.splitter-trunk.splitter-port-side-bottom,
+.splitter-branch.splitter-port-side-bottom {
+  top: auto;
+  bottom: 7px;
+  flex-direction: column-reverse;
 }
 
 .wiring-splitter > code {

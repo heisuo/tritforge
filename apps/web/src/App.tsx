@@ -11,6 +11,7 @@ import {
   type EdgeChange,
   type IsValidConnection,
   type NodeChange,
+  type NodeMouseHandler,
   type OnConnectEnd,
   type OnNodeDrag,
   type OnSelectionChangeParams,
@@ -71,6 +72,7 @@ import {
 import { HierarchyBreadcrumbs } from "./components/HierarchyBreadcrumbs";
 import { ModuleManager } from "./components/ModuleManager";
 import { PropertyEditor } from "./components/PropertyEditor";
+import { NodeContextMenu } from "./components/NodeContextMenu";
 import { ExampleLibrary } from "./ExampleLibrary";
 import { LogicWireEdge } from "./LogicWireEdge";
 import { buildRenderedEdges, wireSignalColor } from "./edge-rendering";
@@ -80,6 +82,11 @@ import {
   type CircuitDocument,
 } from "./editor/circuit-document";
 import { semanticPortIdForHandle } from "./editor/port-handles";
+import {
+  rotateClockwise,
+  rotateCounterClockwise,
+  type NodeRotation,
+} from "./editor/node-rotation";
 import {
   createDefaultDocument,
   cycleKnownWord,
@@ -375,6 +382,11 @@ function Workbench() {
   const [statusMessage, setStatusMessage] = useState("正在加载 Rust/WASM...");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
+  const [nodeContextMenu, setNodeContextMenu] = useState<{
+    nodeId: string;
+    x: number;
+    y: number;
+  } | null>(null);
   const [exampleLibraryOpen, setExampleLibraryOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -1329,6 +1341,53 @@ function Workbench() {
     ],
   );
 
+  const onNodeContextMenu = useCallback<NodeMouseHandler<EditorNode>>(
+    (event, node) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setNodes((items) =>
+        items.map((item) => ({ ...item, selected: item.id === node.id })),
+      );
+      setEdges((items) =>
+        items.map((item) =>
+          item.selected ? { ...item, selected: false } : item,
+        ),
+      );
+      setSelectedNodeId(node.id);
+      setSelectedEdgeIds([]);
+      store.getState().setSelection(activeCircuitId, [node.id], []);
+      setNodeContextMenu({ nodeId: node.id, x: event.clientX, y: event.clientY });
+    },
+    [activeCircuitId, store],
+  );
+
+  const rotateContextNode = useCallback(
+    (direction: "clockwise" | "counter-clockwise") => {
+      if (!nodeContextMenu) return;
+      const nextNodes = nodes.map((node) => {
+        if (node.id !== nodeContextMenu.nodeId) return node;
+        const rotation = (node.data.rotation ?? 0) as NodeRotation;
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            rotation:
+              direction === "clockwise"
+                ? rotateClockwise(rotation)
+                : rotateCounterClockwise(rotation),
+          },
+        };
+      });
+      if (applyEditorDocument({ nodes: nextNodes, edges })) {
+        setStatusMessage(
+          direction === "clockwise" ? "元件已顺时针旋转" : "元件已逆时针旋转",
+        );
+      }
+      setNodeContextMenu(null);
+    },
+    [applyEditorDocument, edges, nodeContextMenu, nodes],
+  );
+
   const deleteSelected = useCallback(() => {
     const selectedId =
       selectedNodeId ?? nodes.find((node) => node.selected)?.id;
@@ -2166,6 +2225,7 @@ function Workbench() {
               onConnectEnd={handleConnectEnd}
               isValidConnection={isValidUiConnection}
               onNodeClick={onNodeClick}
+              onNodeContextMenu={onNodeContextMenu}
               onEdgeClick={handleEdgeClick}
               onNodeDoubleClick={onNodeDoubleClick}
               onNodeDragStop={handleNodeDragStop}
@@ -2269,6 +2329,25 @@ function Workbench() {
           examples={EXAMPLES}
           onClose={() => setExampleLibraryOpen(false)}
           onLoad={loadExample}
+        />
+      )}
+      {nodeContextMenu && (
+        <NodeContextMenu
+          x={nodeContextMenu.x}
+          y={nodeContextMenu.y}
+          rotation={
+            nodes.find((node) => node.id === nodeContextMenu.nodeId)?.data
+              .rotation ?? 0
+          }
+          onRotateClockwise={() => rotateContextNode("clockwise")}
+          onRotateCounterClockwise={() =>
+            rotateContextNode("counter-clockwise")
+          }
+          onDelete={() => {
+            setNodeContextMenu(null);
+            deleteSelected();
+          }}
+          onClose={() => setNodeContextMenu(null)}
         />
       )}
       <footer className="statusbar">

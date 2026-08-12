@@ -1015,8 +1015,8 @@ function semanticProjectFingerprint(project: ProjectDocumentV3): string {
     ...project,
     circuits: project.circuits.map(({ viewport: _viewport, ...circuit }) => ({
       ...circuit,
-      components: circuit.components.map(({ position: _position, ...component }) =>
-        component,
+      components: circuit.components.map(
+        ({ position: _position, rotation: _rotation, ...component }) => component,
       ),
     })),
   });
@@ -1083,7 +1083,7 @@ function structureFingerprint(project: ProjectDocumentV3): string {
     ...project,
     circuits: project.circuits.map(({ viewport: _viewport, ...circuit }) => ({
       ...circuit,
-      components: circuit.components.map((component) => ({
+      components: circuit.components.map(({ rotation: _rotation, ...component }) => ({
         ...component,
         properties: Object.fromEntries(
           Object.entries(component.properties).filter(

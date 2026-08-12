@@ -12,6 +12,7 @@ export default defineConfig({
     "chronogram.spec.ts",
     "memory-lab.spec.ts",
     "counter3.spec.ts",
+    "node-context-menu.spec.ts",
   ],
   fullyParallel: false,
   workers: 1,

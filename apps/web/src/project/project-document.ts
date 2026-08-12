@@ -4,6 +4,7 @@ import {
   type EditorComponent,
   type EditorConnection,
 } from "../editor/circuit-document";
+import { isNodeRotation } from "../editor/node-rotation";
 import {
   parseProjectDocumentV3,
   serializeProjectDocumentV3,
@@ -44,6 +45,7 @@ const COMPONENT_KEYS = new Set([
   "id",
   "typeId",
   "position",
+  "rotation",
   "properties",
 ]);
 const CONNECTION_KEYS = new Set([
@@ -192,11 +194,17 @@ function componentAt(value: unknown, path: string): EditorComponent {
   assertAllowedKeys(component, COMPONENT_KEYS, path);
   const typeId = stringAt(component.typeId, `${path}.typeId`);
   const properties = recordAt(component.properties, `${path}.properties`);
+  if (component.rotation !== undefined && !isNodeRotation(component.rotation)) {
+    throw new Error(`${path}.rotation must be 0, 90, 180, or 270`);
+  }
   validateProperties(typeId, properties, `${path}.properties`);
   return {
     id: stringAt(component.id, `${path}.id`),
     typeId,
     position: pointAt(component.position, `${path}.position`),
+    ...(component.rotation === undefined
+      ? {}
+      : { rotation: component.rotation }),
     properties: structuredClone(properties),
   };
 }
