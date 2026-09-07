@@ -48,7 +48,7 @@ async function startConnectionPreview(page: Page, handleTestId: string) {
   };
   await page.mouse.move(center.x, center.y);
   await page.mouse.down();
-  await page.mouse.move(center.x, center.y + 80, { steps: 4 });
+  await page.mouse.move(center.x + 80, center.y, { steps: 4 });
   const origin = await page
     .locator(".react-flow__connection-path")
     .evaluate((element) => {
@@ -85,7 +85,7 @@ test("edits and simulates a ternary circuit through Rust/WASM", async ({
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "导出工程" }).click();
   const download = await downloadPromise;
-  expect(download.suggestedFilename()).toBe("logsim-ternary-circuit.json");
+  expect(download.suggestedFilename()).toBe("tritforge-project.json");
   const downloadPath = await download.path();
   expect(downloadPath).not.toBeNull();
   await page.getByRole("button", { name: "清空" }).click();

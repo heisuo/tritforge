@@ -154,6 +154,43 @@ describe("orthogonal logic wire paths", () => {
     expect(upper.labelY).not.toBe(lower.labelY);
   });
 
+  it("spreads neighboring fan-out labels along their middle tracks", () => {
+    const common = {
+      sourceX: 500,
+      sourceY: 200,
+      targetX: 100,
+      targetY: 300,
+      sourceSide: "right" as const,
+      targetSide: "left" as const,
+      sourceLaneCount: 4,
+      targetLane: 0,
+      targetLaneCount: 1,
+    };
+    const first = createLogicWirePath({ ...common, sourceLane: 2 });
+    const second = createLogicWirePath({ ...common, sourceLane: 3 });
+
+    expect(Math.abs(first.labelX - second.labelX)).toBeGreaterThan(40);
+  });
+
+  it("places a label on the longest segment when the vertical run has more room", () => {
+    const route = createLogicWirePath({
+      sourceX: 100,
+      sourceY: 100,
+      targetX: 150,
+      targetY: 500,
+      sourceSide: "right",
+      targetSide: "right",
+      sourceLane: 0,
+      sourceLaneCount: 1,
+      targetLane: 0,
+      targetLaneCount: 1,
+    });
+
+    expect(route.labelX).toBe(route.points.at(-2)?.x);
+    expect(route.labelY).toBeGreaterThan(100);
+    expect(route.labelY).toBeLessThan(500);
+  });
+
   it("routes a backward wire outside both endpoint modules", () => {
     const route = createLogicWirePath({
       sourceX: 500,

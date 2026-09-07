@@ -2,6 +2,8 @@
 name = "sim-wasm"
 version = "0.1.0"
 edition = "2024"
+description = "WebAssembly bindings for the TritForge balanced ternary simulator"
+repository = "https://github.com/heisuo/tritforge"
 license = "GPL-3.0-only"
 
 [lib]

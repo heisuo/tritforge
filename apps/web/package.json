@@ -1,7 +1,8 @@
 {
-  "name": "@logsim-ternary/web",
+  "name": "@tritforge/web",
   "private": true,
   "version": "0.1.0",
+  "description": "A browser-based balanced ternary digital logic simulator powered by Rust and WebAssembly.",
   "type": "module",
   "scripts": {
     "build:wasm": "wasm-pack build ../../crates/sim-wasm --target web --out-dir ../../apps/web/src/wasm/pkg",

@@ -203,7 +203,7 @@ test("keeps compact drawers and status controls usable at 1024x720", async ({
   const consoleErrors = watchConsoleErrors(page);
   await waitForSimulator(page);
 
-  const shell = page.getByRole("main", { name: "Logsim Ternary 编辑器" });
+  const shell = page.getByRole("main", { name: "TritForge 编辑器" });
   const status = page.locator(".statusbar");
   await expect(status).toBeVisible();
   await expectInside(status, shell);

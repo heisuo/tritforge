@@ -183,6 +183,29 @@ function pathLength(points: WirePoint[]): number {
   return length;
 }
 
+function labelPointOnLongestSegment(
+  points: WirePoint[],
+  fraction: number,
+): WirePoint {
+  let start = points[0];
+  let end = points[1] ?? points[0];
+  let longest = distance(start, end);
+  for (let index = 2; index < points.length; index += 1) {
+    const candidateStart = points[index - 1];
+    const candidateEnd = points[index];
+    const candidateLength = distance(candidateStart, candidateEnd);
+    if (candidateLength > longest) {
+      start = candidateStart;
+      end = candidateEnd;
+      longest = candidateLength;
+    }
+  }
+  return {
+    x: start.x + (end.x - start.x) * fraction,
+    y: start.y + (end.y - start.y) * fraction,
+  };
+}
+
 function segmentIntersectsObstacle(
   start: WirePoint,
   end: WirePoint,
@@ -320,11 +343,17 @@ export function createLogicWirePath(
     { x: targetTurnX, y: targetY },
     { x: targetX, y: targetY },
   ]);
+  const labelLane = sourceLaneCount > 1
+    ? 0.5 + 0.35 * (sourceLane / (sourceLaneCount - 1))
+    : targetLaneCount > 1
+      ? 0.15 + 0.35 * (targetLane / (targetLaneCount - 1))
+      : 0.5;
+  const labelPoint = labelPointOnLongestSegment(points, labelLane);
 
   return {
     path: roundedOrthogonalPath(points),
-    labelX: (sourceTurnX + targetTurnX) / 2,
-    labelY: middleY,
+    labelX: labelPoint.x,
+    labelY: labelPoint.y,
     points,
   };
 }

@@ -68,7 +68,7 @@ test("runs, steps, watches, clears, collapses, and resizes the chronogram", asyn
   const consoleErrors = watchConsoleErrors(page);
   await waitForSimulator(page);
 
-  const shell = page.getByRole("main", { name: "Logsim Ternary 编辑器" });
+  const shell = page.getByRole("main", { name: "TritForge 编辑器" });
   const dock = page.getByRole("region", { name: "时序图" });
   const statusbar = page.locator(".statusbar");
   await expect(dock).toBeVisible();
@@ -155,7 +155,7 @@ test("keeps the compact chronogram and status bar unobstructed", async ({ page }
   const consoleErrors = watchConsoleErrors(page);
   await waitForSimulator(page);
 
-  const shell = page.getByRole("main", { name: "Logsim Ternary 编辑器" });
+  const shell = page.getByRole("main", { name: "TritForge 编辑器" });
   const dock = page.getByRole("region", { name: "时序图" });
   const statusbar = page.locator(".statusbar");
   await expectInside(dock, shell);

@@ -1546,7 +1546,7 @@ function Workbench() {
     const url = URL.createObjectURL(blob);
     const anchor = window.document.createElement("a");
     anchor.href = url;
-    anchor.download = "logsim-ternary-circuit.json";
+    anchor.download = "tritforge-project.json";
     anchor.click();
     URL.revokeObjectURL(url);
     setStatusMessage("工程已导出为 JSON");
@@ -1924,12 +1924,12 @@ function Workbench() {
   );
 
   return (
-    <main className="app-shell" aria-label="Logsim Ternary 编辑器">
+    <main className="app-shell" aria-label="TritForge 编辑器">
       <header className="topbar">
         <div className="brand">
           <Workflow aria-hidden="true" />
-          <strong>LOGSIM TERNARY</strong>
-          <span>PHASE 3D</span>
+          <strong>TRITFORGE</strong>
+          <span>ALPHA</span>
         </div>
         <div
           className={`toolbar ${mobileMenuOpen ? "is-open" : ""}`}

@@ -466,7 +466,7 @@ describe("App", () => {
   it("opens directly into the editor shell", () => {
     render(<App />);
     expect(
-      screen.getByRole("main", { name: "Logsim Ternary 编辑器" }),
+      screen.getByRole("main", { name: "TritForge 编辑器" }),
     ).toBeInTheDocument();
   });
 
@@ -702,7 +702,7 @@ describe("App", () => {
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("main", { name: "Logsim Ternary 编辑器" }),
+      screen.getByRole("main", { name: "TritForge 编辑器" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("application")).toBeInTheDocument();
     expect(screen.getByText("7 COMPONENTS")).toBeInTheDocument();

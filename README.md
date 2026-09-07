@@ -1,12 +1,12 @@
-# Logsim Ternary
+# TritForge
 
-Logsim Ternary 是一个以 Rust/WebAssembly 为仿真内核、在浏览器中编辑和观察原生平衡三进制组合及时序逻辑电路的工具。
+TritForge 是一个以 Rust/WebAssembly 为仿真内核、在浏览器中设计、组合和观察原生平衡三进制数字逻辑电路的工具。
 
-![Logsim Ternary 层级子电路编辑器](docs/images/phase2a-hierarchy.png)
+![TritForge 层级子电路编辑器](docs/images/phase2a-hierarchy.png)
 
-![Logsim Ternary 单 trit DFF 演示](docs/images/phase3a-dff.png)
+![TritForge 单 trit DFF 演示](docs/images/phase3a-dff.png)
 
-![Logsim Ternary 3-trit 并行寄存器演示](docs/images/phase3b-register3.png)
+![TritForge 3-trit 并行寄存器演示](docs/images/phase3b-register3.png)
 
 ## 前置环境
 
@@ -22,10 +22,12 @@ Logsim Ternary 是一个以 Rust/WebAssembly 为仿真内核、在浏览器中�
 - 撤销、重做、删除、清空、适应画布，并载入可编辑教学示例。
 - 新建可复用模块，使用固定 ID 的 `Module Input` 与 `Module Output` 定义接口。
 - 重复放置模块实例，支持多层无环嵌套，并通过双击和面包屑进入或返回定义。
-- 放置 Clock 和单-trit DFF，通过“单步 Tick”执行完整的 `0 → 1 → 0` 时钟周期。
-- DFF 支持同步复位和写使能；状态栏显示 tick count，层级模块实例拥有独立状态。
-- 载入由三个 DFF 组成的可编辑 3-trit 并行寄存器，观察整字捕获、保持和同步复位。
-- 导入和导出 Project v2 工程；旧版 v1 单电路文件会无损迁移为 `Main`。
+- 使用 `1..27` trit 总线、Splitter、Junction 和同名 Tunnel 组织大规模连线。
+- 旋转元件、选择导线，并使用避让节点和交叉桥的正交布线观察网络结构。
+- 放置 Clock、DFF、Register、ROM 和 RAM；通过单步或自动时钟运行时序电路。
+- 使用 Chronogram 记录标量和总线波形，并在平衡三进制、十进制和分隔 trit 间切换显示。
+- 载入半加器、全加器、层级加法器、计数器、寄存器、总线和存储器等可编辑示例。
+- 导入和导出 Project v3 工程；旧版 v1/v2 文件会在载入时迁移到当前模型。
 - 在桌面三栏工作台和窄屏抽屉布局中编辑同一电路。
 
 ## 层级模块
@@ -39,8 +41,8 @@ Logsim Ternary 是一个以 Rust/WebAssembly 为仿真内核、在浏览器中�
 不能删除，界面会列出保护原因与使用位置。递归引用在导入和 Rust 校验阶段都会
 被拒绝。
 
-工程文件统一导出为 `version: 2`，顶层包含 `rootCircuitId` 与多个 `circuits`。
-v1 迁移保留原元件、连线、属性、位置和 viewport，不在 TypeScript 中猜测或
+工程文件统一导出为 `version: 3`，顶层包含 `rootCircuitId` 与多个 `circuits`。
+v1/v2 迁移保留原元件、连线、属性、位置和 viewport，不在 TypeScript 中猜测或
 重写门语义。
 
 从仓库根目录安装 Rust 组件、WASM 工具和 Web 依赖：
@@ -134,7 +136,7 @@ DFF 端口为 `d/clk/en/rst/q`。`rst=1` 优先同步清零，`en=1` 捕获 `d`�
 
 ## 3-trit 并行寄存器
 
-示例库中的“3-trit 并行寄存器”不是新的内建元件，而是一个普通 Project v2
+示例库中的“3-trit 并行寄存器”不是新的内建元件，而是一个普通工程
 模块。双击 `Register3` 实例可以看到 `dff-2/dff-1/dff-0` 三个 DFF；它们分别
 保存 `Q2/Q1/Q0`，共享同一组 `CLK/EN/RST`，所以在一个上升沿并行更新。
 
@@ -153,7 +155,7 @@ Probe 和内部 DFF 才是可检查的逐 trit 信号与状态来源。
 │ React + TypeScript + React Flow                         │
 │ 元件库、活动画布、模块管理、层级导航、诊断与工程状态    │
 └──────────────────────────┬──────────────────────────────┘
-                           │ Project v2、活动根、输入命令与投影快照
+                           │ Project v3、活动根、输入命令与投影快照
 ┌──────────────────────────▼──────────────────────────────┐
 │ sim-wasm                                                │
 │ 项目级 simulator、wasm-bindgen API、serde 与结构化错误  │
@@ -178,12 +180,12 @@ projection 端点 100,000。超限工程会在分配完整展开图前返回结�
 
 本项目参考了 [Logisim-evolution](https://github.com/logisim-evolution/logisim-evolution) 在值对象、元件类型与实例分离、网络解析、事件传播和振荡检测方面的架构思想。Logisim-evolution 由其贡献者开发并以 GNU General Public License version 3 发布；相关名称、原始代码及版权归原项目和各自权利人所有。
 
-Logsim Ternary 是面向原生三进制语义的独立 Rust/React 实现，不是 Logisim-evolution 的官方项目，也不直接移植其 Java/Swing 实现。本仓库同样以 GNU General Public License version 3 发布，完整条款见 [LICENSE](LICENSE)。
+TritForge 是面向原生三进制语义的独立 Rust/React 实现，不是 Logisim-evolution 的官方项目，也不直接移植其 Java/Swing 实现。本仓库同样以 GNU General Public License version 3 发布，完整条款见 [LICENSE](LICENSE)。
 
 ## 当前不做
 
-- 波形面板、自动连续时钟、物理传播延迟和多时钟域。
-- 多-trit 总线、分线器和任意导线分叉点。
+- 物理传播延迟和多时钟域时序分析。
+- 内建移位寄存器、多端口寄存器组、完整 ALU 或 CPU；这些仍可通过现有基础元件逐层搭建。
 - 递归模块、参数化模块和模块接口版本管理。
 - 框选电路后一键封装为模块。
 - Logisim `.circ` 文件或其他 HDL 的导入。
