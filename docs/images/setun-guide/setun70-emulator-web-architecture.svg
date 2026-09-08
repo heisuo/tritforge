@@ -1,0 +1,209 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1120" viewBox="0 0 1600 1120">
+  <title>SETUN-70 当前 Web 模拟系统详细架构</title>
+  <desc>展示浏览器、FastAPI、EmulatorSession、汇编器，以及 Setun70 CPU 的统一主存、PC、页寄存器、操作数栈、返回栈、概念 ALU 和控制逻辑。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#31464f"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#2672a4"/>
+    </marker>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC", Arial, sans-serif; fill: #172126; }
+      .title { font-size: 30px; font-weight: 750; }
+      .subtitle { font-size: 15px; fill: #53636a; }
+      .layer-title { font-size: 16px; font-weight: 700; letter-spacing: 0; }
+      .box-title { font-size: 17px; font-weight: 700; }
+      .body { font-size: 13px; fill: #42545c; }
+      .small { font-size: 12px; fill: #5f7077; }
+      .mono { font-family: "Cascadia Mono", "Noto Sans Mono CJK SC", monospace; font-size: 13px; }
+      .label { font-size: 12px; font-weight: 650; fill: #31464f; }
+      .step { font-size: 13px; font-weight: 750; fill: #ffffff; text-anchor: middle; }
+      .footer { font-size: 14px; fill: #ffffff; text-anchor: middle; }
+      .solid-box { stroke-width: 2; rx: 5; }
+      .concept-box { stroke-width: 2; stroke-dasharray: 8 6; rx: 5; }
+      .arrow { fill: none; stroke: #31464f; stroke-width: 2.2; marker-end: url(#arrow); }
+      .arrow-blue { fill: none; stroke: #2672a4; stroke-width: 2.2; marker-end: url(#arrow-blue); }
+      .arrow-dashed { fill: none; stroke: #7a8990; stroke-width: 2; stroke-dasharray: 7 6; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1120" fill="#f4f7f6"/>
+  <text x="48" y="50" class="title">SETUN-70 当前 Web 模拟系统详细架构</text>
+  <text x="48" y="78" class="subtitle">以当前 Python 实现为准：一套统一主存 + 两个软件栈 + 三个页寄存器</text>
+
+  <line x1="1140" y1="42" x2="1190" y2="42" stroke="#31464f" stroke-width="2"/>
+  <text x="1202" y="47" class="small">实线：当前代码中的实际状态对象</text>
+  <line x1="1140" y1="70" x2="1190" y2="70" stroke="#7a8990" stroke-width="2" stroke-dasharray="8 6"/>
+  <text x="1202" y="75" class="small">虚线：从执行过程抽象出的硬件概念模块</text>
+
+  <!-- Web and service layer -->
+  <rect x="40" y="105" width="1520" height="180" rx="7" fill="#e9f2f7" stroke="#8bb5cc" stroke-width="1.5"/>
+  <text x="62" y="132" class="layer-title" fill="#245f82">A. 本机 Web 与会话层</text>
+
+  <rect x="72" y="154" width="245" height="96" class="solid-box" fill="#ffffff" stroke="#2672a4"/>
+  <circle cx="93" cy="176" r="14" fill="#2672a4"/><text x="93" y="181" class="step">1</text>
+  <text x="116" y="181" class="box-title">浏览器界面</text>
+  <text x="92" y="209" class="body">编辑 POLIZ、汇编、单步、运行、复位</text>
+  <text x="92" y="232" class="small">只负责 HTTP 与 DOM，不包含第二套 VM</text>
+
+  <rect x="375" y="154" width="235" height="96" class="solid-box" fill="#ffffff" stroke="#2672a4"/>
+  <circle cx="396" cy="176" r="14" fill="#2672a4"/><text x="396" y="181" class="step">2</text>
+  <text x="419" y="181" class="box-title">FastAPI</text>
+  <text x="395" y="209" class="mono">/api/load /step /run /reset</text>
+  <text x="395" y="232" class="small">默认仅监听 127.0.0.1:8000</text>
+
+  <rect x="670" y="144" width="320" height="116" class="solid-box" fill="#fffaf0" stroke="#c88424"/>
+  <circle cx="692" cy="168" r="14" fill="#c88424"/><text x="692" y="173" class="step">3</text>
+  <text x="716" y="173" class="box-title">EmulatorSession</text>
+  <text x="692" y="202" class="body">拥有唯一 Setun70 实例，管理状态机</text>
+  <text x="692" y="225" class="mono">idle / ready / paused / halted / error</text>
+  <text x="692" y="247" class="small">捕获 OUT，生成 JSON snapshot</text>
+
+  <rect x="1050" y="154" width="250" height="96" class="solid-box" fill="#f4f0f7" stroke="#806493"/>
+  <text x="1071" y="181" class="box-title">Setun70Assembler</text>
+  <text x="1071" y="209" class="body">两遍扫描标签与指令</text>
+  <text x="1071" y="232" class="small">POLIZ 源码 -> 6-trit syllable 序列</text>
+
+  <rect x="1360" y="154" width="160" height="96" class="solid-box" fill="#edf7f0" stroke="#438661"/>
+  <text x="1380" y="181" class="box-title">状态快照</text>
+  <text x="1380" y="208" class="body">PC / cycles</text>
+  <text x="1380" y="229" class="body">stack / output</text>
+
+  <path d="M317 190 H375" class="arrow-blue"/><text x="346" y="181" class="label" text-anchor="middle">HTTP</text>
+  <path d="M610 190 H670" class="arrow-blue"/><text x="640" y="181" class="label" text-anchor="middle">调用</text>
+  <path d="M990 190 H1050" class="arrow"/><text x="1020" y="181" class="label" text-anchor="middle">源码</text>
+  <path d="M1050 225 H1012 Q998 225 998 239 V268 Q998 275 985 275 H840 V260" class="arrow"/>
+  <text x="1050" y="274" class="label">机器码</text>
+  <path d="M990 170 H1020 V136 H1440 V154" class="arrow"/><text x="1225" y="129" class="label" text-anchor="middle">JSON snapshot</text>
+
+  <!-- CPU outer layer -->
+  <rect x="40" y="320" width="1520" height="745" rx="7" fill="#ffffff" stroke="#566970" stroke-width="2"/>
+  <text x="62" y="351" class="layer-title">B. Setun70 CPU 与存储模型</text>
+  <text x="302" y="351" class="small">每次 step：取指 -> PC 前进 -> 译码 -> 执行 -> cycles + 1</text>
+
+  <path d="M830 260 V320" class="arrow-blue"/>
+  <text x="845" y="302" class="label">load / step / run</text>
+
+  <!-- Fetch path -->
+  <rect x="75" y="390" width="180" height="112" class="solid-box" fill="#fff8e8" stroke="#c88424"/>
+  <circle cx="97" cy="414" r="14" fill="#c88424"/><text x="97" y="419" class="step">4</text>
+  <text x="121" y="419" class="box-title">程序计数器 PC</text>
+  <text x="96" y="450" class="mono">pc_page</text>
+  <text x="96" y="472" class="mono">pc_offset</text>
+  <text x="96" y="492" class="small">当前取指位置</text>
+
+  <rect x="305" y="508" width="175" height="100" class="concept-box" fill="#fafcfc" stroke="#7a8990"/>
+  <text x="327" y="535" class="box-title">PC 更新逻辑</text>
+  <text x="327" y="560" class="body">offset + 1</text>
+  <text x="327" y="583" class="small">到 81 后换页</text>
+  <text x="327" y="603" class="small">跳转指令可覆盖 PC</text>
+
+  <!-- Unified memory -->
+  <rect x="540" y="375" width="350" height="360" class="solid-box" fill="#edf7f0" stroke="#438661" stroke-width="3"/>
+  <circle cx="565" cy="402" r="14" fill="#438661"/><text x="565" y="407" class="step">5</text>
+  <text x="590" y="407" class="box-title">统一主存 memory</text>
+  <text x="565" y="437" class="mono">Dict[(page, offset)] -&gt; value</text>
+  <rect x="565" y="462" width="300" height="92" rx="3" fill="#dff0e5" stroke="#78a98b"/>
+  <text x="586" y="490" class="box-title">程序区</text>
+  <text x="586" y="517" class="body">操作 syllable、LIT 立即数、地址 syllable</text>
+  <text x="586" y="539" class="small">load_program 从 (0, 0) 顺序写入</text>
+  <rect x="565" y="572" width="300" height="82" rx="3" fill="#e8f4eb" stroke="#78a98b"/>
+  <text x="586" y="601" class="box-title">数据区</text>
+  <text x="586" y="628" class="body">FETCH / STORE / 地址 syllable 共用同一主存</text>
+  <text x="565" y="687" class="body">27 页 x 81 syllables = 2187 syllables</text>
+  <text x="565" y="712" class="body">每个 syllable = 6 trit；未写地址读出 0</text>
+
+  <!-- Decode/control -->
+  <rect x="950" y="390" width="235" height="112" class="concept-box" fill="#f6f2f8" stroke="#806493"/>
+  <circle cx="973" cy="414" r="14" fill="#806493"/><text x="973" y="419" class="step">6</text>
+  <text x="997" y="419" class="box-title">概念 IR / 译码</text>
+  <text x="972" y="449" class="mono">Syllable.from_int()</text>
+  <text x="972" y="474" class="body">operation 或 address</text>
+  <text x="972" y="494" class="small">当前实现是 step() 内的临时对象</text>
+
+  <rect x="1250" y="380" width="260" height="132" class="concept-box" fill="#fff4ec" stroke="#b65d2f"/>
+  <circle cx="1274" cy="406" r="14" fill="#b65d2f"/><text x="1274" y="411" class="step">7</text>
+  <text x="1298" y="411" class="box-title">概念控制 FSM</text>
+  <text x="1274" y="442" class="body">execute_operation / address</text>
+  <text x="1274" y="466" class="body">basic / service / macro 分派</text>
+  <text x="1274" y="490" class="small">当前是 Python 控制流，不是独立 RTL FSM</text>
+
+  <path d="M255 430 H540" class="arrow"/><text x="398" y="421" class="label" text-anchor="middle">取指地址 (page, offset)</text>
+  <path d="M255 476 Q280 500 305 548" class="arrow"/>
+  <path d="M305 586 H286 Q270 586 270 566 V500 H255" class="arrow-dashed"/>
+  <path d="M890 430 H950" class="arrow"/><text x="920" y="421" class="label" text-anchor="middle">6 trit</text>
+  <path d="M1185 440 H1250" class="arrow"/><text x="1218" y="431" class="label" text-anchor="middle">opcode</text>
+  <path d="M1378 380 V365 H165 V390" class="arrow-dashed"/><text x="1085" y="359" class="label" text-anchor="middle">跳转、调用与返回可改写 PC</text>
+
+  <!-- Address and data path -->
+  <rect x="75" y="620" width="205" height="130" class="solid-box" fill="#eaf2f8" stroke="#2672a4"/>
+  <text x="97" y="650" class="box-title">3 个页寄存器</text>
+  <text x="97" y="680" class="mono">P[-1] = 0</text>
+  <text x="97" y="703" class="mono">P[ 0] = 1</text>
+  <text x="97" y="726" class="mono">P[+1] = 2</text>
+
+  <rect x="325" y="625" width="180" height="120" class="concept-box" fill="#fafcfc" stroke="#7a8990"/>
+  <text x="347" y="655" class="box-title">地址解析</text>
+  <text x="347" y="685" class="body">页寄存器选择</text>
+  <text x="347" y="709" class="body">+ 4-trit offset</text>
+  <text x="347" y="731" class="small">得到 (page, offset)</text>
+
+  <rect x="950" y="585" width="245" height="190" class="solid-box" fill="#fff8e8" stroke="#c88424"/>
+  <circle cx="973" cy="610" r="14" fill="#c88424"/><text x="973" y="615" class="step">8</text>
+  <text x="997" y="615" class="box-title">操作数栈</text>
+  <text x="972" y="648" class="mono">operand_stack: List[int]</text>
+  <rect x="978" y="668" width="190" height="36" rx="3" fill="#f7ddb0" stroke="#c88424"/>
+  <text x="995" y="691" class="body">S：次栈顶</text>
+  <rect x="978" y="711" width="190" height="40" rx="3" fill="#f3c773" stroke="#a96c17"/>
+  <text x="995" y="737" class="body">T：栈顶</text>
+  <text x="972" y="768" class="small">当前无深度限制，硬件版需明确容量</text>
+
+  <rect x="1260" y="605" width="250" height="155" class="concept-box" fill="#edf7f0" stroke="#438661"/>
+  <text x="1282" y="635" class="box-title">概念 ALU</text>
+  <text x="1282" y="665" class="body">ADD SUB MUL DIV</text>
+  <text x="1282" y="690" class="body">NEG ABS CMP</text>
+  <text x="1282" y="716" class="small">读取 T/S，结果写回操作数栈</text>
+  <text x="1282" y="739" class="small">当前由 Python 整数运算实现</text>
+
+  <path d="M280 680 H325" class="arrow"/>
+  <path d="M505 680 H540" class="arrow"/><text x="522" y="671" class="label" text-anchor="middle">地址</text>
+  <path d="M950 476 H920 V655 H890" class="arrow-dashed"/><text x="915" y="579" class="label" text-anchor="middle">地址字段</text>
+  <path d="M890 650 H950" class="arrow"/><text x="920" y="641" class="label" text-anchor="middle">读值</text>
+  <path d="M950 710 H890" class="arrow"/><text x="920" y="731" class="label" text-anchor="middle">STORE</text>
+  <path d="M1195 650 H1260" class="arrow"/><text x="1228" y="641" class="label" text-anchor="middle">T/S</text>
+  <path d="M1260 720 H1225 V745 H1195" class="arrow"/><text x="1228" y="766" class="label" text-anchor="middle">结果</text>
+  <path d="M1380 512 V605" class="arrow-dashed"/><text x="1394" y="565" class="label">ALU 控制</text>
+
+  <!-- Auxiliary state -->
+  <rect x="75" y="835" width="270" height="130" class="solid-box" fill="#f4f0f7" stroke="#806493"/>
+  <text x="97" y="866" class="box-title">返回栈</text>
+  <text x="97" y="896" class="mono">return_stack: List[int]</text>
+  <text x="97" y="924" class="body">CALL 压入返回地址</text>
+  <text x="97" y="947" class="body">RET 弹出并恢复 PC</text>
+
+  <rect x="405" y="835" width="275" height="130" class="solid-box" fill="#eef3f5" stroke="#566970"/>
+  <text x="427" y="866" class="box-title">执行状态</text>
+  <text x="427" y="896" class="body">running / cycles / error</text>
+  <text x="427" y="922" class="body">comparison_flag = -1 / 0 / +1</text>
+  <text x="427" y="947" class="small">快照返回网页状态区</text>
+
+  <rect x="740" y="835" width="260" height="130" class="solid-box" fill="#edf7f0" stroke="#438661"/>
+  <text x="762" y="866" class="box-title">服务 I/O</text>
+  <text x="762" y="896" class="body">OUT：弹出 T 并打印十进制/三进制</text>
+  <text x="762" y="922" class="body">IN：当前固定压入 0</text>
+  <text x="762" y="947" class="small">stdout 由 EmulatorSession 捕获</text>
+
+  <rect x="1060" y="835" width="450" height="130" class="solid-box" fill="#fff4ec" stroke="#b65d2f"/>
+  <text x="1082" y="866" class="box-title">当前实现边界</text>
+  <text x="1082" y="896" class="body">只有 memory 是统一主存抽象；程序和数据共用</text>
+  <text x="1082" y="922" class="body">两个栈与页寄存器是独立 Python 容器/状态</text>
+  <text x="1082" y="947" class="body">IR、ALU、FSM 是概念拆分，尚未实现为 RTL 模块</text>
+
+  <path d="M1250 482 H1215 V815 H210 V835" class="arrow-dashed"/><text x="740" y="808" class="label" text-anchor="middle">CALL / RET 控制返回栈</text>
+  <path d="M1072 775 V815 H870 V835" class="arrow"/><text x="975" y="808" class="label" text-anchor="middle">OUT / IN</text>
+  <path d="M1385 760 V800 H542 V835" class="arrow-dashed"/><text x="965" y="792" class="label" text-anchor="middle">CMP 标志、cycles、error</text>
+
+  <rect x="75" y="1000" width="1435" height="42" rx="4" fill="#26343a"/>
+  <text x="792" y="1027" class="footer">第一版硬件建议：1 块统一主 RAM + 小深度操作数栈寄存器 + 小深度返回栈寄存器 + PC/页寄存器 + 简化 ALU/FSM</text>
+</svg>

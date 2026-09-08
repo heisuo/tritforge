@@ -85,30 +85,28 @@ Logsim Ternary 负责功能级离散事件仿真。它不会在第一阶段模�
 
 ### 4.1 参考快照
 
-本项目初始研究使用的 Logisim-evolution 本地快照为：
+本项目初始研究使用的 Logisim-evolution 快照为：
 
-```text
-仓库：/home/heisuo/project/work/ternary/logisim-evolution
-提交：a73bf6523913e4405d91fcbf9c02cd0db93d70f7
-日期：2026-07-28
-许可：GNU GPL v3
-```
+- 参考仓库：[logisim-evolution/logisim-evolution](https://github.com/logisim-evolution/logisim-evolution)
+- 提交：`a73bf6523913e4405d91fcbf9c02cd0db93d70f7`
+- 日期：2026-07-28
+- 许可：GNU GPL v3
 
 主要参考入口：
 
-- [`Value.java`](../../logisim-evolution/src/main/java/com/cburch/logisim/data/Value.java)：
+- [`Value.java`](https://github.com/logisim-evolution/logisim-evolution/blob/a73bf6523913e4405d91fcbf9c02cd0db93d70f7/src/main/java/com/cburch/logisim/data/Value.java)：
   二进制值、未知态、错误态和多驱动合并。
-- [`InstanceFactory.java`](../../logisim-evolution/src/main/java/com/cburch/logisim/instance/InstanceFactory.java)：
+- [`InstanceFactory.java`](https://github.com/logisim-evolution/logisim-evolution/blob/a73bf6523913e4405d91fcbf9c02cd0db93d70f7/src/main/java/com/cburch/logisim/instance/InstanceFactory.java)：
   元件类型、端口和传播入口。
-- [`InstanceState.java`](../../logisim-evolution/src/main/java/com/cburch/logisim/instance/InstanceState.java)：
+- [`InstanceState.java`](https://github.com/logisim-evolution/logisim-evolution/blob/a73bf6523913e4405d91fcbf9c02cd0db93d70f7/src/main/java/com/cburch/logisim/instance/InstanceState.java)：
   元件读取输入和设置输出的接口。
-- [`CircuitWires.java`](../../logisim-evolution/src/main/java/com/cburch/logisim/circuit/CircuitWires.java)：
+- [`CircuitWires.java`](https://github.com/logisim-evolution/logisim-evolution/blob/a73bf6523913e4405d91fcbf9c02cd0db93d70f7/src/main/java/com/cburch/logisim/circuit/CircuitWires.java)：
   导线连通性、总线连接和网络传播。
-- [`Propagator.java`](../../logisim-evolution/src/main/java/com/cburch/logisim/circuit/Propagator.java)：
+- [`Propagator.java`](https://github.com/logisim-evolution/logisim-evolution/blob/a73bf6523913e4405d91fcbf9c02cd0db93d70f7/src/main/java/com/cburch/logisim/circuit/Propagator.java)：
   事件队列、逻辑时间和振荡检测。
-- [`Circuit.java`](../../logisim-evolution/src/main/java/com/cburch/logisim/circuit/Circuit.java)：
+- [`Circuit.java`](https://github.com/logisim-evolution/logisim-evolution/blob/a73bf6523913e4405d91fcbf9c02cd0db93d70f7/src/main/java/com/cburch/logisim/circuit/Circuit.java)：
   元件集合、增删事件和连接关系。
-- [`LogisimFile.java`](../../logisim-evolution/src/main/java/com/cburch/logisim/file/LogisimFile.java)：
+- [`LogisimFile.java`](https://github.com/logisim-evolution/logisim-evolution/blob/a73bf6523913e4405d91fcbf9c02cd0db93d70f7/src/main/java/com/cburch/logisim/file/LogisimFile.java)：
   工程装载、保存和库引用。
 
 ### 4.2 借鉴的设计思想

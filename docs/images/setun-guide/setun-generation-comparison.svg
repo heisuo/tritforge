@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1450" height="850" viewBox="0 0 1450 850">
+  <title>第一代 Setun 与 Setun-70 架构比较</title>
+  <desc>教学比较第一代 Setun 与 Setun-70 的程序单位、算术数据、编程模型、快速状态、操作存储器和控制流，并强调二者不兼容。</desc>
+  <style>
+    text {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+        "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      letter-spacing: 0;
+      fill: #17252d;
+    }
+    .title { font-size: 30px; font-weight: 700; }
+    .subtitle { font-size: 15px; fill: #53666f; }
+    .section { font-size: 18px; font-weight: 700; }
+    .card-title { font-size: 17px; font-weight: 700; }
+    .label { font-size: 14px; font-weight: 700; }
+    .body { font-size: 14px; fill: #344b56; }
+    .small { font-size: 12px; fill: #5a6d75; }
+    .formula { font-size: 22px; font-weight: 700; }
+    .center { text-anchor: middle; }
+    .inverse { fill: #ffffff; }
+    .line { fill: none; stroke: #667b84; stroke-width: 2; }
+  </style>
+  <rect width="100%" height="100%" fill="#ffffff"/>
+  <text x="54" y="48" class="title">第一代 Setun 与 Setun-70：同为三进制，组织方式不同</text>
+  <text x="54" y="76" class="subtitle">教学比较图，不是原机布线图，也不表示指令兼容或硬件兼容</text>
+
+  <rect x="55" y="104" width="1340" height="78" rx="6" fill="#eaf3f8" stroke="#26729c" stroke-width="2"/>
+  <text x="725" y="136" class="section center" fill="#195c7f">共同基础</text>
+  <text x="725" y="162" class="body center">都采用平衡三进制 T / 0 / 1，并利用负、零、正三种状态表达数值与条件</text>
+
+  <rect x="55" y="210" width="650" height="480" rx="6" fill="#f4faf6" stroke="#3f7e59" stroke-width="3"/>
+  <rect x="745" y="210" width="650" height="480" rx="6" fill="#fff7f4" stroke="#b54c34" stroke-width="3"/>
+  <rect x="55" y="210" width="650" height="62" rx="6" fill="#3f7e59"/>
+  <rect x="745" y="210" width="650" height="62" rx="6" fill="#b54c34"/>
+  <text x="380" y="249" class="section inverse center">第一代 Setun</text>
+  <text x="1070" y="249" class="section inverse center">Setun-70</text>
+
+  <rect x="75" y="290" width="610" height="54" rx="4" fill="#ffffff" stroke="#b8cec0"/>
+  <rect x="765" y="290" width="610" height="54" rx="4" fill="#ffffff" stroke="#dec1b8"/>
+  <text x="95" y="313" class="small">程序基本单位</text><text x="260" y="326" class="card-title">9-trit instruction</text>
+  <text x="785" y="313" class="small">程序基本单位</text><text x="950" y="326" class="card-title">6-trit tryte</text>
+
+  <rect x="75" y="356" width="610" height="54" rx="4" fill="#ffffff" stroke="#b8cec0"/>
+  <rect x="765" y="356" width="610" height="54" rx="4" fill="#ffffff" stroke="#dec1b8"/>
+  <text x="95" y="379" class="small">主算术数据</text><text x="260" y="392" class="card-title">18-trit S / R</text>
+  <text x="785" y="379" class="small">主算术数据</text><text x="950" y="392" class="card-title">18-trit operand stack</text>
+
+  <rect x="75" y="422" width="610" height="54" rx="4" fill="#ffffff" stroke="#b8cec0"/>
+  <rect x="765" y="422" width="610" height="54" rx="4" fill="#ffffff" stroke="#dec1b8"/>
+  <text x="95" y="445" class="small">编程模型</text><text x="260" y="458" class="card-title">one-address sequential</text>
+  <text x="785" y="445" class="small">编程模型</text><text x="950" y="458" class="card-title">zero-address / POLIZ</text>
+
+  <rect x="75" y="488" width="610" height="54" rx="4" fill="#ffffff" stroke="#b8cec0"/>
+  <rect x="765" y="488" width="610" height="54" rx="4" fill="#ffffff" stroke="#dec1b8"/>
+  <text x="95" y="511" class="small">主要快速状态</text><text x="260" y="524" class="card-title">S/R + F/C/omega</text>
+  <text x="785" y="511" class="small">主要快速状态</text><text x="950" y="516" class="card-title">T/S + processor state</text><text x="950" y="535" class="small">+ return stack</text>
+
+  <rect x="75" y="554" width="610" height="54" rx="4" fill="#ffffff" stroke="#b8cec0"/>
+  <rect x="765" y="554" width="610" height="54" rx="4" fill="#ffffff" stroke="#dec1b8"/>
+  <text x="95" y="577" class="small">操作存储器</text><text x="260" y="590" class="card-title">162 × 9-trit cells</text>
+  <text x="785" y="577" class="small">操作存储器</text><text x="950" y="590" class="card-title">historical 9 pages × 81 trytes</text>
+
+  <rect x="75" y="620" width="610" height="54" rx="4" fill="#ffffff" stroke="#b8cec0"/>
+  <rect x="765" y="620" width="610" height="54" rx="4" fill="#ffffff" stroke="#dec1b8"/>
+  <text x="95" y="643" class="small">控制流</text><text x="260" y="656" class="card-title">sequential + three-way branch</text>
+  <text x="785" y="643" class="small">控制流</text><text x="950" y="648" class="card-title">structured call / condition</text><text x="950" y="667" class="small">/ loop</text>
+
+  <rect x="55" y="730" width="1340" height="72" rx="6" fill="#263b44"/>
+  <text x="725" y="762" class="section inverse center">共同点是平衡三进制；差异是整机组织方式。</text>
+  <text x="725" y="786" class="small inverse center">Setun-70 是重新设计的双栈体系，不是第一代 Setun 的兼容扩展。</text>
+</svg>

@@ -8,6 +8,10 @@ TritForge 是一个以 Rust/WebAssembly 为仿真内核、在浏览器中设计�
 
 ![TritForge 3-trit 并行寄存器演示](docs/images/phase3b-register3.png)
 
+## 文档
+
+完整的学习规划、Setun/Setun-70 架构教程、5500 ISA 笔记、研究报告和项目设计文档见 [文档导航](docs/README.md)。
+
 ## 前置环境
 
 - Rust stable，包含 `rustfmt`、`clippy` 和 `wasm32-unknown-unknown` target。

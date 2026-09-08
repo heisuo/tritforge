@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1480" height="740" viewBox="0 0 1480 740">
+  <title>原始 Setun 功能体系结构</title>
+  <desc>展示原始 Setun 的单地址顺序结构、9-trit 指令、18-trit 算术块、快速操作存储器、磁鼓、I/O 与页面交换关系。</desc>
+  <style>
+    text {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+        "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      letter-spacing: 0;
+      fill: #17252d;
+    }
+    .title { font-size: 30px; font-weight: 700; }
+    .subtitle { font-size: 15px; fill: #53666f; }
+    .section { font-size: 18px; font-weight: 700; }
+    .card-title { font-size: 17px; font-weight: 700; }
+    .label { font-size: 14px; font-weight: 700; }
+    .body { font-size: 14px; fill: #344b56; }
+    .small { font-size: 12px; fill: #5a6d75; }
+    .formula { font-size: 22px; font-weight: 700; }
+    .center { text-anchor: middle; }
+    .inverse { fill: #ffffff; }
+    .line { fill: none; stroke: #667b84; stroke-width: 2; }
+  </style>
+  <rect width="100%" height="100%" fill="#ffffff"/>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#667b84"/>
+    </marker>
+    <marker id="dash-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#77558b"/>
+    </marker>
+  </defs>
+  <text x="54" y="52" class="title">原始 Setun：单地址顺序体系结构</text>
+  <text x="54" y="82" class="subtitle">9-trit 指令驱动控制；18-trit 算术通路连接快速操作存储器、磁鼓与 I/O</text>
+
+  <rect x="55" y="120" width="390" height="322" rx="6" fill="#fff8f5" stroke="#b54c34" stroke-width="2"/>
+  <text x="79" y="155" class="section" fill="#913621">控制与算术</text>
+  <rect x="79" y="178" width="160" height="82" rx="5" fill="#f7fbfd" stroke="#26729c" stroke-width="2"/>
+  <text x="159" y="211" class="card-title center">C</text>
+  <text x="159" y="237" class="body center">command pointer</text>
+  <text x="159" y="252" class="small center">当前指令地址</text>
+  <rect x="261" y="178" width="160" height="82" rx="5" fill="#eef7f1" stroke="#3f7e59" stroke-width="2"/>
+  <text x="341" y="211" class="card-title center">F</text>
+  <text x="341" y="237" class="body center">5-trit index</text>
+  <text x="341" y="252" class="small center">地址修改索引</text>
+  <rect x="79" y="286" width="160" height="112" rx="5" fill="#f8f5fa" stroke="#77558b" stroke-width="2"/>
+  <text x="159" y="319" class="card-title center">S</text>
+  <text x="159" y="345" class="body center">18-trit arithmetic</text>
+  <text x="159" y="371" class="small center">算术块</text>
+  <rect x="261" y="286" width="160" height="112" rx="5" fill="#f8f5fa" stroke="#77558b" stroke-width="2"/>
+  <text x="341" y="319" class="card-title center">R</text>
+  <text x="341" y="345" class="body center">18-trit arithmetic</text>
+  <text x="341" y="371" class="small center">算术块</text>
+  <line x1="239" y1="219" x2="261" y2="219" class="line" marker-end="url(#arrow)"/>
+  <text x="79" y="424" class="small">omega：1-trit result-sign state</text>
+  <text x="79" y="439" class="small">negative / zero / positive</text>
+
+  <rect x="505" y="120" width="420" height="322" rx="6" fill="#eaf3f8" stroke="#26729c" stroke-width="2"/>
+  <text x="529" y="155" class="section" fill="#195c7f">快速操作 / 核心存储器</text>
+  <text x="529" y="183" class="body">162 × 9-trit cells = 81 × 18-trit words</text>
+  <rect x="529" y="207" width="372" height="158" rx="5" fill="#ffffff" stroke="#7caac2" stroke-width="1.5"/>
+  <rect x="551" y="235" width="101" height="92" fill="#dceef6" stroke="#26729c" stroke-width="1.5"/>
+  <rect x="667" y="235" width="101" height="92" fill="#e5f2e9" stroke="#3f7e59" stroke-width="1.5"/>
+  <rect x="783" y="235" width="96" height="92" fill="#fff0eb" stroke="#b54c34" stroke-width="1.5"/>
+  <text x="601" y="267" class="card-title center">Page 1</text>
+  <text x="601" y="292" class="small center">54 cells</text>
+  <text x="717" y="267" class="card-title center">Page 2</text>
+  <text x="717" y="292" class="small center">54 cells</text>
+  <text x="831" y="267" class="card-title center">Page 3</text>
+  <text x="831" y="292" class="small center">54 cells</text>
+  <text x="715" y="354" class="small center">pages grouped for exchange</text>
+  <text x="529" y="399" class="label">数据与指令共享同一快速存储器边界</text>
+  <text x="529" y="423" class="small">读取操作数、写回结果、取出 9-trit 指令</text>
+
+  <rect x="1005" y="120" width="420" height="322" rx="6" fill="#eef3f5" stroke="#667b84" stroke-width="2"/>
+  <text x="1029" y="155" class="section">外部设备与交换边界</text>
+  <rect x="1029" y="193" width="372" height="102" rx="5" fill="#ffffff" stroke="#667b84" stroke-width="1.5"/>
+  <text x="1215" y="229" class="card-title center">I/O boundary</text>
+  <text x="1215" y="256" class="body center">输入 / 输出设备</text>
+  <text x="1215" y="280" class="small center">控制与数据交换</text>
+  <rect x="1029" y="322" width="372" height="74" rx="5" fill="#ffffff" stroke="#667b84" stroke-width="1.5"/>
+  <text x="1215" y="351" class="card-title center">磁鼓</text>
+  <text x="1215" y="378" class="body center">36 或 72 pages · historical overview</text>
+
+  <text x="475" y="244" class="small center">取出</text>
+  <text x="475" y="260" class="small center">9-trit 指令</text>
+  <line x1="505" y1="284" x2="445" y2="284" class="line" marker-end="url(#arrow)"/>
+  <line x1="445" y1="442" x2="505" y2="442" class="line" marker-end="url(#arrow)"/>
+  <text x="475" y="458" class="small center">地址</text>
+  <text x="475" y="474" class="small center">控制</text>
+  <line x1="925" y1="245" x2="1005" y2="245" class="line" marker-end="url(#arrow)"/>
+  <text x="965" y="234" class="small center">I/O data</text>
+  <line x1="1029" y1="359" x2="925" y2="359" stroke="#77558b" stroke-width="2" stroke-dasharray="8 6" marker-end="url(#dash-arrow)"/>
+  <text x="965" y="354" class="small center">page exchange</text>
+
+  <rect x="55" y="500" width="1370" height="110" rx="6" fill="#f7fbfd" stroke="#26729c" stroke-width="2"/>
+  <text x="79" y="535" class="section" fill="#195c7f">状态与控制含义</text>
+  <text x="79" y="570" class="body">C 指向当前指令；F 以 5 trit 表示地址修改索引；omega 以 1 trit 保存结果符号状态。</text>
+  <text x="79" y="594" class="body">S、R 都是 18 trit 算术块；控制逻辑根据取指、操作数、运算与状态更新推进顺序执行。</text>
+
+  <rect x="55" y="656" width="1370" height="52" rx="5" fill="#263b44"/>
+  <text x="740" y="688" class="label inverse center">依据可检索历史资料整理的功能框图，不是原机物理布线图。</text>
+</svg>

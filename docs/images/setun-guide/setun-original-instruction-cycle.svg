@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1480" height="920" viewBox="0 0 1480 920">
+  <title>原始 Setun 单地址指令周期</title>
+  <desc>展示从当前地址取出 9-trit 指令、读取操作数、使用 S/R 执行、更新 omega 并递增或条件转移的七步指令周期。</desc>
+  <style>
+    text {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+        "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      letter-spacing: 0;
+      fill: #17252d;
+    }
+    .title { font-size: 30px; font-weight: 700; }
+    .subtitle { font-size: 15px; fill: #53666f; }
+    .section { font-size: 18px; font-weight: 700; }
+    .card-title { font-size: 17px; font-weight: 700; }
+    .label { font-size: 14px; font-weight: 700; }
+    .body { font-size: 14px; fill: #344b56; }
+    .small { font-size: 12px; fill: #5a6d75; }
+    .formula { font-size: 22px; font-weight: 700; }
+    .center { text-anchor: middle; }
+    .inverse { fill: #ffffff; }
+    .line { fill: none; stroke: #667b84; stroke-width: 2; }
+  </style>
+  <rect width="100%" height="100%" fill="#ffffff"/>
+  <defs>
+    <marker id="cycle-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#667b84"/>
+    </marker>
+  </defs>
+  <text x="54" y="52" class="title">原始 Setun：单地址指令周期</text>
+  <text x="54" y="82" class="subtitle">从 C 指向的当前地址开始，依次取指、执行并产生下一条控制流</text>
+
+  <rect x="55" y="122" width="1370" height="458" rx="6" fill="#f7fbfd" stroke="#c5d5db" stroke-width="2"/>
+  <text x="79" y="158" class="section">顺序执行路径</text>
+
+  <rect x="79" y="188" width="600" height="76" rx="5" fill="#eaf3f8" stroke="#26729c" stroke-width="2"/>
+  <circle cx="113" cy="226" r="21" fill="#26729c"/>
+  <text x="113" y="234" class="label inverse center">1</text>
+  <text x="153" y="218" class="card-title">PC / current address</text>
+  <text x="153" y="243" class="body">C 提供当前指令地址</text>
+
+  <rect x="755" y="188" width="600" height="76" rx="5" fill="#eef7f1" stroke="#3f7e59" stroke-width="2"/>
+  <circle cx="789" cy="226" r="21" fill="#3f7e59"/>
+  <text x="789" y="234" class="label inverse center">2</text>
+  <text x="829" y="218" class="card-title">fetch 9-trit instruction</text>
+  <text x="829" y="243" class="body">从当前地址取出 9-trit 指令</text>
+
+  <rect x="755" y="296" width="600" height="76" rx="5" fill="#fff8e8" stroke="#b57a1f" stroke-width="2"/>
+  <circle cx="789" cy="334" r="21" fill="#b57a1f"/>
+  <text x="789" y="342" class="label inverse center">3</text>
+  <text x="829" y="326" class="card-title">decode operation + one address</text>
+  <text x="829" y="351" class="body">解码操作，并得到一个显式存储器地址</text>
+
+  <rect x="79" y="296" width="600" height="76" rx="5" fill="#eef7f1" stroke="#3f7e59" stroke-width="2"/>
+  <circle cx="113" cy="334" r="21" fill="#3f7e59"/>
+  <text x="113" y="342" class="label inverse center">4</text>
+  <text x="153" y="326" class="card-title">read operand</text>
+  <text x="153" y="351" class="body">按该地址从快速操作存储器读操作数</text>
+
+  <rect x="79" y="404" width="600" height="76" rx="5" fill="#f8f5fa" stroke="#77558b" stroke-width="2"/>
+  <circle cx="113" cy="442" r="21" fill="#77558b"/>
+  <text x="113" y="450" class="label inverse center">5</text>
+  <text x="153" y="434" class="card-title">execute with S/R</text>
+  <text x="153" y="459" class="body">用 18-trit 算术块 S / R 执行操作</text>
+
+  <rect x="755" y="404" width="600" height="76" rx="5" fill="#eef3f5" stroke="#667b84" stroke-width="2"/>
+  <circle cx="789" cy="442" r="21" fill="#667b84"/>
+  <text x="789" y="450" class="label inverse center">6</text>
+  <text x="829" y="434" class="card-title">write result / update state</text>
+  <text x="829" y="459" class="body">写回结果，并更新 omega 的符号状态</text>
+
+  <line x1="679" y1="226" x2="755" y2="226" class="line" marker-end="url(#cycle-arrow)"/>
+  <line x1="1055" y1="264" x2="1055" y2="296" class="line" marker-end="url(#cycle-arrow)"/>
+  <line x1="755" y1="334" x2="679" y2="334" class="line" marker-end="url(#cycle-arrow)"/>
+  <line x1="379" y1="372" x2="379" y2="404" class="line" marker-end="url(#cycle-arrow)"/>
+  <line x1="679" y1="442" x2="755" y2="442" class="line" marker-end="url(#cycle-arrow)"/>
+  <line x1="1055" y1="480" x2="1055" y2="600" class="line" marker-end="url(#cycle-arrow)"/>
+
+  <rect x="55" y="620" width="1370" height="104" rx="6" fill="#fff8e5" stroke="#b57a1f" stroke-width="2"/>
+  <circle cx="89" cy="672" r="21" fill="#b57a1f"/>
+  <text x="89" y="680" class="label inverse center">7</text>
+  <text x="129" y="660" class="card-title">increment PC or three-way conditional transfer</text>
+  <text x="129" y="686" class="body">顺序情况下递增 C；也可依据 omega 的 negative / zero / positive 状态进行三路条件转移。</text>
+  <text x="129" y="708" class="small">omega supplies the negative/zero/positive branch basis.</text>
+
+  <rect x="55" y="752" width="1370" height="74" rx="6" fill="#eef3f5" stroke="#667b84" stroke-width="2"/>
+  <text x="79" y="781" class="label">术语说明</text>
+  <text x="79" y="806" class="body">“单地址”表示每条指令通常只显式给出一个存储器地址，不是“一 trit 地址”。</text>
+
+  <rect x="55" y="854" width="1370" height="52" rx="5" fill="#263b44"/>
+  <text x="740" y="886" class="label inverse center">依据可检索历史资料整理的功能框图，不是原机物理布线图。</text>
+</svg>

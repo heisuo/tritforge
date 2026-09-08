@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="720" viewBox="0 0 1400 720">
+  <title>Setun 家族教学时间线</title>
+  <desc>展示 Setun 从 1958 年原型、生产使用与解释程序经验，到 Setun-70 重新设计及 DSSP、Nastavnik 后续分支的教学关系。</desc>
+  <style>
+    text {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+        "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      letter-spacing: 0;
+      fill: #17252d;
+    }
+    .title { font-size: 30px; font-weight: 700; }
+    .subtitle { font-size: 15px; fill: #53666f; }
+    .section { font-size: 18px; font-weight: 700; }
+    .card-title { font-size: 17px; font-weight: 700; }
+    .label { font-size: 14px; font-weight: 700; }
+    .body { font-size: 14px; fill: #344b56; }
+    .small { font-size: 12px; fill: #5a6d75; }
+    .formula { font-size: 22px; font-weight: 700; }
+    .center { text-anchor: middle; }
+    .inverse { fill: #ffffff; }
+    .line { fill: none; stroke: #667b84; stroke-width: 2; }
+  </style>
+  <rect width="100%" height="100%" fill="#ffffff"/>
+  <text x="54" y="52" class="title">Setun 家族：从原型到软件分支</text>
+  <text x="54" y="82" class="subtitle">按教学关系梳理历史脉络；体系结构变化由边框与标签共同标识</text>
+
+  <rect x="902" y="34" width="20" height="20" rx="2" fill="#eaf3f8" stroke="#26729c" stroke-width="3"/>
+  <text x="934" y="49" class="small">Setun：蓝色实线边框</text>
+  <rect x="1130" y="31" width="26" height="26" rx="2" fill="#fff2ee" stroke="#b54c34" stroke-width="3"/>
+  <rect x="1135" y="36" width="16" height="16" rx="1" fill="none" stroke="#b54c34" stroke-width="1.5"/>
+  <text x="1168" y="49" class="small">Setun-70：朱红双层边框</text>
+
+  <rect x="55" y="116" width="760" height="72" rx="6" fill="#eaf3f8" stroke="#26729c" stroke-width="2"/>
+  <text x="79" y="145" class="section" fill="#195c7f">第一代 Setun</text>
+  <text x="79" y="171" class="body">设计、原型、生产使用，以及解释程序与 POLIZ 实践的积累</text>
+
+  <rect x="845" y="116" width="500" height="72" rx="6" fill="#fff2ee" stroke="#b54c34" stroke-width="3"/>
+  <rect x="851" y="122" width="488" height="60" rx="3" fill="none" stroke="#b54c34" stroke-width="1.5"/>
+  <text x="870" y="145" class="section" fill="#913621">Setun-70 系列</text>
+  <text x="870" y="171" class="body">另行重新设计的体系，而非对第一代机器的兼容修订</text>
+
+  <line x1="95" y1="232" x2="1305" y2="232" class="line"/>
+  <circle cx="175" cy="232" r="8" fill="#26729c"/>
+  <circle cx="455" cy="232" r="8" fill="#26729c"/>
+  <circle cx="745" cy="232" r="8" fill="#26729c"/>
+  <rect x="1032" y="224" width="16" height="16" fill="#ffffff" stroke="#b54c34" stroke-width="3"/>
+
+  <line x1="175" y1="240" x2="175" y2="272" class="line"/>
+  <rect x="55" y="272" width="240" height="166" rx="6" fill="#f7fbfd" stroke="#26729c" stroke-width="3"/>
+  <rect x="75" y="292" width="72" height="27" rx="3" fill="#26729c"/>
+  <text x="111" y="311" class="label inverse center">Setun</text>
+  <text x="75" y="350" class="card-title">设计启动与 1958 原型机</text>
+  <text x="75" y="381" class="body">莫斯科大学团队探索</text>
+  <text x="75" y="405" class="body">平衡三进制计算机实现</text>
+
+  <line x1="455" y1="240" x2="455" y2="272" class="line"/>
+  <rect x="335" y="272" width="240" height="166" rx="6" fill="#f7fbfd" stroke="#26729c" stroke-width="3"/>
+  <rect x="355" y="292" width="72" height="27" rx="3" fill="#26729c"/>
+  <text x="391" y="311" class="label inverse center">Setun</text>
+  <text x="355" y="350" class="card-title">生产与实际使用</text>
+  <text x="355" y="381" class="body">从实验原型走向小批量生产</text>
+  <text x="355" y="405" class="body">并进入教学与应用环境</text>
+
+  <line x1="745" y1="240" x2="745" y2="272" class="line"/>
+  <rect x="615" y="272" width="260" height="166" rx="6" fill="#f7fbfd" stroke="#26729c" stroke-width="3"/>
+  <rect x="635" y="292" width="72" height="27" rx="3" fill="#26729c"/>
+  <text x="671" y="311" class="label inverse center">Setun</text>
+  <text x="635" y="350" class="card-title">解释程序 / POLIZ 经验</text>
+  <text x="635" y="381" class="body">软件与表达方式的实践积累</text>
+  <text x="635" y="405" class="body">成为后续设计的重要背景</text>
+
+  <line x1="1040" y1="240" x2="1040" y2="272" class="line"/>
+  <rect x="915" y="272" width="250" height="166" rx="6" fill="#fff8f5" stroke="#b54c34" stroke-width="3"/>
+  <rect x="921" y="278" width="238" height="154" rx="3" fill="none" stroke="#b54c34" stroke-width="1.5"/>
+  <rect x="941" y="296" width="96" height="27" rx="3" fill="#b54c34"/>
+  <text x="989" y="315" class="label inverse center">Setun-70</text>
+  <text x="941" y="353" class="card-title">体系结构重新设计</text>
+  <text x="941" y="384" class="body">吸收既有经验，形成新体系</text>
+  <text x="941" y="408" class="label" fill="#913621">不是兼容修订</text>
+
+  <line x1="1040" y1="438" x2="1040" y2="474" stroke="#b54c34" stroke-width="2"/>
+  <line x1="1005" y1="474" x2="1215" y2="474" stroke="#b54c34" stroke-width="2"/>
+  <line x1="1005" y1="474" x2="1005" y2="500" stroke="#b54c34" stroke-width="2"/>
+  <line x1="1215" y1="474" x2="1215" y2="500" stroke="#b54c34" stroke-width="2"/>
+  <text x="1130" y="464" class="small center">后续软件与应用方向</text>
+
+  <rect x="915" y="500" width="180" height="98" rx="6" fill="#f4f0f7" stroke="#77558b" stroke-width="2"/>
+  <text x="1005" y="536" class="card-title center">DSSP</text>
+  <text x="1005" y="566" class="body center">后续软件语言分支</text>
+
+  <rect x="1125" y="500" width="180" height="98" rx="6" fill="#eef7f1" stroke="#3f7e59" stroke-width="2"/>
+  <text x="1215" y="536" class="card-title center">Nastavnik</text>
+  <text x="1215" y="566" class="body center">教学与应用分支</text>
+
+  <rect x="55" y="637" width="1290" height="50" rx="5" fill="#263b44"/>
+  <text x="700" y="668" class="label inverse center">教学关系图，不表示产品向后兼容或完全相同的指令集</text>
+</svg>

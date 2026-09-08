@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="760" viewBox="0 0 1400 760">
+  <title>平衡三进制数值与数据宽度</title>
+  <desc>展示 T、0、1 的数值含义、1T1 的展开示例，以及 3、6、9、18 trit 常见数据宽度。</desc>
+  <style>
+    text {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+        "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      letter-spacing: 0;
+      fill: #17252d;
+    }
+    .title { font-size: 30px; font-weight: 700; }
+    .subtitle { font-size: 15px; fill: #53666f; }
+    .section { font-size: 18px; font-weight: 700; }
+    .card-title { font-size: 17px; font-weight: 700; }
+    .label { font-size: 14px; font-weight: 700; }
+    .body { font-size: 14px; fill: #344b56; }
+    .small { font-size: 12px; fill: #5a6d75; }
+    .formula { font-size: 22px; font-weight: 700; }
+    .center { text-anchor: middle; }
+    .inverse { fill: #ffffff; }
+    .line { fill: none; stroke: #667b84; stroke-width: 2; }
+  </style>
+  <rect width="100%" height="100%" fill="#ffffff"/>
+  <text x="54" y="52" class="title">平衡三进制：数值与常见数据宽度</text>
+  <text x="54" y="82" class="subtitle">每个 trit 只有三种取值；多位数按 3 的幂从右向左计权</text>
+
+  <text x="55" y="126" class="section">一个 trit 的三种值</text>
+
+  <rect x="55" y="148" width="250" height="116" rx="6" fill="#eaf3f8" stroke="#26729c" stroke-width="2"/>
+  <circle cx="105" cy="206" r="28" fill="#26729c"/>
+  <text x="105" y="214" class="formula inverse center">T</text>
+  <text x="155" y="199" class="card-title">T=-1</text>
+  <text x="155" y="226" class="body">负一 trit</text>
+
+  <rect x="325" y="148" width="250" height="116" rx="6" fill="#eef3f5" stroke="#667b84" stroke-width="2"/>
+  <circle cx="375" cy="206" r="28" fill="#667b84"/>
+  <text x="375" y="214" class="formula inverse center">0</text>
+  <text x="425" y="199" class="card-title">0=0</text>
+  <text x="425" y="226" class="body">零 trit</text>
+
+  <rect x="595" y="148" width="250" height="116" rx="6" fill="#eef7f1" stroke="#3f7e59" stroke-width="2"/>
+  <circle cx="645" cy="206" r="28" fill="#3f7e59"/>
+  <text x="645" y="214" class="formula inverse center">1</text>
+  <text x="695" y="199" class="card-title">1=+1</text>
+  <text x="695" y="226" class="body">正一 trit</text>
+
+  <rect x="875" y="132" width="470" height="148" rx="6" fill="#fff8e8" stroke="#b57a1f" stroke-width="2"/>
+  <text x="899" y="162" class="label" fill="#8d5a12">按位权展开</text>
+  <text x="1110" y="209" class="formula center">1T1 = 1×9 - 1×3 + 1 = 7</text>
+  <text x="1110" y="243" class="small center">从左到右的位权为 9、3、1</text>
+
+  <line x1="55" y1="316" x2="1345" y2="316" stroke="#d4dde0" stroke-width="2"/>
+  <text x="55" y="355" class="section">常见宽度</text>
+  <text x="175" y="355" class="small">宽度描述数据单位，不自动等同于某一代机器</text>
+
+  <rect x="55" y="382" width="300" height="228" rx="6" fill="#f7fbfd" stroke="#26729c" stroke-width="2"/>
+  <text x="205" y="422" class="card-title center">3 trits</text>
+  <text x="205" y="452" class="body center">最小教学数据块</text>
+  <rect x="169" y="493" width="22" height="28" rx="2" fill="#26729c" opacity="0.88"/>
+  <rect x="194" y="493" width="22" height="28" rx="2" fill="#26729c" opacity="0.88"/>
+  <rect x="219" y="493" width="22" height="28" rx="2" fill="#26729c" opacity="0.88"/>
+  <text x="205" y="556" class="label center">27 states · -13..13</text>
+  <text x="205" y="583" class="small center">3³ 种不同编码</text>
+
+  <rect x="380" y="382" width="300" height="228" rx="6" fill="#f5faf7" stroke="#3f7e59" stroke-width="2"/>
+  <text x="530" y="422" class="card-title center">6-trit tryte</text>
+  <text x="530" y="452" class="body center">Setun-70 的基本数据单位</text>
+  <rect x="456.5" y="493" width="22" height="28" rx="2" fill="#3f7e59" opacity="0.88"/>
+  <rect x="481.5" y="493" width="22" height="28" rx="2" fill="#3f7e59" opacity="0.88"/>
+  <rect x="506.5" y="493" width="22" height="28" rx="2" fill="#3f7e59" opacity="0.88"/>
+  <rect x="531.5" y="493" width="22" height="28" rx="2" fill="#3f7e59" opacity="0.88"/>
+  <rect x="556.5" y="493" width="22" height="28" rx="2" fill="#3f7e59" opacity="0.88"/>
+  <rect x="581.5" y="493" width="22" height="28" rx="2" fill="#3f7e59" opacity="0.88"/>
+  <text x="530" y="556" class="label center">729 states · -364..364</text>
+  <text x="530" y="583" class="small center">3⁶ 种不同编码</text>
+
+  <rect x="705" y="382" width="300" height="228" rx="6" fill="#fff8f5" stroke="#b54c34" stroke-width="2"/>
+  <text x="855" y="417" class="card-title center">
+    <tspan x="855" dy="0">9-trit original Setun</tspan>
+    <tspan x="855" dy="24">instruction</tspan>
+  </text>
+  <text x="855" y="473" class="body center">第一代 Setun 的指令宽度</text>
+  <rect x="744" y="493" width="22" height="28" rx="2" fill="#b54c34" opacity="0.88"/>
+  <rect x="769" y="493" width="22" height="28" rx="2" fill="#b54c34" opacity="0.88"/>
+  <rect x="794" y="493" width="22" height="28" rx="2" fill="#b54c34" opacity="0.88"/>
+  <rect x="819" y="493" width="22" height="28" rx="2" fill="#b54c34" opacity="0.88"/>
+  <rect x="844" y="493" width="22" height="28" rx="2" fill="#b54c34" opacity="0.88"/>
+  <rect x="869" y="493" width="22" height="28" rx="2" fill="#b54c34" opacity="0.88"/>
+  <rect x="894" y="493" width="22" height="28" rx="2" fill="#b54c34" opacity="0.88"/>
+  <rect x="919" y="493" width="22" height="28" rx="2" fill="#b54c34" opacity="0.88"/>
+  <rect x="944" y="493" width="22" height="28" rx="2" fill="#b54c34" opacity="0.88"/>
+  <text x="855" y="556" class="label center">9 trits</text>
+  <text x="855" y="583" class="small center">指令格式需结合体系结构解读</text>
+
+  <rect x="1030" y="382" width="300" height="228" rx="6" fill="#f8f5fa" stroke="#77558b" stroke-width="2"/>
+  <text x="1180" y="422" class="card-title center">18-trit word</text>
+  <text x="1180" y="452" class="body center">更宽的数值或操作数单位</text>
+  <rect x="1055" y="493" width="11.0556" height="28" rx="2" fill="#77558b" opacity="0.88"/>
+  <rect x="1069.06" y="493" width="11.0556" height="28" rx="2" fill="#77558b" opacity="0.88"/>
+  <rect x="1083.11" y="493" width="11.0556" height="28" rx="2" fill="#77558b" opacity="0.88"/>
+  <rect x="1097.17" y="493" width="11.0556" height="28" rx="2" fill="#77558b" opacity="0.88"/>
+  <rect x="1111.22" y="493" width="11.0556" height="28" rx="2" fill="#77558b" opacity="0.88"/>
+  <rect x="1125.28" y="493" width="11.0556" height="28" rx="2" fill="#77558b" opacity="0.88"/>
+  <rect x="1139.33" y="493" width="11.0556" height="28" rx="2" fill="#77558b" opacity="0.88"/>
+  <rect x="1153.39" y="493" width="11.0556" height="28" rx="2" fill="#77558b" opacity="0.88"/>
+  <rect x="1167.44" y="493" width="11.0556" height="28" rx="2" fill="#77558b" opacity="0.88"/>
+  <rect x="1181.5" y="493" width="11.0556" height="28" rx="2" fill="#77558b" opacity="0.88"/>
+  <rect x="1195.56" y="493" width="11.0556" height="28" rx="2" fill="#77558b" opacity="0.88"/>
+  <rect x="1209.61" y="493" width="11.0556" height="28" rx="2" fill="#77558b" opacity="0.88"/>
+  <rect x="1223.67" y="493" width="11.0556" height="28" rx="2" fill="#77558b" opacity="0.88"/>
+  <rect x="1237.72" y="493" width="11.0556" height="28" rx="2" fill="#77558b" opacity="0.88"/>
+  <rect x="1251.78" y="493" width="11.0556" height="28" rx="2" fill="#77558b" opacity="0.88"/>
+  <rect x="1265.83" y="493" width="11.0556" height="28" rx="2" fill="#77558b" opacity="0.88"/>
+  <rect x="1279.89" y="493" width="11.0556" height="28" rx="2" fill="#77558b" opacity="0.88"/>
+  <rect x="1293.94" y="493" width="11.0556" height="28" rx="2" fill="#77558b" opacity="0.88"/>
+  <text x="1180" y="556" class="label center">18 trits</text>
+  <text x="1180" y="583" class="small center">可由多个较小单位组合理解</text>
+
+  <rect x="55" y="654" width="1290" height="52" rx="5" fill="#263b44"/>
+  <text x="700" y="686" class="label inverse center">位宽本身不能单独识别机器代际</text>
+</svg>

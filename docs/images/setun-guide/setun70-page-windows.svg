@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1450" height="850" viewBox="0 0 1450 850">
+  <title>Setun-70 分页与三窗口</title>
+  <desc>以教学图展示 9 个每页 81 tryte 的逻辑页、三个页寄存器、-1/0/+1 可见窗口以及页内 4-trit 偏移的常见重构视图。</desc>
+  <style>
+    text {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+        "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      letter-spacing: 0;
+      fill: #17252d;
+    }
+    .title { font-size: 30px; font-weight: 700; }
+    .subtitle { font-size: 15px; fill: #53666f; }
+    .section { font-size: 18px; font-weight: 700; }
+    .card-title { font-size: 17px; font-weight: 700; }
+    .label { font-size: 14px; font-weight: 700; }
+    .body { font-size: 14px; fill: #344b56; }
+    .small { font-size: 12px; fill: #5a6d75; }
+    .formula { font-size: 22px; font-weight: 700; }
+    .center { text-anchor: middle; }
+    .inverse { fill: #ffffff; }
+    .line { fill: none; stroke: #667b84; stroke-width: 2; }
+  </style>
+  <rect width="100%" height="100%" fill="#ffffff"/>
+  <defs>
+    <marker id="page-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#667b84"/>
+    </marker>
+  </defs>
+  <text x="54" y="48" class="title">Setun-70：分页与三窗口</text>
+  <text x="54" y="76" class="subtitle">九个逻辑页共享一个操作存储器地址空间；三个页寄存器决定当前可见窗口</text>
+
+  <rect x="55" y="108" width="290" height="242" rx="6" fill="#eef7f1" stroke="#3f7e59" stroke-width="2"/>
+  <text x="200" y="140" class="section center" fill="#2f6848">page registers</text>
+  <rect x="86" y="164" width="228" height="48" rx="4" fill="#dceef6" stroke="#26729c"/><text x="104" y="194" class="label">-1</text><text x="150" y="194" class="body">selector → P2</text>
+  <rect x="86" y="224" width="228" height="48" rx="4" fill="#ffffff" stroke="#3f7e59"/><text x="104" y="254" class="label">0</text><text x="150" y="254" class="body">selector → P4</text>
+  <rect x="86" y="284" width="228" height="48" rx="4" fill="#fff0eb" stroke="#b54c34"/><text x="104" y="314" class="label">+1</text><text x="150" y="314" class="body">selector → P7</text>
+
+  <rect x="405" y="108" width="465" height="242" rx="6" fill="#f7fbfd" stroke="#26729c" stroke-width="2"/>
+  <text x="637" y="140" class="section center" fill="#195c7f">three visible windows</text>
+  <rect x="437" y="164" width="401" height="48" rx="4" fill="#dceef6" stroke="#26729c"/><rect x="437" y="224" width="401" height="48" rx="4" fill="#e5f2e9" stroke="#3f7e59"/><rect x="437" y="284" width="401" height="48" rx="4" fill="#fff0eb" stroke="#b54c34"/>
+  <text x="466" y="194" class="label">window -1</text><text x="630" y="194" class="body">P2 · 81 trytes</text>
+  <text x="466" y="254" class="label">window 0</text><text x="630" y="254" class="body">P4 · 81 trytes</text>
+  <text x="466" y="314" class="label">window +1</text><text x="630" y="314" class="body">P7 · 81 trytes</text>
+  <line x1="345" y1="188" x2="405" y2="188" class="line" marker-end="url(#page-arrow)"/><line x1="345" y1="248" x2="405" y2="248" class="line" marker-end="url(#page-arrow)"/><line x1="345" y1="308" x2="405" y2="308" class="line" marker-end="url(#page-arrow)"/>
+
+  <rect x="930" y="108" width="465" height="242" rx="6" fill="#fff8e8" stroke="#b57a1f" stroke-width="2"/>
+  <text x="1162" y="140" class="section center" fill="#8d5a12">addressing / reference tryte</text>
+  <rect x="964" y="164" width="397" height="54" rx="4" fill="#ffffff" stroke="#b57a1f"/><text x="1162" y="198" class="card-title center">1 page-register selector + 4-trit offset</text>
+  <text x="1162" y="250" class="formula center">-40 … +40</text>
+  <text x="1162" y="278" class="body center">4 trits provide 81 possible offsets</text>
+  <text x="1162" y="310" class="small center">common reconstruction / teaching view;</text><text x="1162" y="328" class="small center">not a verbatim historical encoding claim</text>
+
+  <rect x="55" y="410" width="1340" height="286" rx="6" fill="#f7fbfd" stroke="#c5d5db" stroke-width="2"/>
+  <text x="79" y="444" class="section">historical operating memory</text><text x="79" y="470" class="body">9 logical pages × 81 trytes = 729 trytes in the overview model</text>
+  <rect x="79" y="494" width="390" height="58" fill="#eef3f5" stroke="#667b84"/><rect x="489" y="494" width="390" height="58" fill="#eef3f5" stroke="#667b84"/><rect x="899" y="494" width="466" height="58" fill="#dceef6" stroke="#26729c" stroke-width="3"/>
+  <text x="274" y="530" class="card-title center">P0 · 81 trytes</text><text x="684" y="530" class="card-title center">P1 · 81 trytes</text><text x="1132" y="530" class="card-title center">P2 · 81 trytes · window -1</text>
+  <rect x="79" y="566" width="390" height="58" fill="#eef3f5" stroke="#667b84"/><rect x="489" y="566" width="390" height="58" fill="#e5f2e9" stroke="#3f7e59" stroke-width="3"/><rect x="899" y="566" width="466" height="58" fill="#eef3f5" stroke="#667b84"/>
+  <text x="274" y="602" class="card-title center">P3 · 81 trytes</text><text x="684" y="602" class="card-title center">P4 · 81 trytes · window 0</text><text x="1132" y="602" class="card-title center">P5 · 81 trytes</text>
+  <rect x="79" y="638" width="390" height="38" fill="#eef3f5" stroke="#667b84"/><rect x="489" y="638" width="390" height="38" fill="#fff0eb" stroke="#b54c34" stroke-width="3"/><rect x="899" y="638" width="466" height="38" fill="#eef3f5" stroke="#667b84"/>
+  <text x="274" y="663" class="label center">P6 · 81 trytes</text><text x="684" y="663" class="label center">P7 · 81 trytes · window +1</text><text x="1132" y="663" class="label center">P8 · 81 trytes</text>
+
+  <rect x="55" y="730" width="1340" height="72" rx="6" fill="#263b44"/>
+  <text x="725" y="758" class="label inverse center">分页不是九块独立 RAM；它是同一地址空间的窗口选择方式。</text>
+  <text x="725" y="782" class="small inverse center">页寄存器选择页，偏移选择页内 tryte；三窗口只是同一地址空间的三个可见入口。</text>
+</svg>
